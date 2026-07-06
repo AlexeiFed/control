@@ -27,6 +27,7 @@ import { Button, ButtonLink } from "../ui/button";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import type { GuardSchedulePickerRow } from "../../lib/operations/guards-repository";
 import type { ObjectHolidayRecord } from "../../lib/operations/object-holidays-repository";
+import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
@@ -159,9 +160,9 @@ function writeLastUsedQuickAssign(value: { startTime: string; endTime: string; s
 
 export type ObjectDetailViewProps = {
   object: ObjectListRow;
+  posts: ObjectPost[];
   gridGuardNames: Record<string, string>;
   rateRules: ObjectRateRuleRecord[];
-  posts: ObjectPost[];
   templateSequence: TemplateSequenceData;
   /** Дата начала версии шаблона, действующей в выбранном месяце. */
   templateEffectiveFrom: string;
@@ -261,9 +262,9 @@ function clampInt(value: number, min: number, max: number): number {
 
 export function ObjectDetailView({
   object,
+  posts,
   gridGuardNames,
   rateRules,
-  posts,
   templateSequence,
   templateEffectiveFrom,
   expectedShiftsByDateIso,
@@ -655,7 +656,7 @@ export function ObjectDetailView({
   const guardsForGrid = useMemo(() => {
     const assignedIds = new Set(object.guardIds);
     const shiftGuardIds = new Set(shifts.map((s) => s.guardId));
-    const allIds = new Set([...Array.from(assignedIds), ...Array.from(shiftGuardIds)]);
+    const allIds = new Set<string>([...Array.from(assignedIds), ...Array.from(shiftGuardIds)]);
 
     return Array.from(allIds)
       .map((id) => ({
@@ -1200,7 +1201,7 @@ export function ObjectDetailView({
           pickerGuards={pickerGuards}
           pickerGuardsLoading={pickerGuardsLoading}
           filteredGuards={filteredGuards}
-          onToggleGuard={async (guardId, checked) => {
+          onToggleGuard={async (guardId: string, checked: boolean) => {
             const newIds = checked
               ? [...object.guardIds, guardId]
               : object.guardIds.filter((id) => id !== guardId);
@@ -1220,6 +1221,7 @@ export function ObjectDetailView({
       <ObjectMonthScheduleGridLazy
         objectId={object.id}
         objectName={object.name}
+        posts={posts}
         viewYear={viewYear}
         viewMonth0={viewMonth0}
         monthLabel={monthLabel}

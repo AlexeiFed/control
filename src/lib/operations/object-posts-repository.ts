@@ -15,7 +15,7 @@ export async function getObjectPosts(objectId: string): Promise<ObjectPost[]> {
     [objectId]
   );
 
-  return rows.map(row => ({
+  return rows.map((row: any) => ({
     id: row.id,
     objectId: row.object_id,
     name: row.name,
