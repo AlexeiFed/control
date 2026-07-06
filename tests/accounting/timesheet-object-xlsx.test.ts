@@ -161,7 +161,7 @@ describe("buildTimesheetObjectWorkbook", () => {
     expect(buffer.length).toBeGreaterThan(0);
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(buffer as any);
     expect(workbook.worksheets).toHaveLength(2);
 
     function sheetValues(ws: ExcelJS.Worksheet): string[] {
@@ -212,7 +212,7 @@ describe("buildTimesheetObjectWorkbook", () => {
     );
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(buffer as any);
     const ws = workbook.worksheets[0]!;
 
     expect(ws.getCell("A1").value).toBe(TIMESHEET_WORKBOOK_TITLE);
@@ -246,7 +246,7 @@ describe("buildTimesheetObjectWorkbook", () => {
     );
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(buffer as any);
     const pageSetup = workbook.worksheets[0]?.pageSetup;
 
     expect(pageSetup?.orientation).toBe("landscape");

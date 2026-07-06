@@ -30,7 +30,6 @@ import type { ObjectHolidayRecord } from "../../lib/operations/object-holidays-r
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
-import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import type { ObjectMonthScheduledGuard } from "../../lib/operations/scheduler-repository";
 import type { Shift, ShiftKind } from "../../lib/scheduling/types";
 import { toast } from "../../store/toast-store";

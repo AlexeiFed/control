@@ -1,4 +1,4 @@
-import { query } from "../../db/db";
+import { query } from "../db/pool";
 
 export interface ObjectMonthlySetting {
   id: string;
