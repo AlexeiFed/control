@@ -1,0 +1,13 @@
+# Повторный psql после db:migrate — только безопасные файлы (IF NOT EXISTS / DO $$).
+# Не добавлять миграции с UPDATE по колонкам, которые могли уже быть удалены.
+src/db/migrations/20260520_curator_shift_sync.sql
+src/db/migrations/20260521_link_curators_to_guards.sql
+src/db/migrations/20260522_uniform_size_letter_codes.sql
+src/db/migrations/20260609_curator_payments_and_custom_base.sql
+src/db/migrations/20260609_curator_monthly_salary_type.sql
+src/db/migrations/20260610_guard_profile_periods.sql
+src/db/migrations/20260611_object_shift_template_extra_columns.sql
+src/db/migrations/20260612_reinforcement_shift_hours.sql
+src/db/migrations/20260615_guard_advance_payments.sql
+src/db/migrations/20260703_object_rate_rules_shift_lead.sql
+src/db/migrations/20260704_timesheet_shift_entries.sql

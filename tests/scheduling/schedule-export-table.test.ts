@@ -112,6 +112,50 @@ describe("schedule-export-table", () => {
     expect(entries.some((entry) => entry.shiftKind === "Regular")).toBe(true);
   });
 
+  it("кладёт хвост 7-8 достаивания в колонку 6 июля при якоре 08:00", () => {
+    const { startsAt: tailStart, endsAt: tailEnd } = buildShiftIntervalFromHm(
+      "2026-07-06",
+      "07:00",
+      "08:00",
+      "08:00",
+    );
+    const { startsAt: mainStart, endsAt: mainEnd } = buildShiftIntervalFromHm(
+      "2026-07-06",
+      "08:00",
+      "19:00",
+      "08:00",
+    );
+
+    const table = buildScheduleExportTable(
+      "Тест",
+      [{ guardId: "g1", displayName: "Дмитров" }],
+      [
+        { dateIso: "2026-07-06", header: "6\nПн", day: 6, monthIndex0: 6, year: 2026 },
+        { dateIso: "2026-07-07", header: "7\nВт", day: 7, monthIndex0: 6, year: 2026 },
+      ],
+      [
+        makeShift({
+          id: "main",
+          guardId: "g1",
+          startsAt: mainStart,
+          endsAt: mainEnd,
+        }),
+        makeShift({
+          id: "tail",
+          guardId: "g1",
+          startsAt: tailStart,
+          endsAt: tailEnd,
+        }),
+      ],
+      "08:00",
+    );
+
+    expect(table.cells.g1?.["2026-07-06"]).toHaveLength(2);
+    expect(table.cells.g1?.["2026-07-06"]?.some((entry) => entry.text === "1 ч\n7-8")).toBe(true);
+    expect(table.cells.g1?.["2026-07-06"]?.some((entry) => entry.text === "11 ч\n8-19")).toBe(true);
+    expect(table.cells.g1?.["2026-07-07"]).toHaveLength(0);
+  });
+
   it("кладёт хвост 8-9 в колонку операционных суток, а не в календарный день", () => {
     const { startsAt: tailStart, endsAt: tailEnd } = buildShiftIntervalFromHm(
       "2026-07-02",

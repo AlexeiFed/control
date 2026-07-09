@@ -113,22 +113,23 @@ export async function buildTimesheetObjectWorkbook(
     let monthTotal = 0;
 
     for (const post of posts) {
-      // Add post header
       const postRow = ws.getRow(rowIndex);
       ws.mergeCells(`A${rowIndex}:${colLetter(totalCols)}${rowIndex}`);
       const postCell = postRow.getCell(1);
-      postCell.value = `Пост: ${post.postName}`;
+      postCell.value = post.postName;
       postCell.font = { bold: true, size: 10 };
-      postCell.alignment = { horizontal: "left", vertical: "middle" };
+      postCell.alignment = { horizontal: "center", vertical: "middle" };
       postCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEAEAEA" } };
-      
+
       for (let col = 1; col <= totalCols; col++) {
         applyTableBorder(postRow.getCell(col));
       }
-      
+
       rowIndex++;
 
       const guards = Array.from(post.guards.keys()).sort((a, b) => a.localeCompare(b, "ru-RU"));
+      const postDayTotals = new Array<number>(daysInMonth).fill(0);
+      let postMonthTotal = 0;
 
       for (let i = 0; i < guards.length; i++) {
         const guardName = guards[i]!;
@@ -151,6 +152,7 @@ export async function buildTimesheetObjectWorkbook(
             c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: FILL_YELLOW } };
           }
           rowTotal = round2(rowTotal + cellInfo.hours);
+          postDayTotals[d - 1] = round2(postDayTotals[d - 1]! + cellInfo.hours);
           dayTotals[d - 1] = round2(dayTotals[d - 1]! + cellInfo.hours);
         }
 
@@ -165,8 +167,19 @@ export async function buildTimesheetObjectWorkbook(
           applyTableBorder(c);
         }
 
+        postMonthTotal = round2(postMonthTotal + rowTotal);
         monthTotal = round2(monthTotal + rowTotal);
         rowIndex++;
+      }
+
+      if (guards.length > 0) {
+        rowIndex = appendPostSubtotalRow(ws, rowIndex, {
+          dayStartCol,
+          dayEndCol,
+          daysInMonth,
+          postDayTotals,
+          postMonthTotal,
+        });
       }
     }
 
@@ -334,6 +347,43 @@ function dayOfMonthInKhabarovsk(iso: string): number | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return getKhabarovskComponents(d).date;
+}
+
+function appendPostSubtotalRow(
+  ws: ExcelJS.Worksheet,
+  rowIndex: number,
+  input: {
+    dayStartCol: number;
+    dayEndCol: number;
+    daysInMonth: number;
+    postDayTotals: number[];
+    postMonthTotal: number;
+  },
+): number {
+  const subtotalRow = ws.getRow(rowIndex);
+  ws.mergeCells(rowIndex, 1, rowIndex, 3);
+
+  for (let col = 1; col <= 3; col++) {
+    const c = subtotalRow.getCell(col);
+    c.font = { bold: true, size: 10 };
+    applyTableBorder(c);
+  }
+
+  for (let d = 1; d <= input.daysInMonth; d++) {
+    const c = subtotalRow.getCell(input.dayStartCol + (d - 1));
+    c.value = normalizeHoursCellValue(input.postDayTotals[d - 1]!);
+    c.font = { bold: true, size: 10 };
+    c.alignment = { horizontal: "center", vertical: "middle" };
+    applyTableBorder(c);
+  }
+
+  const monthCell = subtotalRow.getCell(input.dayEndCol + 1);
+  monthCell.value = normalizeHoursCellValue(input.postMonthTotal);
+  monthCell.font = { bold: true, size: 10 };
+  monthCell.alignment = { horizontal: "center", vertical: "middle" };
+  applyTableBorder(monthCell);
+
+  return rowIndex + 1;
 }
 
 function setHeaderCell(ws: ExcelJS.Worksheet, rowIndex: number, colIndex: number, value: string | number): void {

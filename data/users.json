@@ -1,0 +1,38 @@
+[
+  {
+    "id": "d0623532-a9c5-4c18-a8fe-841a47782d31",
+    "email": "admin@erp.local",
+    "name": "Администратор",
+    "role": "Administrator",
+    "active": true,
+    "sessionVersion": 1,
+    "lastLoginAt": "2026-07-06T13:46:15.980Z",
+    "passwordHash": "$argon2id$v=19$m=19456,t=2,p=1$GVdwF/YvrLLB7QNHhhXTaw$ADXeYc5AbKvfiCQ9LWWNEygNF0lPSAtowxDHJtDDhCc",
+    "createdAt": "2026-04-29T05:26:07.624Z",
+    "updatedAt": "2026-07-06T13:46:15.980Z"
+  },
+  {
+    "id": "8ff2c63e-ce71-461d-aae0-7fa2a08200b9",
+    "email": "test@test.ru",
+    "name": "Слава",
+    "role": "Planner",
+    "active": true,
+    "sessionVersion": 1,
+    "lastLoginAt": "2026-05-12T04:48:30.123Z",
+    "passwordHash": "$argon2id$v=19$m=19456,t=2,p=1$7Nr28t8Rs++7i4UT2kMjcA$HRJteIXRRAwyNSl4ssZu++cRZgWKHG2ezoI1Bxehma0",
+    "createdAt": "2026-05-12T04:48:11.009Z",
+    "updatedAt": "2026-05-12T04:48:30.123Z"
+  },
+  {
+    "id": "5e775ffa-121b-4da5-abdf-ef69d25fe3cb",
+    "email": "test2@test.ru",
+    "name": "Зина",
+    "role": "Planner",
+    "active": true,
+    "sessionVersion": 1,
+    "lastLoginAt": "2026-05-21T13:13:20.065Z",
+    "passwordHash": "$argon2id$v=19$m=19456,t=2,p=1$MJFLgp4hBtxAhXiVOp1gBA$cN7SZpPM4VjuiT0dBKcz33zuVPelchO2c2jk/2qTu1s",
+    "createdAt": "2026-05-13T06:15:00.313Z",
+    "updatedAt": "2026-05-21T13:13:20.065Z"
+  }
+]

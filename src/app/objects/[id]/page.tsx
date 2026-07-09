@@ -11,14 +11,11 @@ import { getObject } from "../../../lib/operations/objects-repository";
 import { listGuardDisplayNamesByIds } from "../../../lib/operations/guards-repository";
 import { listObjectRateRulesForObjects } from "../../../lib/operations/object-rate-rules-repository";
 import { listShiftTemplatesForObjectIds } from "../../../lib/operations/shift-templates-repository";
-import {
-  buildExpectedShiftsForLocalMonth,
-  dominantTemplateEffectiveFromForMonth,
-  weeklyExpectedShiftsFromDateMap,
-} from "../../../lib/scheduling/object-shift-templates";
-import { getObjectOperationalDayStartTimeForMonth } from "../../../lib/operations/object-monthly-settings-repository";
+import { buildExpectedShiftsForLocalMonth } from "../../../lib/scheduling/object-shift-templates";
+import { getObjectOperationalDayStartTimeForMonth } from "../../../lib/operations/objects-repository";
 import { listObjectHolidays } from "../../../lib/operations/object-holidays-repository";
-import { getObjectPosts } from "../../../lib/operations/object-posts-repository";
+import { getObjectPosts, ensureMonthlyPostsInherited } from "../../../lib/operations/object-posts-repository";
+import { listMonthlyPostGuardsByObject } from "../../../lib/operations/object-monthly-post-guards-repository";
 import {
   listScheduledGuardsByObjectForLocalMonth,
   listShiftsForObjectInLocalMonth,
@@ -65,7 +62,11 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
   const monthStart = new Date(Date.UTC(year, month0, 1, 0, 0, 0, 0) - 10 * 3600_000);
   const monthEndExclusive = new Date(Date.UTC(year, month0 + 1, 1, 0, 0, 0, 0) - 10 * 3600_000);
 
-  const [templates, rateRules, objectHolidays, scheduledGuardsMap, shifts, monthAvailabilityShifts, globalHolidayDateKeys, posts, monthlyOperationalDayStartTime] =
+  const monthKey = `${year}-${String(month0 + 1).padStart(2, "0")}`;
+
+  await ensureMonthlyPostsInherited(id, monthKey);
+
+  const [templates, rateRules, objectHolidays, scheduledGuardsMap, shifts, monthAvailabilityShifts, globalHolidayDateKeys, posts, operationalDayStartTime, monthlyPostGuardsByPostId] =
     await Promise.all([
       listShiftTemplatesForObjectIds([id]),
       canReadRates || canAssignShifts ? listObjectRateRulesForObjects([id]) : Promise.resolve([]),
@@ -74,16 +75,15 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
       listShiftsForObjectInLocalMonth(id, year, month0),
       listShiftsInLocalRange(monthStart, monthEndExclusive),
       loadHolidayDateSetForLocalRange(monthStart, monthEndExclusive),
-      getObjectPosts(id),
-      getObjectOperationalDayStartTimeForMonth(id, `${year}-${String(month0 + 1).padStart(2, "0")}`),
+      getObjectPosts(id, monthKey),
+      getObjectOperationalDayStartTimeForMonth(id, monthKey),
+      listMonthlyPostGuardsByObject(id, monthKey),
     ]);
 
   const gridGuardIds = [...new Set([...object.guardIds, ...shifts.map((s) => s.guardId)])];
   const gridGuardNames = await listGuardDisplayNamesByIds(gridGuardIds);
 
   const expectedShiftsByDateIso = buildExpectedShiftsForLocalMonth(id, year, month0, templates);
-  const templateSequence = weeklyExpectedShiftsFromDateMap(expectedShiftsByDateIso, year, month0);
-  const templateEffectiveFrom = dominantTemplateEffectiveFromForMonth(templates, id, year, month0);
   const scheduledGuards = scheduledGuardsMap[id] ?? [];
 
   return (
@@ -93,9 +93,8 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
         posts={posts}
         gridGuardNames={gridGuardNames}
         rateRules={rateRules}
-        templateSequence={templateSequence}
-        templateEffectiveFrom={templateEffectiveFrom}
         expectedShiftsByDateIso={expectedShiftsByDateIso}
+        shiftTemplates={templates}
         currentRole={session.user.role}
         objectHolidays={objectHolidays}
         globalHolidayDateKeys={[...globalHolidayDateKeys]}
@@ -108,7 +107,8 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
         success={success}
         initialScrollY={initialScrollY}
         bulkCreateShiftsAction={bulkCreateShiftsAction}
-        monthlyOperationalDayStartTime={monthlyOperationalDayStartTime}
+        operationalDayStartTime={operationalDayStartTime}
+        monthlyPostGuardsByPostId={monthlyPostGuardsByPostId}
       />
     </main>
   );

@@ -227,6 +227,89 @@ describe("buildTimesheetObjectWorkbook", () => {
     expect(row2Values).toContain("ИП СЛОБОДЕНЮК");
   });
 
+  it("центрирует название поста без префикса и добавляет итог по каждому посту", async () => {
+    const buffer = await buildTimesheetObjectWorkbook(
+      [
+        {
+          objectName: "Живописный сад",
+          objectAddress: "ул. Бубенина 5",
+          rows: [
+            baseRow({
+              objectName: "Живописный сад",
+              guardName: "Волкова Мария",
+              postId: "post-1",
+              postName: "пост 1",
+              startsAt: "2026-06-30T23:00:00.000Z",
+              endsAt: "2026-07-01T11:00:00.000Z",
+              totalHours: 12,
+              regularHours: 12,
+            }),
+            baseRow({
+              objectName: "Живописный сад",
+              guardName: "Иванов Сергей",
+              postId: "post-1",
+              postName: "пост 1",
+              startsAt: "2026-06-30T23:00:00.000Z",
+              endsAt: "2026-07-01T23:00:00.000Z",
+              totalHours: 24,
+              regularHours: 24,
+            }),
+            baseRow({
+              objectName: "Живописный сад",
+              guardName: "Борисов Андрей",
+              postId: "post-2",
+              postName: "пост 2",
+              startsAt: "2026-06-30T23:00:00.000Z",
+              endsAt: "2026-07-01T23:00:00.000Z",
+              totalHours: 24,
+              regularHours: 24,
+            }),
+          ],
+          approval: {
+            directorRole: "Директор",
+            directorName: "",
+            siteManagerEnabled: false,
+          },
+        },
+      ],
+      2026,
+      6,
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as any);
+    const ws = workbook.worksheets[0]!;
+
+    const strings: string[] = [];
+    ws.eachRow((row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        if (typeof cell.value === "string") strings.push(cell.value);
+      });
+    });
+    expect(strings).toContain("пост 1");
+    expect(strings).toContain("пост 2");
+    expect(strings).not.toContain("Пост: пост 1");
+
+    let post1HeaderRow = 0;
+    ws.eachRow((row, rowNumber) => {
+      if (row.getCell(1).value === "пост 1") post1HeaderRow = rowNumber;
+    });
+    expect(post1HeaderRow).toBeGreaterThan(0);
+    expect(ws.getRow(post1HeaderRow).getCell(1).alignment?.horizontal).toBe("center");
+
+    const post1SubtotalRow = post1HeaderRow + 3;
+    expect(ws.getRow(post1SubtotalRow).getCell(4).value).toBe(36);
+    expect(ws.getRow(post1SubtotalRow).getCell(35).value).toBe(36);
+
+    let post2HeaderRow = 0;
+    ws.eachRow((row, rowNumber) => {
+      if (row.getCell(1).value === "пост 2") post2HeaderRow = rowNumber;
+    });
+    const post2SubtotalRow = post2HeaderRow + 2;
+    expect(ws.getRow(post2SubtotalRow).getCell(4).value).toBe(24);
+    expect(ws.getRow(post2SubtotalRow).getCell(35).value).toBe(24);
+  });
+
   it("настраивает альбомную ориентацию и масштаб по ширине страницы", async () => {
     const buffer = await buildTimesheetObjectWorkbook(
       [

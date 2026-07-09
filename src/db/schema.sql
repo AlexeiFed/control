@@ -26,10 +26,25 @@ CREATE TABLE IF NOT EXISTS object_monthly_settings (
 CREATE TABLE IF NOT EXISTS object_posts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   object_id uuid NOT NULL REFERENCES security_objects(id) ON DELETE CASCADE,
+  month text NOT NULL,
   name text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (object_id, name)
+  UNIQUE (object_id, month, name)
 );
+
+CREATE INDEX IF NOT EXISTS object_posts_object_month_idx ON object_posts (object_id, month);
+
+CREATE TABLE IF NOT EXISTS object_monthly_post_guards (
+  object_id uuid NOT NULL REFERENCES security_objects(id) ON DELETE CASCADE,
+  post_id uuid NOT NULL REFERENCES object_posts(id) ON DELETE CASCADE,
+  guard_id uuid NOT NULL REFERENCES guards(id) ON DELETE CASCADE,
+  month text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (post_id, guard_id, month)
+);
+
+CREATE INDEX IF NOT EXISTS object_monthly_post_guards_lookup_idx
+  ON object_monthly_post_guards (object_id, month);
 
 CREATE TABLE IF NOT EXISTS guards (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

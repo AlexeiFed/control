@@ -1,0 +1,18 @@
+---
+description: Security and RBAC rules for the private security-company ERP
+alwaysApply: true
+---
+
+# ERP Security And RBAC
+
+- Treat the ERP as a private system. Do not add public registration, self-signup, magic invite links, or role self-assignment.
+- Seed the first `Administrator`; every later user must be created, edited, disabled, or deleted by an `Administrator`.
+- Enforce RBAC on the server for every page action, route handler, server action, and data query. Client-side guards are only UX.
+- Roles:
+  - `Administrator`: full access to users, roles, objects, guards, schedules, reports, and system health.
+  - `Planner`: manage objects, guards, schedules, and guard logs; no financial reports and no user administration.
+  - `Accountant`: read-only schedules; full timesheet, statistics, payroll hour calculations, and export access.
+- Sessions must be httpOnly, secure in production, sameSite `lax` or stricter, and rotated/invalidated on password or role changes.
+- Passwords must be hashed with a modern password hashing library such as Argon2id or bcrypt; never store or log plaintext passwords.
+- Block schedule writes when the guard is `Sick`, `OnVacation`, or already assigned to an overlapping shift.
+- Hour accounting must split shifts into total, night, and holiday minutes using the 08:00-20:00 day window and 20:00-08:00 night window.

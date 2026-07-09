@@ -14,7 +14,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { deleteShiftAction } from "../../app/scheduler/actions";
-import { updateObjectOperationalDayStartTimeAction, upsertObjectMonthlySettingAction } from "../../app/objects/actions";
+import { upsertObjectMonthlySettingAction } from "../../app/objects/actions";
 import { Button } from "../ui/button";
 import type { Shift, ShiftKind } from "../../lib/scheduling/types";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
@@ -35,7 +35,8 @@ import {
   type ExpectedShifts,
 } from "../../lib/scheduling/object-shift-templates";
 import { computeDayPlanMetrics, formatTemplateCountWithHours } from "../../lib/scheduling/schedule-shortage";
-import { operationalDayDateIsoFromStart } from "../../lib/scheduling/operational-day-timeline";
+import { shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
+import { scheduleShiftColumnDateIso } from "../../lib/scheduling/operational-day-timeline";
 import { confirmDeleteShift } from "../../lib/scheduling/shift-delete-confirm";
 import {
   buildScheduleDayColumnStyle,
@@ -121,12 +122,13 @@ export type ObjectMonthScheduleGridProps = {
   days: number[];
   dayColumnMetaByDay: Map<number, DayColumnMeta>;
   monthPlan: Record<number, ExpectedShifts>;
-  guardsForGrid: ScheduleGridGuardRow[];
+  monthPlanByPost?: Record<string, Record<number, ExpectedShifts>>;
+  expectedShiftsByPostId?: Record<string, Record<string, ExpectedShifts>>;
+  guardsByPost: Record<string, ScheduleGridGuardRow[]>;
   shiftsByGuardAndDay: Record<string, Record<number, Shift[]>>;
   monthShifts: Shift[];
   expectedShiftsByDateIso: Record<string, ExpectedShifts>;
   operationalDayStartTime: string;
-  globalOperationalDayStartTime: string;
   canWrite: boolean;
   canManageOperationalDay: boolean;
   bulkCreateShiftsAction?: (
@@ -153,12 +155,13 @@ export function ObjectMonthScheduleGrid({
   days,
   dayColumnMetaByDay,
   monthPlan,
-  guardsForGrid,
+  monthPlanByPost,
+  expectedShiftsByPostId,
+  guardsByPost,
   shiftsByGuardAndDay,
   monthShifts,
   expectedShiftsByDateIso,
   operationalDayStartTime,
-  globalOperationalDayStartTime,
   canWrite,
   canManageOperationalDay,
   bulkCreateShiftsAction,
@@ -169,52 +172,32 @@ export function ObjectMonthScheduleGrid({
   onIncidentDraft,
 }: ObjectMonthScheduleGridProps) {
   const router = useRouter();
-  const [operationalDayDraft, setOperationalDayDraft] = useState(globalOperationalDayStartTime);
-  const [monthlyOperationalDayDraft, setMonthlyOperationalDayDraft] = useState(operationalDayStartTime);
+  const [operationalDayDraft, setOperationalDayDraft] = useState(operationalDayStartTime);
   const [isSavingOperationalDay, setIsSavingOperationalDay] = useState(false);
 
   useEffect(() => {
-    setOperationalDayDraft(globalOperationalDayStartTime);
-  }, [globalOperationalDayStartTime]);
-
-  useEffect(() => {
-    setMonthlyOperationalDayDraft(operationalDayStartTime);
+    setOperationalDayDraft(operationalDayStartTime);
   }, [operationalDayStartTime]);
 
-  const operationalDayDirty = operationalDayDraft !== globalOperationalDayStartTime;
-  const monthlyOperationalDayDirty = monthlyOperationalDayDraft !== operationalDayStartTime;
+  const operationalDayDirty = operationalDayDraft !== operationalDayStartTime;
+
+  const guardsForExport = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: ScheduleGridGuardRow[] = [];
+    for (const section of Object.values(guardsByPost)) {
+      for (const row of section) {
+        if (seen.has(row.guardId)) continue;
+        seen.add(row.guardId);
+        rows.push(row);
+      }
+    }
+    return rows.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
+  }, [guardsByPost]);
+
+  const firstPostId = posts[0]?.id ?? null;
 
   async function saveOperationalDayStartTime(nextTime?: string) {
     const value = nextTime ?? operationalDayDraft;
-    setIsSavingOperationalDay(true);
-    try {
-      const fd = new FormData();
-      fd.set("objectId", objectId);
-      fd.set("operationalDayStartTime", value);
-      const result = await updateObjectOperationalDayStartTimeAction(fd);
-      if (!result.ok) {
-        toast({
-          title: "Не сохранено",
-          message: result.error,
-          variant: "error",
-          durationMs: 6500,
-        });
-        return;
-      }
-      setOperationalDayDraft(value);
-      toast({
-        title: "Общие операционные сутки обновлены",
-        message: `По умолчанию сутки ${value} – ${value} (+1)`,
-        variant: "success",
-      });
-      router.refresh();
-    } finally {
-      setIsSavingOperationalDay(false);
-    }
-  }
-
-  async function saveMonthlyOperationalDayStartTime(nextTime?: string) {
-    const value = nextTime ?? monthlyOperationalDayDraft;
     setIsSavingOperationalDay(true);
     try {
       const monthStr = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
@@ -232,10 +215,10 @@ export function ObjectMonthScheduleGrid({
         });
         return;
       }
-      setMonthlyOperationalDayDraft(value);
+      setOperationalDayDraft(value);
       toast({
-        title: "Операционные сутки на месяц обновлены",
-        message: `Для ${monthLabel} сутки ${value} – ${value} (+1)`,
+        title: "Операционные сутки обновлены",
+        message: `Для ${monthLabel}: ${value} – ${value} (+1)`,
         variant: "success",
       });
       router.refresh();
@@ -252,6 +235,7 @@ export function ObjectMonthScheduleGrid({
     endTime: string;
     shiftKind: ShiftKind;
     guardName: string;
+    postId: string | null;
   } | null>(null);
   const [dragTargetIso, setDragTargetIso] = useState<string | null>(null);
   const dragTargetIsoRef = useRef<string | null>(null);
@@ -326,6 +310,7 @@ export function ObjectMonthScheduleGrid({
           startTime: source.startTime,
           endTime: source.endTime,
           shiftKind: source.shiftKind,
+          ...(source.postId ? { postId: source.postId } : {}),
         },
       ];
       void (async () => {
@@ -381,10 +366,17 @@ export function ObjectMonthScheduleGrid({
     return ids;
   }, [shiftsByGuardAndDay]);
 
+  function expectedForCell(dateIso: string, postId: string | null): ExpectedShifts {
+    if (postId && expectedShiftsByPostId?.[postId]?.[dateIso]) {
+      return expectedShiftsByPostId[postId][dateIso];
+    }
+    return expectedShiftsByDateIso[dateIso] ?? defaultExpectedShiftsForDay();
+  }
+
   function triggerQuickAssign(guardId: string, dateIso: string, postId: string | null = null) {
     setShiftDeleteFocus(null);
     const lastUsed = readLastUsedQuickAssign();
-    const expected = expectedShiftsByDateIso[dateIso] ?? defaultExpectedShiftsForDay();
+    const expected = expectedForCell(dateIso, postId);
     onQuickAssign({
       guardId,
       dateIso,
@@ -395,17 +387,145 @@ export function ObjectMonthScheduleGrid({
     });
   }
 
+  function shiftsOnDayForPost(d: number, postId: string | null): Shift[] {
+    return Object.values(shiftsByGuardAndDay)
+      .flatMap((g) => g[d] || [])
+      .filter((s) => shiftMatchesPost(s.postId, postId, firstPostId));
+  }
+
+  function renderPlanRow(plan: Record<number, ExpectedShifts>, postId: string | null) {
+    return (
+      <tr className="bg-app-elevated/40 border-b-2 border-app-border">
+        <td className="schedule-sticky-col border border-app-border p-1.5 font-bold text-accent-primary text-[9px] uppercase tracking-wider sm:p-2 sm:text-[10px]">
+          План (осн/ус/мп/СтМ)
+        </td>
+        {days.map((d) => {
+          const dayPlan = plan[d];
+          const dayShifts = shiftsOnDayForPost(d, postId);
+          const metrics = computeDayPlanMetrics(dayShifts, dayPlan);
+          const totalMinutes = dayShifts
+            .filter((s) => !s.isNoShow)
+            .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60000, 0);
+          const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
+          const colMeta = dayColumnMetaByDay.get(d);
+
+          if (!metrics) {
+            return (
+              <td
+                key={d}
+                data-schedule-col={d}
+                className="border border-app-border p-1 text-center text-[10px] text-app-muted transition-[background-color] duration-75"
+                style={mergeScheduleCellStyles(
+                  colMeta ? buildScheduleDayColumnStyle(colMeta) : undefined,
+                  scheduleGridColumnHoverStyle(gridHover, d),
+                )}
+              >
+                —
+              </td>
+            );
+          }
+
+          const factColor = metrics.hoursShort > 0
+            ? "text-accent-warning"
+            : metrics.hoursOver > 0
+              ? "text-accent-danger"
+              : "text-accent-primary";
+          const tooltipParts: string[] = [];
+          if (metrics.expectedHoursRegular > 0) {
+            tooltipParts.push(
+              `Осн.: факт ${metrics.regularDayHours} / план ${metrics.expectedHoursRegular} ч (${metrics.regCount}${dayPlan.regular > 0 ? `/${dayPlan.regular}` : ""} см.)`,
+            );
+          }
+          if (metrics.expectedReinforcement > 0 || metrics.reinforcementCount > 0) {
+            tooltipParts.push(
+              `Усил.: факт ${metrics.reinforcementDayHours} / план ${metrics.expectedReinforcementHours} ч (${formatTemplateCountWithHours(metrics.expectedReinforcement, metrics.reinforcementShiftHours, "чел.")})`,
+            );
+          }
+          if (metrics.expectedRapidResponse > 0 || metrics.rapidResponseCount > 0) {
+            tooltipParts.push(
+              `МП: факт ${metrics.rapidResponseDayHours} / план ${metrics.expectedRapidResponseHours} ч`,
+            );
+          }
+          if (metrics.expectedShiftLead > 0 || metrics.shiftLeadCount > 0) {
+            tooltipParts.push(
+              `СтМ: факт ${metrics.shiftLeadDayHours} / план ${metrics.expectedShiftLeadHours} ч`,
+            );
+          }
+          tooltipParts.push(`Всего на дне: ${totalHours} ч`);
+          if (metrics.hoursShort > 0) tooltipParts.push(`Недобор по часам: ${metrics.hoursShort} ч`);
+          if (metrics.hoursOver > 0) tooltipParts.push(`Перебор по часам: ${metrics.hoursOver} ч`);
+
+          return (
+            <td
+              key={d}
+              data-schedule-col={d}
+              className="border border-app-border p-1 text-center font-bold transition-[background-color] duration-75"
+              style={mergeScheduleCellStyles(
+                colMeta ? buildScheduleDayColumnStyle(colMeta) : undefined,
+                scheduleGridColumnHoverStyle(gridHover, d),
+              )}
+            >
+              <div className="flex flex-col items-center gap-0.5" title={tooltipParts.join("\n")}>
+                {metrics.expectedHoursRegular > 0 ? (
+                  <span className={`text-[11px] tabular-nums leading-tight ${factColor}`}>
+                    {metrics.regularDayHours}/{metrics.expectedHoursRegular}
+                  </span>
+                ) : null}
+                {metrics.expectedReinforcement > 0 || metrics.reinforcementCount > 0 ? (
+                  <span
+                    className={`text-[10px] tabular-nums leading-tight ${
+                      metrics.reinforcementHoursShort > 0 || metrics.reinforcementHoursOver > 0
+                        ? metrics.reinforcementHoursOver > 0
+                          ? "text-accent-danger"
+                          : "text-accent-warning"
+                        : "text-accent-primary"
+                    }`}
+                  >
+                    ус {metrics.reinforcementDayHours}/{metrics.expectedReinforcementHours}
+                  </span>
+                ) : null}
+                {metrics.expectedRapidResponse > 0 || metrics.rapidResponseCount > 0 ? (
+                  <span
+                    className={`text-[10px] tabular-nums leading-tight ${
+                      metrics.rapidResponseHoursShort > 0 || metrics.rapidResponseHoursOver > 0
+                        ? "text-accent-warning"
+                        : "text-accent-primary"
+                    }`}
+                  >
+                    мп {metrics.rapidResponseDayHours}/{metrics.expectedRapidResponseHours}
+                  </span>
+                ) : null}
+                {metrics.expectedShiftLead > 0 || metrics.shiftLeadCount > 0 ? (
+                  <span
+                    className={`text-[10px] tabular-nums leading-tight ${
+                      metrics.shiftLeadHoursShort > 0 || metrics.shiftLeadHoursOver > 0
+                        ? "text-accent-warning"
+                        : "text-accent-primary"
+                    }`}
+                  >
+                    СтМ {metrics.shiftLeadDayHours}/{metrics.expectedShiftLeadHours}
+                  </span>
+                ) : null}
+              </div>
+            </td>
+          );
+        })}
+      </tr>
+    );
+  }
+
   function renderGuardsRows(postId: string | null) {
-    if (guardsForGrid.length === 0) {
+    const sectionGuards = guardsByPost[postId ?? ""] ?? [];
+    if (sectionGuards.length === 0) {
       return (
         <tr>
-          <td colSpan={days.length + 1} className="p-8 text-center text-app-muted italic">
-            Нет назначенных смен в этом месяце
+          <td colSpan={days.length + 1} className="p-4 text-center text-app-muted italic text-xs">
+            {posts.length > 0 ? "Штат поста не назначен" : "Нет назначенных смен в этом месяце"}
           </td>
         </tr>
       );
     }
-    return guardsForGrid.map((sg) => (
+    return sectionGuards.map((sg) => (
       <tr key={`${postId ?? "null"}-${sg.guardId}`} className="transition-[background-color] duration-75">
         <td
           className="schedule-sticky-col border border-app-border p-1.5 text-[11px] font-medium transition-[background-color] duration-75 sm:p-2 sm:text-xs"
@@ -438,7 +558,7 @@ export function ObjectMonthScheduleGrid({
         </td>
         {days.map((d) => {
           const allDayShifts = shiftsByGuardAndDay[sg.guardId]?.[d] || [];
-          const dayShifts = allDayShifts.filter(s => s.postId === postId);
+          const dayShifts = allDayShifts.filter((s) => shiftMatchesPost(s.postId, postId, firstPostId));
           const colMeta = dayColumnMetaByDay.get(d);
           const dateIso = colMeta?.dateIso ?? toDateIsoKhabarovsk(new Date(viewYear, viewMonth0, d));
           const deleteFocus =
@@ -553,6 +673,7 @@ export function ObjectMonthScheduleGrid({
                                 endTime: toTimeKh(s.endsAt),
                                 shiftKind: s.shiftKind,
                                 guardName: sg.displayName,
+                                postId,
                               });
                               dragTargetIsoRef.current = null;
                               setDragTargetIso(null);
@@ -604,7 +725,7 @@ export function ObjectMonthScheduleGrid({
                                   onQuickAssign({
                                     editingShiftId: s.id,
                                     guardId: s.guardId,
-                                    dateIso: operationalDayDateIsoFromStart(s.startsAt, operationalDayStartTime),
+                                    dateIso: scheduleShiftColumnDateIso(s, operationalDayStartTime),
                                     shiftKind: s.shiftKind,
                                     startTime: toTimeKh(s.startsAt),
                                     endTime: toTimeKh(s.endsAt),
@@ -691,7 +812,7 @@ export function ObjectMonthScheduleGrid({
                                 startTime: toTimeKh(s.startsAt),
                                 endTime: toTimeKh(s.endsAt),
                                 shiftKind: resolveShiftKindForTemplate(
-                                  expectedShiftsByDateIso[dateIso] ?? defaultExpectedShiftsForDay(),
+                                  expectedForCell(dateIso, postId),
                                   s.shiftKind,
                                 ),
                                 postId,
@@ -808,111 +929,67 @@ export function ObjectMonthScheduleGrid({
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-4 rounded-button border px-3 py-3 xl:flex-row xl:items-start" style={{ borderColor: `${designTokens.color.accent.primary}44`, backgroundColor: `${designTokens.color.accent.primary}08` }}>
-        <div className="flex-1 flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-3 pb-4 xl:pb-0 xl:border-r xl:border-app-border/40 xl:pr-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-muted">
-              Общие операционные сутки
-            </p>
-            <p className="mt-1 text-sm font-semibold tabular-nums text-app-text">
-              {operationalDayDraft} – {operationalDayDraft} (+1)
-            </p>
-            <p className="mt-1 text-[11px] leading-snug text-app-muted">
-              По умолчанию для новых месяцев.
-            </p>
-          </div>
-
-          {canManageOperationalDay ? (
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="grid gap-1">
-                <label htmlFor={`operational-day-${objectId}`} className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">
-                  Начало
-                </label>
-                <input
-                  id={`operational-day-${objectId}`}
-                  type="time"
-                  step={900}
-                  value={operationalDayDraft}
-                  disabled={isSavingOperationalDay}
-                  onChange={(event) => setOperationalDayDraft(event.target.value)}
-                  className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm tabular-nums outline-none focus:border-accent-primary disabled:opacity-60"
-                />
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={!operationalDayDirty || isSavingOperationalDay}
-                onClick={() => void saveOperationalDayStartTime()}
-              >
-                Сохранить
-              </Button>
-            </div>
-          ) : null}
+      <div className="mb-4 flex flex-col gap-3 rounded-button border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between" style={{ borderColor: `${designTokens.color.accent.primary}44`, backgroundColor: `${designTokens.color.accent.primary}08` }}>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-muted">
+            Операционные сутки
+          </p>
+          <p className="mt-1 text-sm font-semibold tabular-nums text-app-text">
+            {operationalDayDraft} – {operationalDayDraft} (+1)
+          </p>
+          <p className="mt-1 text-[11px] leading-snug text-app-muted">
+            Суточная смена и шкала назначения для {monthLabel}.
+          </p>
         </div>
 
-        <div className="flex-1 flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-3 xl:pl-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-accent-primary">
-              Сутки на текущий месяц
-            </p>
-            <p className="mt-1 text-sm font-semibold tabular-nums text-app-text">
-              {monthlyOperationalDayDraft} – {monthlyOperationalDayDraft} (+1)
-            </p>
-            <p className="mt-1 text-[11px] leading-snug text-app-muted">
-              Суточная смена и шкала назначения для {monthLabel}.
-            </p>
-          </div>
-
-          {canManageOperationalDay ? (
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="grid gap-1">
-                <label htmlFor={`monthly-operational-day-${objectId}`} className="text-[10px] font-semibold uppercase tracking-wide text-accent-primary">
-                  Начало (текущий мес.)
-                </label>
-                <input
-                  id={`monthly-operational-day-${objectId}`}
-                  type="time"
-                  step={900}
-                  value={monthlyOperationalDayDraft}
-                  disabled={isSavingOperationalDay}
-                  onChange={(event) => setMonthlyOperationalDayDraft(event.target.value)}
-                  className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm tabular-nums outline-none focus:border-accent-primary disabled:opacity-60"
-                />
-              </div>
-              <div className="flex flex-wrap gap-1.5 pb-0.5">
-                {(["08:00", "09:00"] as const).map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    disabled={isSavingOperationalDay}
-                    onClick={() => {
-                      setMonthlyOperationalDayDraft(preset);
-                      void saveMonthlyOperationalDayStartTime(preset);
-                    }}
-                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                      monthlyOperationalDayDraft === preset
-                        ? "border-accent-primary bg-accent-primary text-white"
-                        : "border-app-border bg-app-surface text-app-text hover:bg-app-bg"
-                    }`}
-                  >
-                    {preset.slice(0, 2)}–{preset.slice(0, 2)}
-                  </button>
-                ))}
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!monthlyOperationalDayDirty || isSavingOperationalDay}
-                onClick={() => void saveMonthlyOperationalDayStartTime()}
-              >
-                {isSavingOperationalDay ? "Сохранение…" : "Сохранить"}
-              </Button>
+        {canManageOperationalDay ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1">
+              <label htmlFor={`operational-day-${objectId}`} className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">
+                Начало суток
+              </label>
+              <input
+                id={`operational-day-${objectId}`}
+                type="time"
+                step={900}
+                value={operationalDayDraft}
+                disabled={isSavingOperationalDay}
+                onChange={(event) => setOperationalDayDraft(event.target.value)}
+                className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm tabular-nums outline-none focus:border-accent-primary disabled:opacity-60"
+              />
             </div>
-          ) : (
-            <p className="text-xs text-app-muted">Изменение — у администратора или планировщика.</p>
-          )}
-        </div>
+            <div className="flex flex-wrap gap-1.5 pb-0.5">
+              {(["08:00", "09:00"] as const).map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  disabled={isSavingOperationalDay}
+                  onClick={() => {
+                    setOperationalDayDraft(preset);
+                    void saveOperationalDayStartTime(preset);
+                  }}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                    operationalDayDraft === preset
+                      ? "border-accent-primary bg-accent-primary text-white"
+                      : "border-app-border bg-app-surface text-app-text hover:bg-app-bg"
+                  }`}
+                >
+                  {preset.slice(0, 2)}–{preset.slice(0, 2)}
+                </button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!operationalDayDirty || isSavingOperationalDay}
+              onClick={() => void saveOperationalDayStartTime()}
+            >
+              {isSavingOperationalDay ? "Сохранение…" : "Сохранить"}
+            </Button>
+          </div>
+        ) : (
+          <p className="text-xs text-app-muted">Изменение — у администратора или планировщика.</p>
+        )}
       </div>
 
       <div className="max-w-full rounded-button border border-app-border">
@@ -977,144 +1054,24 @@ export function ObjectMonthScheduleGrid({
                 );
               })}
             </tr>
-            {/* Строка плана */}
-            <tr className="bg-app-elevated/40 border-b-2 border-app-border">
-              <td className="schedule-sticky-col border border-app-border p-1.5 font-bold text-accent-primary text-[9px] uppercase tracking-wider sm:p-2 sm:text-[10px]">
-                План (осн/ус/мп/СтМ)
-              </td>
-              {days.map((d) => {
-                const plan = monthPlan[d];
-                const dayShifts = Object.values(shiftsByGuardAndDay).flatMap((g) => g[d] || []);
-                const metrics = computeDayPlanMetrics(dayShifts, plan);
-                const totalMinutes = dayShifts
-                  .filter((s) => !s.isNoShow)
-                  .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60000, 0);
-                const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
-                const colMeta = dayColumnMetaByDay.get(d);
-
-                if (!metrics) {
-                  return (
-                    <td
-                      key={d}
-                      data-schedule-col={d}
-                      className="border border-app-border p-1 text-center text-[10px] text-app-muted transition-[background-color] duration-75"
-                      style={mergeScheduleCellStyles(
-                        colMeta ? buildScheduleDayColumnStyle(colMeta) : undefined,
-                        scheduleGridColumnHoverStyle(gridHover, d),
-                      )}
-                    >
-                      —
-                    </td>
-                  );
-                }
-
-                const factColor = metrics.hoursShort > 0
-                  ? "text-accent-warning"
-                  : metrics.hoursOver > 0
-                    ? "text-accent-danger"
-                    : "text-accent-primary";
-                const tooltipParts: string[] = [];
-                if (metrics.expectedHoursRegular > 0) {
-                  tooltipParts.push(
-                    `Осн.: факт ${metrics.regularDayHours} / план ${metrics.expectedHoursRegular} ч (${metrics.regCount}${plan.regular > 0 ? `/${plan.regular}` : ""} см.)`,
-                  );
-                }
-                if (metrics.expectedReinforcement > 0 || metrics.reinforcementCount > 0) {
-                  tooltipParts.push(
-                    `Усил.: факт ${metrics.reinforcementDayHours} / план ${metrics.expectedReinforcementHours} ч (${formatTemplateCountWithHours(metrics.expectedReinforcement, metrics.reinforcementShiftHours, "чел.")})`,
-                  );
-                }
-                if (metrics.expectedRapidResponse > 0 || metrics.rapidResponseCount > 0) {
-                  tooltipParts.push(
-                    `МП: факт ${metrics.rapidResponseDayHours} / план ${metrics.expectedRapidResponseHours} ч`,
-                  );
-                }
-                if (metrics.expectedShiftLead > 0 || metrics.shiftLeadCount > 0) {
-                  tooltipParts.push(
-                    `СтМ: факт ${metrics.shiftLeadDayHours} / план ${metrics.expectedShiftLeadHours} ч`,
-                  );
-                }
-                tooltipParts.push(`Всего на дне: ${totalHours} ч`);
-                if (metrics.hoursShort > 0) tooltipParts.push(`Недобор по часам: ${metrics.hoursShort} ч`);
-                if (metrics.hoursOver > 0) tooltipParts.push(`Перебор по часам: ${metrics.hoursOver} ч`);
-
-                return (
-                  <td
-                    key={d}
-                    data-schedule-col={d}
-                    className="border border-app-border p-1 text-center font-bold transition-[background-color] duration-75"
-                    style={mergeScheduleCellStyles(
-                      colMeta ? buildScheduleDayColumnStyle(colMeta) : undefined,
-                      scheduleGridColumnHoverStyle(gridHover, d),
-                    )}
-                  >
-                    <div className="flex flex-col items-center gap-0.5" title={tooltipParts.join("\n")}>
-                      {metrics.expectedHoursRegular > 0 ? (
-                        <span className={`text-[11px] tabular-nums leading-tight ${factColor}`}>
-                          {metrics.regularDayHours}/{metrics.expectedHoursRegular}
-                        </span>
-                      ) : null}
-                      {metrics.expectedReinforcement > 0 || metrics.reinforcementCount > 0 ? (
-                        <span
-                          className={`text-[10px] tabular-nums leading-tight ${
-                            metrics.reinforcementHoursShort > 0 || metrics.reinforcementHoursOver > 0
-                              ? metrics.reinforcementHoursOver > 0
-                                ? "text-accent-danger"
-                                : "text-accent-warning"
-                              : "text-accent-primary"
-                          }`}
-                        >
-                          ус {metrics.reinforcementDayHours}/{metrics.expectedReinforcementHours}
-                        </span>
-                      ) : null}
-                      {metrics.expectedRapidResponse > 0 || metrics.rapidResponseCount > 0 ? (
-                        <span
-                          className={`text-[10px] tabular-nums leading-tight ${
-                            metrics.rapidResponseHoursShort > 0 || metrics.rapidResponseHoursOver > 0
-                              ? "text-accent-warning"
-                              : "text-accent-primary"
-                          }`}
-                        >
-                          мп {metrics.rapidResponseDayHours}/{metrics.expectedRapidResponseHours}
-                        </span>
-                      ) : null}
-                      {metrics.expectedShiftLead > 0 || metrics.shiftLeadCount > 0 ? (
-                        <span
-                          className={`text-[10px] tabular-nums leading-tight ${
-                            metrics.shiftLeadHoursShort > 0 || metrics.shiftLeadHoursOver > 0
-                              ? "text-accent-warning"
-                              : "text-accent-primary"
-                          }`}
-                        >
-                          СтМ {metrics.shiftLeadDayHours}/{metrics.expectedShiftLeadHours}
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
-                );
-              })}
-            </tr>
+            {posts.length === 0 ? renderPlanRow(monthPlan, null) : null}
           </thead>
           <tbody>
             {posts.length > 0 ? (
-              <>
-                {posts.map((post) => (
-                  <Fragment key={post.id}>
-                    <tr>
-                      <td colSpan={days.length + 1} className="bg-app-elevated/60 p-2 font-semibold text-app-text">
-                        {post.name}
-                      </td>
-                    </tr>
-                    {renderGuardsRows(post.id)}
-                  </Fragment>
-                ))}
-                <tr>
-                  <td colSpan={days.length + 1} className="bg-app-elevated/60 p-2 font-semibold text-app-text">
-                    Без поста
-                  </td>
-                </tr>
-                {renderGuardsRows(null)}
-              </>
+              posts.map((post) => (
+                <Fragment key={post.id}>
+                  <tr>
+                    <td
+                      colSpan={days.length + 1}
+                      className="bg-app-elevated/60 p-2 text-center text-sm font-bold text-app-text"
+                    >
+                      {post.name}
+                    </td>
+                  </tr>
+                  {renderPlanRow(monthPlanByPost?.[post.id] ?? monthPlan, post.id)}
+                  {renderGuardsRows(post.id)}
+                </Fragment>
+              ))
             ) : (
               renderGuardsRows(null)
             )}
@@ -1263,7 +1220,7 @@ export function ObjectMonthScheduleGrid({
           viewYear={viewYear}
           viewMonth0={viewMonth0}
           monthLabel={monthLabel}
-          guardsForGrid={guardsForGrid}
+          guardsForGrid={guardsForExport}
           monthShifts={monthShifts}
           operationalDayStartTime={operationalDayStartTime}
           onClose={() => setExportDialog(null)}

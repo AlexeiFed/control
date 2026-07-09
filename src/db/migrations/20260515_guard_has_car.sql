@@ -1,0 +1,1 @@
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS has_car boolean NOT NULL DEFAULT false;

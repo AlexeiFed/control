@@ -1,0 +1,1 @@
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS middle_name text NOT NULL DEFAULT '';

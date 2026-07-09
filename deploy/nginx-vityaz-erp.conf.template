@@ -1,0 +1,33 @@
+# Шаблон: подставляется через envsubst в bootstrap (DOMAIN, WWW_DOMAIN, APP_PORT, REMOTE_DIR).
+# Существующее приложение (vityaz-security → :3001) не затрагивается.
+# Примечание: certbot позже добавит 443-блок и редирект 80→443, сохранив location'ы ниже.
+# ВАЖНО: после certbot в 443-блоке заменить `listen 443 ssl;` на `listen 443 ssl http2;` (мультиплексирование для браузеров).
+
+server {
+    listen 80;
+    server_name ${DOMAIN} ${WWW_DOMAIN};
+
+    # Сжатие динамики (HTML/RSC/JSON/JS/CSS): глобальный gzip on уже включён.
+    gzip_types text/plain text/css application/json application/javascript application/x-javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml text/x-component;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+
+    # Статика Next с контент-хешем — отдаём прямо с диска мимо Node (разгружает единственное ядро).
+    location /_next/static/ {
+        alias ${REMOTE_DIR}/.next/static/;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}

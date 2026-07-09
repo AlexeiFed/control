@@ -1,0 +1,16 @@
+[Unit]
+Description=Vityaz ERP (Next.js)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${REMOTE_DIR}
+EnvironmentFile=${REMOTE_DIR}/.env
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

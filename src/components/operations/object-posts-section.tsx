@@ -22,7 +22,12 @@ export function ObjectPostsSection({ objectId, posts }: ObjectPostsSectionProps)
   return (
     <section className="rounded-card border border-app-border bg-app-surface p-4 shadow-glow sm:p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Посты</h2>
+        <div>
+          <h2 className="text-lg font-semibold">Посты</h2>
+          <p className="mt-1 text-xs text-app-muted">
+            Название первого поста меняется здесь. Штат по постам — в графике за месяц.
+          </p>
+        </div>
         <Button
           variant="secondary"
           size="sm"

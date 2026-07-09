@@ -1,0 +1,21 @@
+---
+description: Next.js, Tailwind, Zustand, and dark UI conventions for this ERP
+globs: "**/*.{ts,tsx,css}"
+alwaysApply: false
+---
+
+# Next.js Dark UI Rules
+
+- Use Next.js App Router patterns: server components by default, client components only for interactivity and Zustand consumers.
+- Use TypeScript discriminated unions for roles, statuses, shifts, and permission checks; avoid stringly typed permission logic.
+- Keep RBAC helpers in shared server-safe modules and reuse them from route handlers, server actions, and UI wrappers.
+- Use Zustand only for current-user role/session-derived UI state. Do not trust Zustand as an authorization source.
+- UI must use `src/lib/design-tokens.ts`. If it does not exist, create it before building components.
+- Dark mode must be high contrast. Status accents:
+  - Active: emerald
+  - Sick: rose
+  - Vacation: amber
+  - Night shift: indigo/violet
+  - Holiday: cyan/fuchsia highlight
+- Prefer Lucide icons for navigation/status affordances and Framer Motion for small state transitions, not business logic.
+- Add tests around date/time calculations, RBAC matrices, and schedule conflict prevention before wiring UI.

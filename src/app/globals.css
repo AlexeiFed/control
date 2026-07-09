@@ -1,0 +1,229 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #f3f5f7;
+  --color-app-surface: #ffffff;
+  --color-app-elevated: #f8fafc;
+  --color-app-border: #cbd5e1;
+  --color-app-text: #0f172a;
+  --color-app-muted: #475569;
+  --color-accent-primary: #1e3a5f;
+  --color-accent-primary-hover: #172f4d;
+  --color-accent-secondary: #7c3aed;
+  --color-accent-danger: #b91c1c;
+  --color-accent-warning: #b45309;
+  --color-accent-success: #047857;
+  --color-status-active: #047857;
+  --color-status-inactive: #64748b;
+  --color-shift-day-from: #38bdf8;
+  --color-shift-day-to: #22c55e;
+  --color-shift-night-from: #6366f1;
+  --color-shift-night-to: #8b5cf6;
+  --color-shift-holiday-from: #f59e0b;
+  --color-shift-holiday-to: #ec4899;
+  --radius-card: 0.875rem;
+  --radius-button: 0.625rem;
+  --shadow-glow: 0 18px 42px rgb(15 23 42 / 0.07);
+}
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f3f5f7;
+  color: #0f172a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+@keyframes toast-shake {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  40% {
+    transform: translate3d(3px, 0, 0);
+  }
+  60% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  80% {
+    transform: translate3d(2px, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes navigation-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.toast-shake {
+  animation: toast-shake 240ms ease-in-out;
+}
+
+.toast-screen-shake {
+  animation: toast-shake 240ms ease-in-out;
+}
+
+/** Горизонтальный скролл всегда виден (macOS overlay scrollbars). */
+.app-h-scroll {
+  position: relative;
+  isolation: isolate;
+  max-width: 100%;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: auto;
+}
+
+/** Реестр: горизонтальный скролл через полосу внизу экрана, без ползунка на всей высоте таблицы. */
+.registry-table-h-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-padding-inline-end: 0.5rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.registry-table-h-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/** Зеркальный ползунок внизу viewport. */
+.registry-sticky-h-scroll {
+  position: fixed !important;
+  height: 0.875rem;
+  min-height: 0.875rem;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #e2e8f0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.registry-sticky-h-scroll::-webkit-scrollbar {
+  height: 0.75rem;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.registry-sticky-h-scroll::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.registry-sticky-h-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 0.3125rem;
+  cursor: grab;
+}
+
+.registry-sticky-h-scroll::-webkit-scrollbar-thumb:active {
+  cursor: grabbing;
+}
+
+.registry-sticky-h-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/** Sticky левая колонка в графике смен — поверх ячеек при горизонтальном скролле. */
+.schedule-sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 40;
+  background-color: #ffffff;
+  box-shadow: 4px 0 8px -2px rgb(15 23 42 / 0.12);
+}
+
+.schedule-sticky-corner {
+  z-index: 50;
+}
+
+.app-h-scroll-y {
+  overflow-y: auto;
+}
+
+.app-scroll-table {
+  overflow-x: scroll;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-h-scroll::-webkit-scrollbar,
+.app-scroll-table::-webkit-scrollbar {
+  height: 0.75rem;
+  width: 0.75rem;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.app-h-scroll::-webkit-scrollbar-track,
+.app-scroll-table::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.app-h-scroll::-webkit-scrollbar-thumb,
+.app-scroll-table::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 0.3125rem;
+  cursor: grab;
+}
+
+.app-h-scroll::-webkit-scrollbar-thumb:active,
+.app-scroll-table::-webkit-scrollbar-thumb:active {
+  cursor: grabbing;
+}
+
+.app-h-scroll::-webkit-scrollbar-thumb:hover,
+.app-scroll-table::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.app-h-scroll,
+.app-scroll-table {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #e2e8f0;
+}
+
+/** График смен: touch — плюс всегда виден, drag только на десктопе. */
+@media (hover: none), (pointer: coarse) {
+  .schedule-cell-add-btn {
+    visibility: visible !important;
+    opacity: 0.92;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .schedule-drag-handle {
+    display: flex;
+  }
+}

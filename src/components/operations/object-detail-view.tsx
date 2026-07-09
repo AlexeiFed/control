@@ -12,12 +12,14 @@ import {
 } from "lucide-react";
 import { ObjectGuardAssignmentSection } from "./object-guard-assignment-section";
 import { ObjectHolidaysSection } from "./object-holidays-section";
-import { ObjectPostsSection } from "./object-posts-section";
+import { ObjectPostsAndStaffSection } from "./object-posts-and-staff-section";
+import type { MonthlyPostGuardsByPostId } from "../../lib/operations/object-monthly-post-guards-repository";
 import { ObjectTimesheetApprovalSection } from "./object-timesheet-approval-section";
+import { ObjectShiftTemplateSection } from "./object-shift-template-section";
 import { ObjectMonthScheduleGridLazy } from "./object-month-schedule-grid-lazy";
 import { readLastUsedQuickAssign } from "./object-month-schedule-grid";
 import { normalizeHolidayDateKey, type DayColumnMeta } from "./object-detail-schedule-styles";
-import { setObjectGuardsAction, loadTemplateEditBaselineAction, saveShiftTemplatesAction, updateObjectAction } from "../../app/objects/actions";
+import { setObjectGuardsAction, updateObjectAction } from "../../app/objects/actions";
 import {
   createShiftAction,
   recordShiftIncidentAction,
@@ -30,6 +32,7 @@ import type { ObjectHolidayRecord } from "../../lib/operations/object-holidays-r
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
+import type { ObjectShiftTemplateRow } from "../../lib/operations/shift-templates-repository";
 import type { ObjectMonthScheduledGuard } from "../../lib/operations/scheduler-repository";
 import type { Shift, ShiftKind } from "../../lib/scheduling/types";
 import { toast } from "../../store/toast-store";
@@ -52,7 +55,14 @@ import {
   getKhabarovskComponents,
   addDaysToIsoDate,
 } from "../../lib/format/display-date";
-import { buildShiftIntervalFromHm, defaultSutkiShiftInterval, operationalDayDateIsoFromStart, shiftBelongsToOperationalDayColumn, tryBuildShiftIntervalFromHm } from "../../lib/scheduling/operational-day-timeline";
+import { shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
+import {
+  defaultSutkiShiftInterval,
+  normalizeOperationalAnchorTime,
+  scheduleShiftColumnDateIso,
+  shiftBelongsToOperationalDayColumn,
+  tryBuildShiftIntervalFromHm,
+} from "../../lib/scheduling/operational-day-timeline";
 import {
   listGuardsWithAvailability,
   formatRequestedGuardSubstitutionHint,
@@ -64,10 +74,13 @@ import {
   sortGuardsForShiftAssignment,
 } from "../../lib/scheduling/guard-car-sort";
 import {
+  buildExpectedShiftsForLocalMonth,
   defaultExpectedShiftsForDay,
+  dominantTemplateEffectiveFromForMonth,
   localMonthDateIso,
   resolveShiftKindForTemplate,
   shiftKindsInTemplate,
+  weeklyExpectedShiftsFromDateMap,
   type ExpectedShifts,
 } from "../../lib/scheduling/object-shift-templates";
 import {
@@ -162,11 +175,9 @@ export type ObjectDetailViewProps = {
   posts: ObjectPost[];
   gridGuardNames: Record<string, string>;
   rateRules: ObjectRateRuleRecord[];
-  templateSequence: TemplateSequenceData;
-  /** Дата начала версии шаблона, действующей в выбранном месяце. */
-  templateEffectiveFrom: string;
   /** План смен по каждой дате месяца (версии шаблона + наследование МП/усиления). */
   expectedShiftsByDateIso: Record<string, ExpectedShifts>;
+  shiftTemplates: ObjectShiftTemplateRow[];
   currentRole: Role;
   objectHolidays: ObjectHolidayRecord[];
   /** Глобальный календарь праздников (admin/holidays) за видимый месяц. */
@@ -184,7 +195,8 @@ export type ObjectDetailViewProps = {
   bulkCreateShiftsAction?: (
     formData: FormData,
   ) => Promise<{ created: number; skipped: Array<{ objectId: string; dateIso: string; reason: string }> } | void>;
-  monthlyOperationalDayStartTime?: string | null;
+  operationalDayStartTime: string;
+  monthlyPostGuardsByPostId: MonthlyPostGuardsByPostId;
 };
 
 function toTimeKh(date: Date): string {
@@ -209,54 +221,16 @@ function parseShiftFromApi(row: ShiftApiRow): Shift {
   };
 }
 
-const weekdayShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-
-type TemplateSequenceData = {
-  regular: number[];
-  reinforcement: number[];
-  shiftHours: number[];
-  reinforcementShiftHours: number[];
-  rapidResponse: number[];
-  rapidResponseShiftHours: number[];
-  shiftLead: number[];
-  shiftLeadShiftHours: number[];
-};
-
-type TemplateDraftDay = {
-  regular: number;
-  shiftHours: number;
-  reinforcement: number;
-  reinforcementShiftHours: number;
-  rapidResponse: number;
-  rapidResponseShiftHours: number;
-  shiftLead: number;
-  shiftLeadShiftHours: number;
-};
-
-type TemplateDraft = {
-  effectiveFrom: string;
-  days: TemplateDraftDay[];
-};
-
-function buildTemplateDraft(sequence: TemplateSequenceData, effectiveFrom: string): TemplateDraft {
-  return {
-    effectiveFrom,
-    days: Array.from({ length: 7 }, (_, i) => ({
-      regular: sequence.regular[i] ?? 2,
-      shiftHours: sequence.shiftHours[i] ?? 24,
-      reinforcement: sequence.reinforcement[i] ?? 0,
-      reinforcementShiftHours: sequence.reinforcementShiftHours[i] ?? 24,
-      rapidResponse: sequence.rapidResponse[i] ?? 0,
-      rapidResponseShiftHours: sequence.rapidResponseShiftHours[i] ?? 24,
-      shiftLead: sequence.shiftLead[i] ?? 0,
-      shiftLeadShiftHours: sequence.shiftLeadShiftHours[i] ?? 24,
-    })),
-  };
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, Math.trunc(value)));
+function normalizeShiftDates(shift: Shift): Shift {
+  if (
+    shift.startsAt instanceof Date &&
+    shift.endsAt instanceof Date &&
+    (!shift.incidentWorkedUntilAt || shift.incidentWorkedUntilAt instanceof Date) &&
+    (!shift.incidentRecordedAt || shift.incidentRecordedAt instanceof Date)
+  ) {
+    return shift;
+  }
+  return parseShiftFromApi(shift as unknown as ShiftApiRow);
 }
 
 export function ObjectDetailView({
@@ -264,9 +238,8 @@ export function ObjectDetailView({
   posts,
   gridGuardNames,
   rateRules,
-  templateSequence,
-  templateEffectiveFrom,
   expectedShiftsByDateIso,
+  shiftTemplates,
   currentRole,
   objectHolidays,
   globalHolidayDateKeys = [],
@@ -279,13 +252,11 @@ export function ObjectDetailView({
   success,
   initialScrollY,
   bulkCreateShiftsAction,
-  monthlyOperationalDayStartTime,
+  operationalDayStartTime,
+  monthlyPostGuardsByPostId,
 }: ObjectDetailViewProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
-  const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null);
-  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
-  const [isLoadingTemplateBaseline, setIsLoadingTemplateBaseline] = useState(false);
   const [guardSearch, setGuardSearch] = useState("");
   const [quickAssign, setQuickAssign] = useState<{
     guardId?: string;
@@ -296,8 +267,9 @@ export function ObjectDetailView({
     replacedGuardName?: string;
     startTime?: string;
     endTime?: string;
+    postId?: string | null;
   } | null>(null);
-  const operationalAnchor = object.operationalDayStartTime;
+  const operationalAnchor = normalizeOperationalAnchorTime(operationalDayStartTime);
   const defaultSutki = useMemo(() => defaultSutkiShiftInterval(operationalAnchor), [operationalAnchor]);
   const [quickStartTime, setQuickStartTime] = useState(defaultSutki.startTime);
   const [quickEndTime, setQuickEndTime] = useState(defaultSutki.endTime);
@@ -349,39 +321,53 @@ export function ObjectDetailView({
   const canManageOperationalDay = hasPermission(currentRole, "objects:manage");
   const canEditTemplates = hasPermission(currentRole, "scheduleTemplates:manage");
   const showRatesSection = hasPermission(currentRole, "rates:read");
-  function beginTemplateEdit() {
-    setTemplateDraft(buildTemplateDraft(templateSequence, templateEffectiveFrom));
-  }
 
-  async function reloadTemplateDraftForEffectiveFrom(effectiveFrom: string) {
-    setIsLoadingTemplateBaseline(true);
-    try {
-      const baseline = await loadTemplateEditBaselineAction(object.id, effectiveFrom);
-      setTemplateDraft(buildTemplateDraft(baseline, effectiveFrom));
-    } catch (err) {
-      toast({
-        title: "Не удалось загрузить сменность",
-        message: err instanceof Error ? err.message : "Ошибка загрузки",
-        variant: "error",
-        durationMs: 6500,
-      });
-    } finally {
-      setIsLoadingTemplateBaseline(false);
+  const templateSections = useMemo(() => {
+    if (posts.length === 0) {
+      const expected = buildExpectedShiftsForLocalMonth(
+        object.id,
+        viewYear,
+        viewMonth0,
+        shiftTemplates,
+        null,
+      );
+      return [
+        {
+          postId: null as string | null,
+          postName: null as string | null,
+          sequence: weeklyExpectedShiftsFromDateMap(expected, viewYear, viewMonth0),
+          effectiveFrom: dominantTemplateEffectiveFromForMonth(
+            shiftTemplates,
+            object.id,
+            viewYear,
+            viewMonth0,
+            null,
+          ),
+        },
+      ];
     }
-  }
-
-  function cancelTemplateEdit() {
-    setTemplateDraft(null);
-  }
-
-  function patchTemplateDay(index: number, patch: Partial<TemplateDraftDay>) {
-    setTemplateDraft((prev) => {
-      if (!prev) return prev;
-      const days = [...prev.days];
-      days[index] = { ...days[index]!, ...patch };
-      return { ...prev, days };
+    return posts.map((post) => {
+      const expected = buildExpectedShiftsForLocalMonth(
+        object.id,
+        viewYear,
+        viewMonth0,
+        shiftTemplates,
+        post.id,
+      );
+      return {
+        postId: post.id,
+        postName: post.name,
+        sequence: weeklyExpectedShiftsFromDateMap(expected, viewYear, viewMonth0),
+        effectiveFrom: dominantTemplateEffectiveFromForMonth(
+          shiftTemplates,
+          object.id,
+          viewYear,
+          viewMonth0,
+          post.id,
+        ),
+      };
     });
-  }
+  }, [posts, object.id, viewYear, viewMonth0, shiftTemplates]);
 
   const lastToastRef = useRef<{ error?: string; success?: string }>({});
 
@@ -651,6 +637,37 @@ export function ObjectDetailView({
     return plan;
   }, [days, dayColumnMetaByDay, expectedShiftsByDateIso]);
 
+  const expectedShiftsByPostId = useMemo(() => {
+    if (posts.length === 0) return {};
+    const result: Record<string, Record<string, ExpectedShifts>> = {};
+    for (const post of posts) {
+      result[post.id] = buildExpectedShiftsForLocalMonth(
+        object.id,
+        viewYear,
+        viewMonth0,
+        shiftTemplates,
+        post.id,
+      );
+    }
+    return result;
+  }, [posts, object.id, viewYear, viewMonth0, shiftTemplates]);
+
+  const monthPlanByPost = useMemo(() => {
+    const result: Record<string, Record<number, ExpectedShifts>> = {};
+    for (const post of posts) {
+      const byDate = expectedShiftsByPostId[post.id] ?? {};
+      const byDay: Record<number, ExpectedShifts> = {};
+      for (const d of days) {
+        const meta = dayColumnMetaByDay.get(d);
+        if (meta) {
+          byDay[d] = byDate[meta.dateIso] ?? defaultExpectedShiftsForDay();
+        }
+      }
+      result[post.id] = byDay;
+    }
+    return result;
+  }, [posts, expectedShiftsByPostId, days, dayColumnMetaByDay]);
+
   // Список охранников для графика
   const guardsForGrid = useMemo(() => {
     const assignedIds = new Set(object.guardIds);
@@ -668,6 +685,38 @@ export function ObjectDetailView({
       }))
       .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
   }, [object.guardIds, shifts, gridGuardNames, scheduledGuards]);
+
+  const monthKey = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
+
+  const firstPostId = posts[0]?.id ?? null;
+
+  const guardsByPost = useMemo(() => {
+    if (posts.length === 0) {
+      return { "": guardsForGrid };
+    }
+
+    const result: Record<string, typeof guardsForGrid> = {};
+    for (const post of posts) {
+      const assignedIds = new Set(monthlyPostGuardsByPostId[post.id] ?? []);
+      const shiftGuardIds = new Set(
+        shifts
+          .filter((s) => shiftMatchesPost(s.postId, post.id, firstPostId))
+          .map((s) => s.guardId),
+      );
+      const allIds = new Set([...assignedIds, ...shiftGuardIds]);
+      result[post.id] = Array.from(allIds)
+        .map((id) => ({
+          guardId: id,
+          displayName:
+            gridGuardNames[id] ??
+            scheduledGuards.find((g) => g.guardId === id)?.displayName ??
+            "Неизвестный",
+          isAssigned: assignedIds.has(id),
+        }))
+        .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
+    }
+    return result;
+  }, [posts, monthlyPostGuardsByPostId, shifts, guardsForGrid, gridGuardNames, scheduledGuards, firstPostId]);
 
   const pickerGuardList = pickerGuards ?? [];
 
@@ -696,10 +745,12 @@ export function ObjectDetailView({
     return map;
   }, [dayColumnMetaByDay]);
 
+  const normalizedShifts = useMemo(() => shifts.map(normalizeShiftDates), [shifts]);
+
   const shiftsByGuardAndDay = useMemo(() => {
     const map: Record<string, Record<number, Shift[]>> = {};
-    for (const shift of shifts) {
-      const opDateIso = operationalDayDateIsoFromStart(shift.startsAt, operationalAnchor);
+    for (const shift of normalizedShifts) {
+      const opDateIso = scheduleShiftColumnDateIso(shift, operationalAnchor);
       const d = dateIsoToDay.get(opDateIso);
       if (d === undefined) continue;
       if (!map[shift.guardId]) map[shift.guardId] = {};
@@ -707,7 +758,7 @@ export function ObjectDetailView({
       map[shift.guardId][d].push(shift);
     }
     return map;
-  }, [shifts, operationalAnchor, dateIsoToDay]);
+  }, [normalizedShifts, operationalAnchor, dateIsoToDay]);
 
   useEffect(() => {
     if (!quickAssign) {
@@ -725,7 +776,9 @@ export function ObjectDetailView({
         ? shifts.find((shift) => shift.id === quickAssign.editingShiftId)
         : undefined;
       const expectedForCell =
-        expectedShiftsByDateIso[quickAssign.dateIso] ?? defaultExpectedShiftsForDay();
+        quickAssign.postId && expectedShiftsByPostId[quickAssign.postId]
+          ? expectedShiftsByPostId[quickAssign.postId][quickAssign.dateIso] ?? defaultExpectedShiftsForDay()
+          : expectedShiftsByDateIso[quickAssign.dateIso] ?? defaultExpectedShiftsForDay();
       const resolvedShiftKind = resolveShiftKindForTemplate(
         expectedForCell,
         quickAssign.shiftKind ?? lastUsed?.shiftKind,
@@ -785,12 +838,17 @@ export function ObjectDetailView({
         setSelectedRateRuleId(rateForm.selectedRateRuleId);
       }
     }
-  }, [quickAssign, shifts, expectedShiftsByDateIso, pickerGuardList, object.guardIds, object.id, rateRules, holidayDateKeys]);
+  }, [quickAssign, shifts, expectedShiftsByDateIso, expectedShiftsByPostId, pickerGuardList, object.guardIds, object.id, rateRules, holidayDateKeys]);
 
   const quickAssignExpectedShifts = useMemo(() => {
     if (!quickAssign) return null;
+    if (quickAssign.postId && expectedShiftsByPostId[quickAssign.postId]) {
+      return (
+        expectedShiftsByPostId[quickAssign.postId][quickAssign.dateIso] ?? defaultExpectedShiftsForDay()
+      );
+    }
     return expectedShiftsByDateIso[quickAssign.dateIso] ?? defaultExpectedShiftsForDay();
-  }, [quickAssign, expectedShiftsByDateIso]);
+  }, [quickAssign, expectedShiftsByPostId, expectedShiftsByDateIso]);
 
   const quickAssignAllowedShiftKinds = useMemo(
     () => (quickAssignExpectedShifts ? shiftKindsInTemplate(quickAssignExpectedShifts) : []),
@@ -1212,10 +1270,18 @@ export function ObjectDetailView({
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ObjectPostsSection objectId={object.id} posts={posts} />
-        <ObjectHolidaysSection objectId={object.id} holidays={objectHolidays} />
-      </div>
+      <ObjectHolidaysSection objectId={object.id} holidays={objectHolidays} />
+
+      <ObjectPostsAndStaffSection
+        objectId={object.id}
+        monthKey={monthKey}
+        monthLabel={monthLabel}
+        posts={posts}
+        objectGuardIds={object.guardIds}
+        monthlyPostGuardsByPostId={monthlyPostGuardsByPostId}
+        guardNames={gridGuardNames}
+        canManage={canManageOperationalDay}
+      />
 
       <ObjectMonthScheduleGridLazy
         objectId={object.id}
@@ -1228,12 +1294,13 @@ export function ObjectDetailView({
         days={days}
         dayColumnMetaByDay={dayColumnMetaByDay}
         monthPlan={monthPlan}
-        guardsForGrid={guardsForGrid}
+        monthPlanByPost={monthPlanByPost}
+        expectedShiftsByPostId={expectedShiftsByPostId}
+        guardsByPost={guardsByPost}
         shiftsByGuardAndDay={shiftsByGuardAndDay}
-        monthShifts={shifts}
+        monthShifts={normalizedShifts}
         expectedShiftsByDateIso={expectedShiftsByDateIso}
-        operationalDayStartTime={monthlyOperationalDayStartTime ?? object.operationalDayStartTime}
-        globalOperationalDayStartTime={object.operationalDayStartTime}
+        operationalDayStartTime={operationalDayStartTime}
         canWrite={canWrite}
         canManageOperationalDay={canManageOperationalDay}
         bulkCreateShiftsAction={bulkCreateShiftsAction}
@@ -1253,309 +1320,32 @@ export function ObjectDetailView({
       {/* Сменность и ставки */}
       <section className="rounded-card border border-app-border bg-app-surface p-3 shadow-glow sm:p-6">
         <div className="flex flex-col gap-6 sm:gap-8">
-          <div>
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold">Сменность (Шаблон)</h2>
-                {!templateDraft ? (
-                  <p className="mt-1 text-xs text-app-muted">
-                    Действует с {formatDisplayDateFromIso(templateEffectiveFrom)} · план в графике считается по этому шаблону на каждый день
-                  </p>
-                ) : null}
-              </div>
-              {canEditTemplates && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full shrink-0 sm:w-auto"
-                  onClick={() => (templateDraft ? cancelTemplateEdit() : beginTemplateEdit())}
-                  disabled={isSavingTemplate}
-                >
-                  {templateDraft ? "Отмена" : "Редактировать шаблон"}
-                </Button>
-              )}
-            </div>
-
-            {templateDraft ? (
-              <form
-                className="space-y-6"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!templateDraft || isSavingTemplate) return;
-                  const fd = new FormData();
-                  fd.set("objectId", object.id);
-                  fd.set("effectiveFrom", templateDraft.effectiveFrom);
-                  templateDraft.days.forEach((day, i) => {
-                    const n = i + 1;
-                    fd.set(`d${n}`, String(day.regular));
-                    fd.set(`h${n}`, String(day.shiftHours));
-                    fd.set(`r${n}`, String(day.reinforcement));
-                    fd.set(`rh${n}`, String(day.reinforcementShiftHours));
-                    fd.set(`mp${n}`, String(day.rapidResponse));
-                    fd.set(`mph${n}`, String(day.rapidResponseShiftHours));
-                    fd.set(`stm${n}`, String(day.shiftLead));
-                    fd.set(`stmh${n}`, String(day.shiftLeadShiftHours));
-                  });
-                  fd.set("noRedirect", "true");
-                  setIsSavingTemplate(true);
-                  try {
-                    await saveShiftTemplatesAction(fd);
-                    toast({
-                      title: "Шаблон сохранён",
-                      message: "Сменность обновлена без прокрутки страницы",
-                      variant: "success",
-                    });
-                    setTemplateDraft(null);
-                    router.refresh();
-                  } catch (err) {
-                    toast({
-                      title: "Не удалось сохранить шаблон",
-                      message: err instanceof Error ? err.message : "Ошибка сохранения",
-                      variant: "error",
-                      durationMs: 6500,
-                    });
-                  } finally {
-                    setIsSavingTemplate(false);
-                  }
-                }}
-              >
-                <label className="grid max-w-xs gap-1 text-sm">
-                  <span className="text-app-muted">Применять сменность с даты</span>
-                  <input
-                    type="date"
-                    value={templateDraft.effectiveFrom}
-                    onChange={(e) => void reloadTemplateDraftForEffectiveFrom(e.target.value)}
-                    disabled={isLoadingTemplateBaseline || isSavingTemplate}
-                    className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-app-text outline-none focus:border-accent-primary disabled:opacity-60"
-                    required
-                  />
-                  <span className="text-xs text-app-muted">
-                    По умолчанию — дата текущей версии ({formatDisplayDateFromIso(templateEffectiveFrom)}). Новая дата создаёт отдельную версию; повторное сохранение с более ранней даты убирает случайные будущие версии.
-                  </span>
-                </label>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-                  {weekdayShort.map((day, i) => {
-                    const draftDay = templateDraft.days[i]!;
-                    return (
-                    <div
-                      key={day}
-                      className="flex flex-col gap-3 p-4 rounded-button border border-app-border bg-app-elevated"
-                    >
-                      <span className="text-xs uppercase tracking-wider text-app-muted text-center font-bold">
-                        {day}
-                      </span>
-                      <div className="space-y-3">
-                        <div className="border-b border-app-border/40 pb-2">
-                          <label className="grid gap-1">
-                            <span className="text-[10px] text-app-muted uppercase font-semibold">Обычные</span>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={24}
-                                value={draftDay.regular}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, { regular: clampInt(Number(e.target.value), 0, 24) })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-primary text-center"
-                                title="Количество смен"
-                              />
-                              <input
-                                type="number"
-                                min={1}
-                                max={24}
-                                value={draftDay.shiftHours}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, { shiftHours: clampInt(Number(e.target.value), 1, 24) })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-primary text-center"
-                                title="Часов в смене"
-                              />
-                            </div>
-                            <div className="flex justify-between text-[8px] text-app-muted px-1">
-                              <span>смен</span>
-                              <span>часов</span>
-                            </div>
-                          </label>
-                        </div>
-
-                        <div className="border-b border-app-border/40 pb-2">
-                          <label className="grid gap-1">
-                            <span className="text-[10px] text-accent-warning uppercase font-semibold">Усиление</span>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={24}
-                                value={draftDay.reinforcement}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, { reinforcement: clampInt(Number(e.target.value), 0, 24) })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-warning text-center"
-                                title="Количество постов"
-                              />
-                              <input
-                                type="number"
-                                min={1}
-                                max={24}
-                                value={draftDay.reinforcementShiftHours}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, {
-                                    reinforcementShiftHours: clampInt(Number(e.target.value), 1, 24),
-                                  })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-warning text-center"
-                                title="Часов в смене"
-                              />
-                            </div>
-                            <div className="flex justify-between text-[8px] text-app-muted px-1">
-                              <span>постов</span>
-                              <span>часов</span>
-                            </div>
-                          </label>
-                        </div>
-
-                        <div className="border-b border-app-border/40 pb-2">
-                          <label className="grid gap-1">
-                            <span className="text-[10px] text-accent-secondary uppercase font-semibold">СтМ</span>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={24}
-                                value={draftDay.shiftLead}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, { shiftLead: clampInt(Number(e.target.value), 0, 24) })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-secondary text-center"
-                                title="Количество смен старшего"
-                              />
-                              <input
-                                type="number"
-                                min={1}
-                                max={24}
-                                value={draftDay.shiftLeadShiftHours}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, {
-                                    shiftLeadShiftHours: clampInt(Number(e.target.value), 1, 24),
-                                  })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-secondary text-center"
-                                title="Часов в смене"
-                              />
-                            </div>
-                            <div className="flex justify-between text-[8px] text-app-muted px-1">
-                              <span>смен</span>
-                              <span>часов</span>
-                            </div>
-                          </label>
-                        </div>
-
-                        <div>
-                          <label className="grid gap-1">
-                            <span className="text-[10px] text-accent-primary uppercase font-semibold text-accent-primary">МП</span>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={24}
-                                value={draftDay.rapidResponse}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, { rapidResponse: clampInt(Number(e.target.value), 0, 24) })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-primary text-center"
-                                title="Количество постов"
-                              />
-                              <input
-                                type="number"
-                                min={1}
-                                max={24}
-                                value={draftDay.rapidResponseShiftHours}
-                                onChange={(e) =>
-                                  patchTemplateDay(i, {
-                                    rapidResponseShiftHours: clampInt(Number(e.target.value), 1, 24),
-                                  })
-                                }
-                                className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-sm outline-none focus:border-accent-primary text-center"
-                                title="Часов в смене"
-                              />
-                            </div>
-                            <div className="flex justify-between text-[8px] text-app-muted px-1">
-                              <span>постов</span>
-                              <span>часов</span>
-                            </div>
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-end">
-                  <Button type="submit" disabled={isSavingTemplate || isLoadingTemplateBaseline}>
-                    <Save className="size-4 mr-2" />
-                    {isSavingTemplate ? "Сохранение…" : "Сохранить шаблон"}
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                {weekdayShort.map((day, i) => (
-                  <div
-                    key={day}
-                    className="flex min-w-0 flex-col gap-1.5 rounded-button border border-app-border bg-app-elevated p-2 sm:gap-2 sm:p-3"
-                  >
-                    <span className="text-center text-[10px] font-bold uppercase tracking-wider text-app-muted sm:text-xs">
-                      {day}
-                    </span>
-                    <div className="flex flex-col items-center">
-                      <div className="text-lg font-bold sm:text-xl">{templateSequence.regular[i]}</div>
-                      <span className="text-center text-[8px] uppercase leading-tight text-app-muted sm:text-[9px]">
-                        <span className="sm:hidden">осн.</span>
-                        <span className="hidden sm:inline">Обычные</span>
-                        {templateSequence.shiftHours?.[i] !== 24 ? ` (${templateSequence.shiftHours?.[i]}ч)` : ""}
-                      </span>
-                    </div>
-                    {templateSequence.reinforcement[i] > 0 && (
-                      <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
-                        <div className="text-base font-bold text-accent-warning sm:text-lg">
-                          {templateSequence.reinforcement[i]}
-                        </div>
-                        <span className="text-center text-[8px] uppercase leading-tight text-accent-warning sm:text-[9px]">
-                          <span className="sm:hidden">ус.</span>
-                          <span className="hidden sm:inline">Усиление</span>
-                          {templateSequence.reinforcementShiftHours?.[i] !== 24 ? ` (${templateSequence.reinforcementShiftHours?.[i]}ч)` : ""}
-                        </span>
-                      </div>
-                    )}
-                    {templateSequence.rapidResponse?.[i] > 0 && (
-                      <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
-                        <div className="text-base font-bold text-accent-primary sm:text-lg">
-                          {templateSequence.rapidResponse[i]}
-                        </div>
-                        <span className="text-center text-[8px] uppercase leading-tight text-accent-primary sm:text-[9px]">
-                          МП
-                          {templateSequence.rapidResponseShiftHours?.[i] !== 24 ? ` (${templateSequence.rapidResponseShiftHours?.[i]}ч)` : ""}
-                        </span>
-                      </div>
-                    )}
-                    {templateSequence.shiftLead?.[i] > 0 && (
-                      <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
-                        <div className="text-base font-bold text-accent-secondary sm:text-lg">
-                          {templateSequence.shiftLead[i]}
-                        </div>
-                        <span className="text-center text-[8px] uppercase leading-tight text-accent-secondary sm:text-[9px]">
-                          СтМ
-                          {templateSequence.shiftLeadShiftHours?.[i] !== 24 ? ` (${templateSequence.shiftLeadShiftHours?.[i]}ч)` : ""}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {posts.length > 0 ? (
+            <>
+              <h2 className="text-lg font-semibold">Сменность (Шаблон)</h2>
+              {templateSections.map((section) => (
+                <ObjectShiftTemplateSection
+                  key={section.postId ?? "object"}
+                  objectId={object.id}
+                  postId={section.postId}
+                  postName={section.postName}
+                  templateSequence={section.sequence}
+                  templateEffectiveFrom={section.effectiveFrom}
+                  canEdit={canEditTemplates}
+                />
+              ))}
+            </>
+          ) : (
+            templateSections.map((section) => (
+              <ObjectShiftTemplateSection
+                key="object"
+                objectId={object.id}
+                templateSequence={section.sequence}
+                templateEffectiveFrom={section.effectiveFrom}
+                canEdit={canEditTemplates}
+              />
+            ))
+          )}
 
           {showRatesSection ? (
             <div className="border-t border-app-border pt-6 sm:pt-8">
@@ -1696,6 +1486,9 @@ export function ObjectDetailView({
               ) : null}
               {quickAssign.replaceShiftId ? (
                 <input type="hidden" name="replaceShiftId" value={quickAssign.replaceShiftId} />
+              ) : null}
+              {quickAssign.postId ? (
+                <input type="hidden" name="postId" value={quickAssign.postId} />
               ) : null}
               <input
                 type="hidden"

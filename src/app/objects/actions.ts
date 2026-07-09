@@ -38,6 +38,7 @@ import {
   deleteObjectPost,
   updateObjectPost,
 } from "../../lib/operations/object-posts-repository";
+import { replaceMonthlyPostGuards } from "../../lib/operations/object-monthly-post-guards-repository";
 
 const createObjectSchema = z.object({
   name: z.string().trim().min(1),
@@ -285,10 +286,16 @@ const saveShiftTemplatesSchema = z.object({
   stmh5: z.coerce.number().int().min(1).max(24).default(24),
   stmh6: z.coerce.number().int().min(1).max(24).default(24),
   stmh7: z.coerce.number().int().min(1).max(24).default(24),
+  postId: z
+    .preprocess((v) => (v == null || String(v).trim() === "" ? undefined : String(v).trim()), z.string().uuid().optional()),
 });
 
 /** Сменность накануне effectiveFrom — база для новой версии шаблона. */
-export async function loadTemplateEditBaselineAction(objectId: string, effectiveFrom: string) {
+export async function loadTemplateEditBaselineAction(
+  objectId: string,
+  effectiveFrom: string,
+  postId?: string,
+) {
   const session = await requireSession();
   assertPermission(session.user.role, "scheduleTemplates:manage");
   if (!z.string().uuid().safeParse(objectId).success) {
@@ -297,8 +304,16 @@ export async function loadTemplateEditBaselineAction(objectId: string, effective
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
     throw new Error("Некорректная дата начала сменности");
   }
+  if (postId && !z.string().uuid().safeParse(postId).success) {
+    throw new Error("Некорректный пост");
+  }
   const templates = await listShiftTemplatesForObjectIds([objectId]);
-  return activeShiftsSequence(templates, objectId, getPreviousCivilDate(effectiveFrom));
+  return activeShiftsSequence(
+    templates,
+    objectId,
+    getPreviousCivilDate(effectiveFrom),
+    postId ?? null,
+  );
 }
 
 export async function saveShiftTemplatesAction(formData: FormData) {
@@ -368,6 +383,7 @@ export async function saveShiftTemplatesAction(formData: FormData) {
     stmh5: formData.get("stmh5") ?? 24,
     stmh6: formData.get("stmh6") ?? 24,
     stmh7: formData.get("stmh7") ?? 24,
+    postId: formData.get("postId")?.toString().trim() || undefined,
     });
   } catch (error) {
     const message = error instanceof z.ZodError
@@ -386,6 +402,7 @@ export async function saveShiftTemplatesAction(formData: FormData) {
     templates,
     input.objectId,
     getPreviousCivilDate(input.effectiveFrom),
+    input.postId ?? null,
   );
 
   const perDay = [1, 2, 3, 4, 5, 6, 7].map((dayOfWeek, index) => {
@@ -427,7 +444,7 @@ export async function saveShiftTemplatesAction(formData: FormData) {
     };
   });
 
-  await replaceShiftTemplatesForObject(input.objectId, perDay, input.effectiveFrom);
+  await replaceShiftTemplatesForObject(input.objectId, perDay, input.effectiveFrom, input.postId ?? null);
   revalidateAfterShiftMutation(["/objects", `/objects/${input.objectId}`, "/scheduler"]);
 
   if (noRedirect) {
@@ -685,9 +702,10 @@ export async function createObjectPostAction(formData: FormData) {
   assertPermission(session.user.role, "objects:manage");
 
   const objectId = z.string().uuid().parse(formData.get("objectId"));
+  const month = z.string().regex(/^\d{4}-\d{2}$/).parse(formData.get("month"));
   const name = z.string().trim().min(1).parse(formData.get("name"));
 
-  await createObjectPost(objectId, name);
+  await createObjectPost(objectId, month, name);
   revalidatePath(`/objects/${objectId}`);
 }
 
@@ -750,4 +768,37 @@ export async function upsertObjectMonthlySettingAction(
           : "Не удалось сохранить настройки месяца";
     return { ok: false, error: message };
   }
+}
+
+const replaceMonthlyPostGuardsSchema = z.object({
+  objectId: z.string().uuid(),
+  postId: z.string().uuid(),
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  guardIds: z.array(z.string().uuid()),
+});
+
+export async function replaceMonthlyPostGuardsAction(formData: FormData) {
+  const session = await requireSession();
+  assertPermission(session.user.role, "objects:manage");
+
+  const guardIdsRaw = formData.get("guardIds");
+  const guardIds =
+    typeof guardIdsRaw === "string" && guardIdsRaw.trim().length > 0
+      ? guardIdsRaw.split(",").map((id) => id.trim()).filter(Boolean)
+      : [];
+
+  const input = replaceMonthlyPostGuardsSchema.parse({
+    objectId: formData.get("objectId"),
+    postId: formData.get("postId"),
+    month: formData.get("month"),
+    guardIds,
+  });
+
+  await replaceMonthlyPostGuards(
+    input.objectId,
+    input.postId,
+    input.month,
+    input.guardIds,
+  );
+  revalidatePath(`/objects/${input.objectId}`);
 }
