@@ -1,4 +1,3 @@
-import { hasGuardUniform } from "../format/uniform";
 import type { GuardListRow } from "../operations/guards-repository";
 import type { GuardLicenseType, GuardPosition, GuardStatus } from "../scheduling/types";
 
@@ -44,7 +43,7 @@ export function filterGuardsForRegistryTable(
     if (filters.employed === "no" && guard.employmentType !== "Unemployed") return false;
     if (filters.hasCar === "yes" && !guard.hasCar) return false;
     if (filters.hasCar === "no" && guard.hasCar) return false;
-    const uniform = hasGuardUniform(guard.uniformSize, guard.uniformHeight);
+    const uniform = guard.uniformIssued;
     if (filters.hasUniform === "yes" && !uniform) return false;
     if (filters.hasUniform === "no" && uniform) return false;
     if (filters.objectId && !guard.objectIds.includes(filters.objectId)) return false;

@@ -87,18 +87,73 @@ describe("filterGuardsForRegistryTable", () => {
     expect(result[0]?.id).toBe("1");
   });
 
-  it("filters by uniform absence", () => {
-    const result = filterGuardsForRegistryTable(guards, {
-      query: "",
-      position: "",
-      licenseType: "",
-      employed: "",
-      hasCar: "",
-      hasUniform: "no",
-      objectId: "",
-      status: "",
+  describe("filters by uniform issued", () => {
+    const uniformGuards = [
+      row({
+        id: "1",
+        uniformIssued: true,
+        uniformIssuedOn: "2026-01-01",
+        uniformCondition: "new",
+      }),
+      row({
+        id: "2",
+        firstName: "Сидор",
+        lastName: "Иванов",
+        uniformIssued: false,
+        uniformSize: null,
+        uniformHeight: null,
+      }),
+      row({
+        id: "3",
+        firstName: "Пётр",
+        lastName: "Сидоров",
+        uniformIssued: false,
+        uniformSize: 50,
+        uniformHeight: 180,
+      }),
+    ];
+
+    it("includes only not issued when hasUniform is no", () => {
+      const result = filterGuardsForRegistryTable(uniformGuards, {
+        query: "",
+        position: "",
+        licenseType: "",
+        employed: "",
+        hasCar: "",
+        hasUniform: "no",
+        objectId: "",
+        status: "",
+      });
+      expect(result.map((g) => g.id)).toEqual(["2", "3"]);
     });
-    expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBe("2");
+
+    it("includes only issued when hasUniform is yes", () => {
+      const result = filterGuardsForRegistryTable(uniformGuards, {
+        query: "",
+        position: "",
+        licenseType: "",
+        employed: "",
+        hasCar: "",
+        hasUniform: "yes",
+        objectId: "",
+        status: "",
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0]?.id).toBe("1");
+    });
+
+    it("excludes guard with size/height but uniformIssued false when hasUniform is yes", () => {
+      const result = filterGuardsForRegistryTable(uniformGuards, {
+        query: "",
+        position: "",
+        licenseType: "",
+        employed: "",
+        hasCar: "",
+        hasUniform: "yes",
+        objectId: "",
+        status: "",
+      });
+      expect(result.some((g) => g.id === "3")).toBe(false);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { formatDisplayDateFromIso } from "../format/display-date";
-import { formatUniformSizeDisplay } from "../format/uniform";
+import { formatUniformConditionLabel, formatUniformSizeDisplay } from "../format/uniform";
 import type { GuardListRow } from "../operations/guards-repository";
 import {
   guardEmploymentLabels,
@@ -31,6 +31,10 @@ export const GUARD_REGISTRY_EXPORT_HEADERS = [
   "Авто",
   "Размер формы",
   "Рост",
+  "Форма выдана",
+  "Дата выдачи формы",
+  "Состояние формы",
+  "Примечание к форме",
   "Объекты",
   "Статус",
   "Дата увольнения",
@@ -72,6 +76,12 @@ export function buildGuardRegistryExportRow(guard: GuardListRow, index: number):
     guard.hasCar ? "да" : "нет",
     formatUniformSizeCell(guard),
     guard.uniformHeight != null ? guard.uniformHeight : "",
+    guard.uniformIssued ? "да" : "нет",
+    guard.uniformIssued ? formatOptionalDate(guard.uniformIssuedOn) : "",
+    guard.uniformIssued && guard.uniformCondition
+      ? formatUniformConditionLabel(guard.uniformCondition)
+      : "",
+    guard.uniformIssued ? (guard.uniformNote ?? "") : "",
     guard.objectNames.join(", "),
     guardStatusLabels[guard.status],
     formatOptionalDate(guard.dismissedOn),
