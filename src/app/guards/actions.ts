@@ -10,6 +10,8 @@ import type { GuardLicenseType, GuardPosition } from "../../lib/scheduling/types
 import { isValidRuPhone, normalizeRuPhoneForStorage } from "../../lib/format/phone-ru";
 import {
   isValidUniformSizeStored,
+  normalizeUniformIssuedFields,
+  parseUniformCondition,
   parseUniformSizeFormValue,
   UNIFORM_HEIGHT_MAX,
   UNIFORM_HEIGHT_MIN,
@@ -38,7 +40,10 @@ import {
   updateGuardStatus,
 } from "../../lib/operations/guards-repository";
 import type { GuardProfilePeriodKind } from "../../lib/guards/profile-periods";
-import { revalidateGuardComplianceAlerts } from "../../lib/scheduling/revalidate-after-mutation";
+import {
+  revalidateAfterGuardStatusChange,
+  revalidateGuardComplianceAlerts,
+} from "../../lib/scheduling/revalidate-after-mutation";
 
 const positionSchema = z.enum(["ShiftLead", "Guard", "Curator"]);
 const employmentSchema = z.enum(["Employed", "Unemployed"]);
@@ -182,6 +187,23 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
     const hasCar = formData.get("hasCar") === "on";
     const traineeUntil = isTrainee ? parseTraineeUntil(input.traineeUntil) : null;
 
+    const uniformIssued = formData.get("uniformIssued") === "on";
+    const uniformIssuedOn = formData.get("uniformIssuedOn");
+    const uniformCondition = formData.get("uniformCondition");
+    const uniformNote = formData.get("uniformNote");
+
+    let issuedFields;
+    try {
+      issuedFields = normalizeUniformIssuedFields({
+        issued: uniformIssued,
+        issuedOn: String(uniformIssuedOn ?? ""),
+        condition: parseUniformCondition(uniformCondition),
+        note: String(uniformNote ?? ""),
+      });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Ошибка данных формы" };
+    }
+
     try {
       await createGuard({
         firstName: input.firstName,
@@ -193,6 +215,10 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
         contactPhone: input.contactPhone,
         uniformSize: input.uniformSize,
         uniformHeight: input.uniformHeight,
+        uniformIssued: issuedFields.uniformIssued,
+        uniformIssuedOn: issuedFields.uniformIssuedOn,
+        uniformCondition: issuedFields.uniformCondition,
+        uniformNote: issuedFields.uniformNote,
         position,
         licenseType: licenseForDb(input.licenseType),
         employmentType: input.employmentType,
@@ -267,25 +293,37 @@ const updateStatusSchema = z
     }
   });
 
-export async function updateGuardStatusAction(formData: FormData) {
-  const session = await requireSession();
-  assertPermission(session.user.role, "guards:manage");
+export type UpdateGuardStatusResult =
+  | { ok: true; status: "Active" | "Sick" | "OnVacation" | "Inactive" | "Dismissed" }
+  | { ok: false; error: string };
 
-  const input = updateStatusSchema.parse({
-    guardId: formData.get("guardId"),
-    status: formData.get("status"),
-    dismissedOn: formData.get("dismissedOn"),
-  });
+export async function updateGuardStatusAction(formData: FormData): Promise<UpdateGuardStatusResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "guards:manage");
 
-  await updateGuardStatus(
-    input.guardId,
-    input.status,
-    input.status === "Dismissed" ? input.dismissedOn : null,
-  );
-  revalidatePath("/guards");
-  revalidatePath(`/guards/${input.guardId}`);
-  revalidateGuardComplianceAlerts();
-  redirect("/guards");
+    const input = updateStatusSchema.parse({
+      guardId: formData.get("guardId"),
+      status: formData.get("status"),
+      dismissedOn: formData.get("dismissedOn"),
+    });
+
+    await updateGuardStatus(
+      input.guardId,
+      input.status,
+      input.status === "Dismissed" ? input.dismissedOn : null,
+    );
+    revalidateAfterGuardStatusChange(input.guardId);
+    return { ok: true, status: input.status };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: formatZodError(error) };
+    }
+    if (error instanceof Error && error.message) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: false, error: "Не удалось обновить статус" };
+  }
 }
 
 const objectAssignmentSchema = z.object({
@@ -486,6 +524,23 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
 
     const hasCar = formData.get("hasCar") === "on";
 
+    const uniformIssued = formData.get("uniformIssued") === "on";
+    const uniformIssuedOn = formData.get("uniformIssuedOn");
+    const uniformCondition = formData.get("uniformCondition");
+    const uniformNote = formData.get("uniformNote");
+
+    let issuedFields;
+    try {
+      issuedFields = normalizeUniformIssuedFields({
+        issued: uniformIssued,
+        issuedOn: String(uniformIssuedOn ?? ""),
+        condition: parseUniformCondition(uniformCondition),
+        note: String(uniformNote ?? ""),
+      });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Ошибка данных формы" };
+    }
+
     await updateGuardProfile({
       guardId: input.guardId,
       firstName: input.firstName,
@@ -495,6 +550,10 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
       contactPhone: input.contactPhone,
       uniformSize: input.uniformSize,
       uniformHeight: input.uniformHeight,
+      uniformIssued: issuedFields.uniformIssued,
+      uniformIssuedOn: issuedFields.uniformIssuedOn,
+      uniformCondition: issuedFields.uniformCondition,
+      uniformNote: issuedFields.uniformNote,
       position: existing.position,
       licenseType,
       employmentType,
