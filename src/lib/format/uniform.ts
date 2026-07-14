@@ -1,3 +1,5 @@
+import { formatDisplayDateFromIso } from "./display-date";
+
 export const UNIFORM_SIZE_MIN = 44;
 export const UNIFORM_SIZE_MAX = 70;
 export const UNIFORM_HEIGHT_MIN = 150;
@@ -85,4 +87,72 @@ export function hasGuardUniform(
 
 export function formatGuardUniformTooltip(size: number, height: number): string {
   return `Размер: ${formatUniformSizeDisplay(size)}, рост: ${height}`;
+}
+
+export const UNIFORM_CONDITIONS = ["new", "used"] as const;
+export type UniformCondition = (typeof UNIFORM_CONDITIONS)[number];
+
+export const uniformConditionLabels: Record<UniformCondition, string> = {
+  new: "новое",
+  used: "б/у",
+};
+
+export function parseUniformCondition(raw: unknown): UniformCondition | null {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (s === "new" || s === "used") return s;
+  return null;
+}
+
+export function formatUniformConditionLabel(condition: UniformCondition): string {
+  return uniformConditionLabels[condition];
+}
+
+export type UniformIssuedNormalized = {
+  uniformIssued: boolean;
+  uniformIssuedOn: string | null;
+  uniformCondition: UniformCondition | null;
+  uniformNote: string | null;
+};
+
+export function normalizeUniformIssuedFields(input: {
+  issued: boolean;
+  issuedOn: string | null | undefined;
+  condition: UniformCondition | null | undefined;
+  note: string | null | undefined;
+}): UniformIssuedNormalized {
+  if (!input.issued) {
+    return {
+      uniformIssued: false,
+      uniformIssuedOn: null,
+      uniformCondition: null,
+      uniformNote: null,
+    };
+  }
+  const issuedOn = typeof input.issuedOn === "string" ? input.issuedOn.trim() : "";
+  if (!issuedOn) {
+    throw new Error("Укажите дату выдачи формы");
+  }
+  if (input.condition !== "new" && input.condition !== "used") {
+    throw new Error("Укажите состояние формы");
+  }
+  const noteRaw = typeof input.note === "string" ? input.note.trim() : "";
+  return {
+    uniformIssued: true,
+    uniformIssuedOn: issuedOn,
+    uniformCondition: input.condition,
+    uniformNote: noteRaw || null,
+  };
+}
+
+export function formatUniformIssuedTooltip(input: {
+  issuedOn: string;
+  condition: UniformCondition;
+  note?: string | null;
+}): string {
+  const parts = [
+    `Дата: ${formatDisplayDateFromIso(input.issuedOn)}`,
+    `Состояние: ${formatUniformConditionLabel(input.condition)}`,
+  ];
+  if (input.note) parts.push(`Примечание: ${input.note}`);
+  return parts.join(", ");
 }
