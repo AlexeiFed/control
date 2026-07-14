@@ -13,6 +13,7 @@ import { normalizeShiftKindFromDb } from "../scheduling/types";
 import { mapGuardLicenseFromDb } from "../scheduling/guard-profile";
 import { normalizeGuardFilters, type GuardFilterInput } from "./guard-filters";
 import { toDateIsoKhabarovsk } from "../format/display-date";
+import type { UniformCondition } from "../format/uniform";
 
 /** Кэш наличия колонки `guards.phone` (старые локальные БД без миграций). */
 let guardsHasPhoneColumnCache: boolean | undefined;
@@ -139,6 +140,35 @@ export async function getGuardsUniformHeightSelect(
   return mode === "aliased" ? "g.uniform_height" : "uniform_height";
 }
 
+/** Фрагмент SELECT для выдачи формы (4 колонки); при отсутствии колонок — безопасные дефолты. */
+export async function getGuardsUniformIssuedSelect(
+  mode: GuardsPhoneSelectMode = "aliased",
+): Promise<string> {
+  const has = await resolveGuardsOptionalColumn("uniform_issued");
+  if (!has) {
+    return [
+      "false AS uniform_issued",
+      "NULL::date AS uniform_issued_on",
+      "NULL::text AS uniform_condition",
+      "NULL::text AS uniform_note",
+    ].join(",\n          ");
+  }
+  if (mode === "aliased") {
+    return [
+      "g.uniform_issued",
+      "g.uniform_issued_on::text AS uniform_issued_on",
+      "g.uniform_condition",
+      "g.uniform_note",
+    ].join(",\n          ");
+  }
+  return [
+    "uniform_issued",
+    "uniform_issued_on::text AS uniform_issued_on",
+    "uniform_condition",
+    "uniform_note",
+  ].join(",\n          ");
+}
+
 export async function getGuardsBirthDateSelect(
   mode: GuardsPhoneSelectMode = "aliased",
 ): Promise<"g.birth_date::text AS birth_date" | "birth_date::text AS birth_date" | "NULL::text AS birth_date"> {
@@ -167,6 +197,10 @@ export type GuardListRow = {
   contactPhone: string;
   uniformSize: number | null;
   uniformHeight: number | null;
+  uniformIssued: boolean;
+  uniformIssuedOn: string | null;
+  uniformCondition: UniformCondition | null;
+  uniformNote: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   licenseGrade: number | null;
@@ -199,6 +233,10 @@ type GuardRow = {
   contact_phone: string;
   uniform_size: number | null;
   uniform_height: number | null;
+  uniform_issued: boolean;
+  uniform_issued_on: string | null;
+  uniform_condition: string | null;
+  uniform_note: string | null;
   position: GuardPosition;
   license_type: string | null;
   license_grade: number | null;
@@ -245,6 +283,10 @@ export type CreateGuardInput = {
   contactPhone: string;
   uniformSize: number | null;
   uniformHeight: number | null;
+  uniformIssued: boolean;
+  uniformIssuedOn: string | null;
+  uniformCondition: UniformCondition | null;
+  uniformNote: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -265,6 +307,10 @@ export type UpdateGuardProfileInput = {
   contactPhone: string;
   uniformSize: number | null;
   uniformHeight: number | null;
+  uniformIssued: boolean;
+  uniformIssuedOn: string | null;
+  uniformCondition: UniformCondition | null;
+  uniformNote: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -306,6 +352,37 @@ async function saveGuardMiddleName(guardId: string, middleName: string | null | 
   const has = await resolveGuardsOptionalColumn("middle_name");
   if (!has) return;
   await query(`UPDATE guards SET middle_name = $2 WHERE id = $1`, [guardId, (middleName ?? "").trim()]);
+}
+
+async function saveGuardUniformIssuedFields(
+  guardId: string,
+  input: {
+    uniformIssued: boolean;
+    uniformIssuedOn: string | null;
+    uniformCondition: UniformCondition | null;
+    uniformNote: string | null;
+  },
+): Promise<void> {
+  const has = await resolveGuardsOptionalColumn("uniform_issued");
+  if (!has) return;
+  await query(
+    `
+      UPDATE guards
+      SET
+        uniform_issued = $2,
+        uniform_issued_on = $3::date,
+        uniform_condition = $4,
+        uniform_note = $5
+      WHERE id = $1
+    `,
+    [
+      guardId,
+      input.uniformIssued,
+      input.uniformIssuedOn,
+      input.uniformCondition,
+      input.uniformNote,
+    ],
+  );
 }
 
 async function saveGuardComplianceFields(
@@ -724,6 +801,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
   const contactPhoneSel = await getGuardsContactPhoneSelect("aliased");
   const uniformSizeSel = await getGuardsUniformSizeSelect("aliased");
   const uniformHeightSel = await getGuardsUniformHeightSelect("aliased");
+  const uniformIssuedSel = await getGuardsUniformIssuedSelect("aliased");
   const birthDateSel = await getGuardsBirthDateSelect("aliased");
   const middleNameSel = await getGuardsMiddleNameSelect("aliased");
   const hasCarSel = await getGuardsHasCarSelect("aliased");
@@ -790,6 +868,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${contactPhoneSel},
           ${uniformSizeSel},
           ${uniformHeightSel},
+          ${uniformIssuedSel},
           g.position,
           g.license_type,
           ${licenseGradeSel},
@@ -840,6 +919,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${contactPhoneSel},
           ${uniformSizeSel},
           ${uniformHeightSel},
+          ${uniformIssuedSel},
           g.position,
           g.license_type,
           ${licenseGradeSel},
@@ -918,6 +998,7 @@ export async function listGuardsForSchedulePicker(): Promise<GuardSchedulePicker
         trainee_until::text AS trainee_until,
         ${hasCarSel}
       FROM guards
+      WHERE status = 'Active'
       ORDER BY last_name, first_name
     `,
   );
@@ -975,6 +1056,23 @@ export async function listGuardDisplayNamesByIds(ids: ReadonlyArray<string>): Pr
   for (const row of rows) {
     out[row.id] = `${row.last_name} ${row.first_name}`.trim();
   }
+  return out;
+}
+
+export async function listGuardStatusesByIds(
+  ids: ReadonlyArray<string>,
+): Promise<Record<string, GuardStatus>> {
+  if (ids.length === 0) return {};
+  const rows = await query<{ id: string; status: GuardStatus }>(
+    `
+      SELECT id, status
+      FROM guards
+      WHERE id = ANY($1::uuid[])
+    `,
+    [[...ids]],
+  );
+  const out: Record<string, GuardStatus> = {};
+  for (const row of rows) out[row.id] = row.status;
   return out;
 }
 
@@ -1203,6 +1301,12 @@ export async function createGuard(input: CreateGuardInput): Promise<string> {
   );
   await saveGuardBirthDate(guardId, input.birthDate);
   await saveGuardMiddleName(guardId, input.middleName);
+  await saveGuardUniformIssuedFields(guardId, {
+    uniformIssued: input.uniformIssued,
+    uniformIssuedOn: input.uniformIssuedOn,
+    uniformCondition: input.uniformCondition,
+    uniformNote: input.uniformNote,
+  });
 
   const dismissedOn = input.dismissedOn ?? null;
   if (input.status === "Dismissed" && dismissedOn) {
@@ -1417,6 +1521,12 @@ export async function updateGuardProfile(input: UpdateGuardProfileInput): Promis
   });
   await saveGuardBirthDate(input.guardId, input.birthDate);
   await saveGuardMiddleName(input.guardId, input.middleName);
+  await saveGuardUniformIssuedFields(input.guardId, {
+    uniformIssued: input.uniformIssued,
+    uniformIssuedOn: input.uniformIssuedOn,
+    uniformCondition: input.uniformCondition,
+    uniformNote: input.uniformNote,
+  });
 }
 
 export async function deleteGuard(guardId: string): Promise<void> {
@@ -1498,6 +1608,21 @@ export async function listGuardObjectAssignments(
   };
 }
 
+/** Карта назначений охранник → объекты (для фильтров в пикере смен). */
+export async function listGuardObjectIdsByGuardId(): Promise<Record<string, string[]>> {
+  const rows = await query<{ guard_id: string; object_id: string }>(
+    `
+      SELECT guard_id, object_id
+      FROM guard_object_assignments
+    `,
+  );
+  const map: Record<string, string[]> = {};
+  for (const row of rows) {
+    (map[row.guard_id] ??= []).push(row.object_id);
+  }
+  return map;
+}
+
 export async function isGuardAssignedToObject(guardId: string, objectId: string): Promise<boolean> {
   const rows = await query<{ exists: boolean }>(
     `
@@ -1524,6 +1649,10 @@ export type GuardDetails = {
   contactPhone: string;
   uniformSize: number | null;
   uniformHeight: number | null;
+  uniformIssued: boolean;
+  uniformIssuedOn: string | null;
+  uniformCondition: UniformCondition | null;
+  uniformNote: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -1545,6 +1674,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
   const contactPhoneSel = await getGuardsContactPhoneSelect("aliased");
   const uniformSizeSel = await getGuardsUniformSizeSelect("aliased");
   const uniformHeightSel = await getGuardsUniformHeightSelect("aliased");
+  const uniformIssuedSel = await getGuardsUniformIssuedSelect("aliased");
   const birthDateSel = await getGuardsBirthDateSelect("aliased");
   const middleNameSel = await getGuardsMiddleNameSelect("aliased");
   const hasCarSel = await getGuardsHasCarSelect("aliased");
@@ -1583,6 +1713,10 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     contact_phone: string;
     uniform_size: number | null;
     uniform_height: number | null;
+    uniform_issued: boolean;
+    uniform_issued_on: string | null;
+    uniform_condition: string | null;
+    uniform_note: string | null;
     position: GuardPosition;
     license_type: string | null;
     employment_type: GuardEmploymentType;
@@ -1611,6 +1745,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
         ${contactPhoneSel},
         ${uniformSizeSel},
         ${uniformHeightSel},
+        ${uniformIssuedSel},
         g.position,
         g.license_type,
         g.employment_type,
@@ -1650,6 +1785,13 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     contactPhone: first.contact_phone ?? "",
     uniformSize: first.uniform_size ?? null,
     uniformHeight: first.uniform_height ?? null,
+    uniformIssued: first.uniform_issued ?? false,
+    uniformIssuedOn: first.uniform_issued_on ?? null,
+    uniformCondition:
+      first.uniform_condition === "new" || first.uniform_condition === "used"
+        ? first.uniform_condition
+        : null,
+    uniformNote: first.uniform_note ?? null,
     position: first.position ?? "Guard",
     licenseType: (first.license_type as GuardLicenseType | null) ?? null,
     employmentType: first.employment_type ?? "Unemployed",
@@ -1713,6 +1855,13 @@ function mapGuardRow(row: GuardRow): GuardListRow {
     contactPhone: row.contact_phone ?? "",
     uniformSize: row.uniform_size ?? null,
     uniformHeight: row.uniform_height ?? null,
+    uniformIssued: row.uniform_issued ?? false,
+    uniformIssuedOn: row.uniform_issued_on ?? null,
+    uniformCondition:
+      row.uniform_condition === "new" || row.uniform_condition === "used"
+        ? row.uniform_condition
+        : null,
+    uniformNote: row.uniform_note ?? null,
     position: row.position ?? "Guard",
     licenseType: (row.license_type as GuardLicenseType | null) ?? null,
     licenseGrade: row.license_grade ?? null,
