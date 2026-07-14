@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { updateGuardStatusAction } from "../../app/guards/actions";
 import type { GuardListRow } from "../../lib/operations/guards-repository";
 import { useDropdownPortalPosition } from "../../lib/guards/use-dropdown-portal-position";
+import { dispatchDirectoryDataRefresh } from "../../lib/guards/directory-data-refresh";
 import { guardStatusLabels, guardStatusOptions } from "../../lib/operations/status-labels";
 import type { GuardStatus } from "../../lib/scheduling/types";
+import { toast } from "../../store/toast-store";
 import { Button } from "../ui/button";
 
 const MENU_WIDTH = 208;
@@ -25,7 +28,10 @@ type GuardStatusCellProps = {
 };
 
 export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCellProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const menuKey = `status-${guard.id}`;
+  const [localStatus, setLocalStatus] = useState(guard.status);
   const [dismissedDate, setDismissedDate] = useState(guard.dismissedOn ?? "");
   const [dismissStep, setDismissStep] = useState(false);
   const isOpen = openMenu === menuKey;
@@ -46,8 +52,40 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
   }, [isOpen]);
 
   useEffect(() => {
+    setLocalStatus(guard.status);
     setDismissedDate(guard.dismissedOn ?? "");
-  }, [guard.dismissedOn]);
+  }, [guard.status, guard.dismissedOn]);
+
+  function applyStatus(status: GuardStatus, dismissedOn?: string) {
+    const formData = new FormData();
+    formData.set("guardId", guard.id);
+    formData.set("status", status);
+    if (dismissedOn) formData.set("dismissedOn", dismissedOn);
+
+    startTransition(async () => {
+      const result = await updateGuardStatusAction(formData);
+      if (!result.ok) {
+        toast({
+          variant: "error",
+          title: "Статус не обновлён",
+          message: result.error,
+          durationMs: 4500,
+        });
+        return;
+      }
+      setLocalStatus(result.status);
+      setOpenMenu(null);
+      setDismissStep(false);
+      dispatchDirectoryDataRefresh();
+      router.refresh();
+      toast({
+        variant: "success",
+        title: "Статус обновлён",
+        message: guardStatusLabels[result.status],
+        durationMs: 2200,
+      });
+    });
+  }
 
   const menuPanel = isOpen ? (
     <div
@@ -65,22 +103,27 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
       onClick={(event) => event.stopPropagation()}
     >
       {dismissStep ? (
-        <form action={updateGuardStatusAction} className="flex flex-col gap-2">
-          <input type="hidden" name="guardId" value={guard.id} />
-          <input type="hidden" name="status" value="Dismissed" />
+        <div className="flex flex-col gap-2">
           <p className={`text-xs font-medium ${statusClass.Dismissed}`}>Уволен</p>
           <label className="flex flex-col gap-1 text-xs text-app-muted">
             <span>Дата увольнения</span>
             <input
               type="date"
-              name="dismissedOn"
               required
               value={dismissedDate}
               onChange={(e) => setDismissedDate(e.target.value)}
-              className="h-8 w-full rounded-button border border-app-border bg-app-bg px-2 text-xs outline-none focus:border-accent-primary"
+              disabled={isPending}
+              className="h-8 w-full rounded-button border border-app-border bg-app-bg px-2 text-xs outline-none focus:border-accent-primary disabled:opacity-60"
             />
           </label>
-          <Button type="submit" variant="primary" size="sm" className="w-full">
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            className="w-full"
+            disabled={isPending || !dismissedDate}
+            onClick={() => applyStatus("Dismissed", dismissedDate)}
+          >
             Сохранить
           </Button>
           <Button
@@ -88,11 +131,12 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
             variant="ghost"
             size="sm"
             className="w-full"
+            disabled={isPending}
             onClick={() => setDismissStep(false)}
           >
             Назад
           </Button>
-        </form>
+        </div>
       ) : (
         <div className="flex flex-col gap-1">
           {guardStatusOptions.map((statusOption) =>
@@ -103,23 +147,23 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
                 variant="menu"
                 size="sm"
                 className={`justify-start ${statusClass.Dismissed}`}
+                disabled={isPending}
                 onClick={() => setDismissStep(true)}
               >
                 {statusOption.label}
               </Button>
             ) : (
-              <form key={statusOption.value} action={updateGuardStatusAction}>
-                <input type="hidden" name="guardId" value={guard.id} />
-                <input type="hidden" name="status" value={statusOption.value} />
-                <Button
-                  type="submit"
-                  variant="menu"
-                  size="sm"
-                  className={`w-full justify-start ${statusClass[statusOption.value as GuardStatus]}`}
-                >
-                  {statusOption.label}
-                </Button>
-              </form>
+              <Button
+                key={statusOption.value}
+                type="button"
+                variant="menu"
+                size="sm"
+                className={`w-full justify-start ${statusClass[statusOption.value as GuardStatus]}`}
+                disabled={isPending || localStatus === statusOption.value}
+                onClick={() => applyStatus(statusOption.value as GuardStatus)}
+              >
+                {statusOption.label}
+              </Button>
             ),
           )}
         </div>
@@ -135,9 +179,10 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
           variant="outline"
           size="sm"
           className="w-full justify-center bg-app-bg"
+          disabled={isPending}
           onClick={() => setOpenMenu((current) => (current === menuKey ? null : menuKey))}
         >
-          <span className={statusClass[guard.status]}>{guardStatusLabels[guard.status]}</span>
+          <span className={statusClass[localStatus]}>{guardStatusLabels[localStatus]}</span>
         </Button>
       </span>
       {typeof document !== "undefined" && menuPanel ? createPortal(menuPanel, document.body) : null}
