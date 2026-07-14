@@ -18,6 +18,7 @@ import {
 } from "../../lib/format/uniform";
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import { GuardProfileObjectsEditor } from "./guard-profile-objects-editor";
+import { GuardUniformIssuedFields } from "./guard-uniform-issued-fields";
 import type { GuardEmploymentType, GuardLicenseType } from "../../lib/scheduling/types";
 import {
   guardEmploymentLabels,
@@ -164,6 +165,13 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
             ))}
           </select>
         </label>
+        <GuardUniformIssuedFields
+          defaultIssued={guard.uniformIssued}
+          defaultIssuedOn={guard.uniformIssuedOn}
+          defaultCondition={guard.uniformCondition}
+          defaultNote={guard.uniformNote}
+          fieldClassName={fieldClass}
+        />
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Трудоустройство</span>

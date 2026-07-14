@@ -28,6 +28,7 @@ import { guardPositionLabels, guardStatusLabels, guardStatusOptions } from "../.
 import type { GuardEmploymentType, GuardLicenseType, GuardPosition, GuardStatus } from "../../lib/scheduling/types";
 import { GuardFormComplianceFields } from "./guard-form-compliance-fields";
 import { GuardObjectsMultiPicker } from "./guard-objects-multi-picker";
+import { GuardUniformIssuedFields } from "./guard-uniform-issued-fields";
 import { GuardRegistryTableFiltersPanel } from "./guard-registry-table-filters";
 import { GuardRegistryTable } from "./guard-registry-table";
 import { GuardRegistryExportButton } from "./guard-registry-export-button";
@@ -373,6 +374,10 @@ export function GuardFilters({ guards, objects, filters, userId }: GuardFiltersP
             ))}
           </select>
         </label>
+        <GuardUniformIssuedFields
+          compact
+          fieldClassName="h-8 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary"
+        />
         <Button
           type="submit"
           size="lg"

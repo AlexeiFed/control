@@ -38,10 +38,7 @@ import {
   guardLicenseLabels,
   guardPositionLabels,
 } from "../../lib/operations/status-labels";
-import {
-  formatGuardUniformTooltip,
-  hasGuardUniform,
-} from "../../lib/format/uniform";
+import { formatUniformIssuedTooltip } from "../../lib/format/uniform";
 import { GuardStatusCell } from "./guard-status-cell";
 import { GuardTableObjectsCell } from "./guard-table-objects-cell";
 import { StickyHorizontalScroll } from "../ui/sticky-horizontal-scroll";
@@ -318,10 +315,18 @@ export function GuardRegistryTable({
       case "uniform":
         return (
           <td key={columnId} className={guardTableTdClass}>
-            {hasGuardUniform(guard.uniformSize, guard.uniformHeight) ? (
+            {guard.uniformIssued ? (
               <span
                 className="cursor-default text-status-active"
-                title={formatGuardUniformTooltip(guard.uniformSize!, guard.uniformHeight!)}
+                title={
+                  guard.uniformIssuedOn && guard.uniformCondition
+                    ? formatUniformIssuedTooltip({
+                        issuedOn: guard.uniformIssuedOn,
+                        condition: guard.uniformCondition,
+                        note: guard.uniformNote,
+                      })
+                    : undefined
+                }
               >
                 да
               </span>

@@ -23,7 +23,11 @@ import {
   guardStatusLabels,
 } from "../../../lib/operations/status-labels";
 import { designTokens } from "../../../lib/design-tokens";
-import { formatGuardUniformTooltip, hasGuardUniform } from "../../../lib/format/uniform";
+import {
+  formatUniformConditionLabel,
+  formatUniformSizeDisplay,
+  hasGuardUniform,
+} from "../../../lib/format/uniform";
 import { calculateShiftHours } from "../../../lib/scheduling/hour-calculator";
 import {
   formatDisplayDateFromIso,
@@ -215,18 +219,29 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                 )}
               </span>
 
-              <span className="text-app-muted">Форма одежды:</span>
+              <span className="text-app-muted">Размер / рост:</span>
               <span className="font-semibold text-app-text">
-                {hasGuardUniform(guard.uniformSize, guard.uniformHeight) ? (
-                  <span
-                    className="cursor-help underline decoration-dotted text-accent-primary"
-                    title={formatGuardUniformTooltip(guard.uniformSize!, guard.uniformHeight!)}
-                  >
-                    Да ({guard.uniformSize}/{guard.uniformHeight})
-                  </span>
-                ) : (
-                  "Нет"
-                )}
+                {hasGuardUniform(guard.uniformSize, guard.uniformHeight)
+                  ? `${formatUniformSizeDisplay(guard.uniformSize!)} / ${guard.uniformHeight}`
+                  : "—"}
+              </span>
+
+              <span className="text-app-muted">Форма выдана:</span>
+              <span className="font-semibold text-app-text">
+                {guard.uniformIssued
+                  ? [
+                      "Да",
+                      guard.uniformIssuedOn
+                        ? formatDisplayDateFromIso(guard.uniformIssuedOn)
+                        : null,
+                      guard.uniformCondition
+                        ? formatUniformConditionLabel(guard.uniformCondition)
+                        : null,
+                      guard.uniformNote || null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : "Нет"}
               </span>
             </div>
           </article>
