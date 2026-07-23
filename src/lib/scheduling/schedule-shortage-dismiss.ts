@@ -32,7 +32,6 @@ export function buildShortageDayFingerprint(input: {
   pendingIncident: boolean;
 }): string {
   const shiftLines = [...input.shifts]
-    .slice()
     .sort((a, b) => a.id.localeCompare(b.id))
     .map(
       (s) =>
