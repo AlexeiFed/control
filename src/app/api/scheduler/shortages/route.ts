@@ -1,5 +1,5 @@
 /**
- * Назначение: Эндпоинт для получения списка недоборов в графике смен на текущие 2 недели.
+ * Назначение: Эндпоинт для получения списка недоборов в графике смен на текущую неделю.
  * Описание: Возвращает список объектов и дней с недостающими часами/людьми для отображения в глобальном колокольчике.
  */
 
@@ -8,8 +8,11 @@ import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
+import { listShortageDismissals } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../../../../lib/scheduling/schedule-shortage";
+import { buildValidShortageDismissKeySet } from "../../../../lib/scheduling/build-shortage-dismiss-state";
+import { filterShortagesByDismissals } from "../../../../lib/scheduling/schedule-shortage-dismiss";
 import { getMondayWeekStartKhabarovsk, toDateIsoKhabarovsk, formatWeekdayDayLabel } from "../../../../lib/format/display-date";
 
 export async function GET() {
@@ -26,8 +29,8 @@ export async function GET() {
 
   try {
     const weekStart = getMondayWeekStartKhabarovsk();
-
-    const visibleDayCount = 14;
+    // Только текущая календарная неделя пн–вс.
+    const visibleDayCount = 7;
     const weekDayIsos = Array.from({ length: visibleDayCount }, (_, index) =>
       civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60 * 1000)),
     );
@@ -50,12 +53,26 @@ export async function GET() {
 
     const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
 
-    const shortages = computeScheduleShortages(
+    const rawShortages = computeScheduleShortages(
       snapshot.objects,
       snapshot.shifts,
       expectedShiftsByObjectDay,
       weekDays
     );
+
+    const storedDismissals = await listShortageDismissals(
+      objectIds,
+      weekDayIsos[0]!,
+      weekDayIsos[weekDayIsos.length - 1]!,
+    );
+    const validDismissKeys = buildValidShortageDismissKeySet({
+      objects: snapshot.objects,
+      shifts: snapshot.shifts,
+      expectedByObjectDay: expectedShiftsByObjectDay,
+      weekDayIsos,
+      storedDismissals,
+    });
+    const shortages = filterShortagesByDismissals(rawShortages, validDismissKeys);
 
     const weekStartIso = toDateIsoKhabarovsk(weekStart);
 
