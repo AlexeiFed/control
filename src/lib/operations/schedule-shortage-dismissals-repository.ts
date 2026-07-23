@@ -1,6 +1,10 @@
 import { isUndefinedColumnOrTableError } from "../db/column-compat";
 import { query } from "../db/pool";
-import { shortageDismissKey } from "../scheduling/schedule-shortage-dismiss";
+import type { ExpectedShifts } from "../scheduling/object-shift-templates";
+import type { ScheduleObjectRef, ScheduleObjectShortage } from "../scheduling/schedule-shortage";
+import { buildValidShortageDismissKeySet } from "../scheduling/build-shortage-dismiss-state";
+import { filterShortagesByDismissals, shortageDismissKey } from "../scheduling/schedule-shortage-dismiss";
+import type { Shift } from "../scheduling/types";
 
 export async function listShortageDismissals(
   objectIds: string[],
@@ -35,6 +39,34 @@ export async function listShortageDismissals(
   }
 
   return map;
+}
+
+/**
+ * Применяет сохранённые dismiss'ы недоборов к сырым результатам `computeScheduleShortages`.
+ * Общая логика для GET /api/scheduler/shortages и глобальных алертов, чтобы оба пути
+ * скрывали одни и те же уже подтверждённые (и всё ещё валидные) недоборы дня.
+ */
+export async function filterShortagesByStoredDismissals(input: {
+  objectIds: string[];
+  weekDayIsos: ReadonlyArray<string>;
+  objects: ReadonlyArray<ScheduleObjectRef>;
+  shifts: ReadonlyArray<Shift>;
+  expectedByObjectDay: Record<string, Record<string, ExpectedShifts>>;
+  rawShortages: ReadonlyArray<ScheduleObjectShortage>;
+}): Promise<ScheduleObjectShortage[]> {
+  const storedDismissals = await listShortageDismissals(
+    input.objectIds,
+    input.weekDayIsos[0]!,
+    input.weekDayIsos[input.weekDayIsos.length - 1]!,
+  );
+  const validDismissKeys = buildValidShortageDismissKeySet({
+    objects: input.objects,
+    shifts: input.shifts,
+    expectedByObjectDay: input.expectedByObjectDay,
+    weekDayIsos: input.weekDayIsos,
+    storedDismissals,
+  });
+  return filterShortagesByDismissals(input.rawShortages, validDismissKeys);
 }
 
 export async function upsertShortageDismissal(input: {

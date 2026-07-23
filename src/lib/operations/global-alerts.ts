@@ -8,6 +8,7 @@ import {
 } from "./guards-repository";
 import { getSchedulerSnapshot, listPendingIncidentReplacements } from "./scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
+import { filterShortagesByStoredDismissals } from "./schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../scheduling/schedule-shortage";
 import type { IncidentCategory } from "../scheduling/types";
@@ -140,7 +141,7 @@ async function loadScheduleShortages(): Promise<{
   weekStartIso: string;
 }> {
   const weekStart = getMondayWeekStartKhabarovsk();
-  const visibleDayCount = 14;
+  const visibleDayCount = 7;
   const weekDayIsos = Array.from({ length: visibleDayCount }, (_, index) =>
     civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60_000)),
   );
@@ -157,19 +158,27 @@ async function loadScheduleShortages(): Promise<{
   const templates =
     objectIds.length > 0 ? await listShiftTemplatesForObjectIds(objectIds) : [];
   const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
-  const shortages = computeScheduleShortages(
+  const rawShortages = computeScheduleShortages(
     snapshot.objects,
     snapshot.shifts,
     expectedShiftsByObjectDay,
     weekDays,
   );
+  const shortages = await filterShortagesByStoredDismissals({
+    objectIds,
+    weekDayIsos,
+    objects: snapshot.objects,
+    shifts: snapshot.shifts,
+    expectedByObjectDay: expectedShiftsByObjectDay,
+    rawShortages,
+  });
 
   return { shortages, weekStartIso: toDateIsoKhabarovsk(weekStart) };
 }
 
 const getGlobalAlertsCached = unstable_cache(
   (role: string) => loadGlobalAlertsForRole(role as Role),
-  ["global-alerts:v2"],
+  ["global-alerts:v3"],
   {
     tags: ["global-alerts", "scheduler", "shifts", "guards", "directory"],
     revalidate: 180,

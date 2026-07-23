@@ -8,11 +8,9 @@ import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
-import { listShortageDismissals } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
+import { filterShortagesByStoredDismissals } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../../../../lib/scheduling/schedule-shortage";
-import { buildValidShortageDismissKeySet } from "../../../../lib/scheduling/build-shortage-dismiss-state";
-import { filterShortagesByDismissals } from "../../../../lib/scheduling/schedule-shortage-dismiss";
 import { getMondayWeekStartKhabarovsk, toDateIsoKhabarovsk, formatWeekdayDayLabel } from "../../../../lib/format/display-date";
 
 export async function GET() {
@@ -60,19 +58,14 @@ export async function GET() {
       weekDays
     );
 
-    const storedDismissals = await listShortageDismissals(
+    const shortages = await filterShortagesByStoredDismissals({
       objectIds,
-      weekDayIsos[0]!,
-      weekDayIsos[weekDayIsos.length - 1]!,
-    );
-    const validDismissKeys = buildValidShortageDismissKeySet({
+      weekDayIsos,
       objects: snapshot.objects,
       shifts: snapshot.shifts,
       expectedByObjectDay: expectedShiftsByObjectDay,
-      weekDayIsos,
-      storedDismissals,
+      rawShortages,
     });
-    const shortages = filterShortagesByDismissals(rawShortages, validDismissKeys);
 
     const weekStartIso = toDateIsoKhabarovsk(weekStart);
 
