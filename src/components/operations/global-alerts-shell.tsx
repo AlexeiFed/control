@@ -1,9 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { GlobalAlertsPayload, GlobalAlertIncidentItem } from "../../lib/operations/global-alerts";
 import { GUARD_COMPLIANCE_REMINDERS_REFRESH_EVENT } from "../../lib/guards/compliance-reminders-refresh";
+import {
+  DIRECTORY_DATA_REFRESH_EVENT,
+  DIRECTORY_DATA_REFRESH_STORAGE_KEY,
+} from "../../lib/guards/directory-data-refresh";
 import { GlobalGuardComplianceBanners } from "./global-guard-compliance-banners";
 import {
   GlobalIncidentReplacementsBanner,
@@ -11,7 +15,7 @@ import {
   type IncidentReplacementsRefreshDetail,
 } from "./global-incident-replacements-banner";
 import { GlobalGuardBirthdayBell } from "./global-guard-birthday-bell";
-import { GlobalScheduleShortageBell } from "./global-schedule-shortage-bell";
+import { GlobalScheduleShortageBell, SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 
 const EMPTY_ALERTS: GlobalAlertsPayload = {
   incidentItems: null,
@@ -20,6 +24,7 @@ const EMPTY_ALERTS: GlobalAlertsPayload = {
   medicalItems: null,
   birthdayItems: null,
   shortages: null,
+  canDismissShortages: false,
   weekStartIso: null,
 };
 
@@ -37,6 +42,7 @@ async function fetchPendingIncidentItems(): Promise<GlobalAlertIncidentItem[] | 
 
 export function GlobalAlertsShell() {
   const pathname = usePathname();
+  const router = useRouter();
   const [alerts, setAlerts] = useState<GlobalAlertsPayload | null>(null);
   const [incidentDismissed, setIncidentDismissed] = useState(false);
 
@@ -70,6 +76,7 @@ export function GlobalAlertsShell() {
         medicalItems: body.medicalItems ?? null,
         birthdayItems: body.birthdayItems ?? null,
         shortages: body.shortages ?? null,
+        canDismissShortages: body.canDismissShortages === true,
         weekStartIso: body.weekStartIso ?? null,
       });
     } catch {
@@ -87,6 +94,19 @@ export function GlobalAlertsShell() {
     const id = window.setInterval(() => void load(), 180_000);
     return () => window.clearInterval(id);
   }, [load, pathname]);
+
+  /** После смены статуса — при переходе на другую страницу тоже подтянуть свежие RSC. */
+  useEffect(() => {
+    if (pathname === "/login") return;
+    try {
+      const at = Number(localStorage.getItem(DIRECTORY_DATA_REFRESH_STORAGE_KEY) ?? "0");
+      if (Number.isFinite(at) && at > 0 && Date.now() - at < 120_000) {
+        router.refresh();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [pathname, router]);
 
   useEffect(() => {
     if (pathname === "/login") return;
@@ -107,15 +127,32 @@ export function GlobalAlertsShell() {
     function onComplianceRefresh() {
       void load();
     }
+    function onShortageRefresh() {
+      void load();
+    }
+    function onDirectoryRefresh() {
+      router.refresh();
+      void load();
+    }
+    function onDirectoryStorage(event: StorageEvent) {
+      if (event.key !== DIRECTORY_DATA_REFRESH_STORAGE_KEY) return;
+      onDirectoryRefresh();
+    }
     window.addEventListener("focus", onFocus);
     window.addEventListener(INCIDENT_REPLACEMENTS_REFRESH_EVENT, onIncidentRefresh);
     window.addEventListener(GUARD_COMPLIANCE_REMINDERS_REFRESH_EVENT, onComplianceRefresh);
+    window.addEventListener(DIRECTORY_DATA_REFRESH_EVENT, onDirectoryRefresh);
+    window.addEventListener(SCHEDULE_SHORTAGE_REFRESH_EVENT, onShortageRefresh);
+    window.addEventListener("storage", onDirectoryStorage);
     return () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener(INCIDENT_REPLACEMENTS_REFRESH_EVENT, onIncidentRefresh);
       window.removeEventListener(GUARD_COMPLIANCE_REMINDERS_REFRESH_EVENT, onComplianceRefresh);
+      window.removeEventListener(DIRECTORY_DATA_REFRESH_EVENT, onDirectoryRefresh);
+      window.removeEventListener(SCHEDULE_SHORTAGE_REFRESH_EVENT, onShortageRefresh);
+      window.removeEventListener("storage", onDirectoryStorage);
     };
-  }, [load, loadIncidentItems, pathname]);
+  }, [load, loadIncidentItems, pathname, router]);
 
   const data = alerts ?? EMPTY_ALERTS;
   const incidentFingerprint =
@@ -157,6 +194,7 @@ export function GlobalAlertsShell() {
           <GlobalScheduleShortageBell
             shortages={data.shortages}
             weekStartIso={data.weekStartIso ?? ""}
+            canDismiss={data.canDismissShortages}
           />
         </div>
       ) : null}

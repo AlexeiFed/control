@@ -68,6 +68,7 @@ export type GlobalAlertsPayload = {
   medicalItems: GlobalAlertComplianceItem[] | null;
   birthdayItems: GlobalAlertBirthdayItem[] | null;
   shortages: GlobalAlertObjectShortage[] | null;
+  canDismissShortages: boolean;
   weekStartIso: string | null;
 };
 
@@ -132,6 +133,7 @@ async function loadGlobalAlertsForRole(role: Role): Promise<GlobalAlertsPayload>
         }))
       : null,
     shortages: shortagesPart?.shortages ?? null,
+    canDismissShortages: hasPermission(role, "schedule:write"),
     weekStartIso: shortagesPart?.weekStartIso ?? null,
   };
 }
