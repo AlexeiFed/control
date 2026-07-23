@@ -70,17 +70,24 @@ export function GlobalScheduleShortageBell({
   const [hovered, setHovered] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(() => new Set());
-  const [dismissingKey, setDismissingKey] = useState<string | null>(null);
+  const [dismissingKeys, setDismissingKeys] = useState<Set<string>>(() => new Set());
   const pathname = usePathname();
 
   const shortages = useMemo(() => {
     if (!rawShortages) return rawShortages;
     if (dismissedKeys.size === 0) return rawShortages;
     return rawShortages
-      .map((obj) => ({
-        ...obj,
-        days: obj.days.filter((day) => !dismissedKeys.has(dismissKey(obj.objectId, day.dateIso))),
-      }))
+      .map((obj) => {
+        const activeDays = obj.days.filter((day) => !dismissedKeys.has(dismissKey(obj.objectId, day.dateIso)));
+        return {
+          ...obj,
+          days: activeDays,
+          totalHoursShort: Math.round(activeDays.reduce((sum, d) => sum + d.hoursShort, 0) * 10) / 10,
+          totalReinforcementShort: Math.round(activeDays.reduce((sum, d) => sum + d.reinforcementShort, 0) * 10) / 10,
+          totalRapidResponseShort: Math.round(activeDays.reduce((sum, d) => sum + d.rapidResponseShort, 0) * 10) / 10,
+          totalShiftLeadShort: Math.round(activeDays.reduce((sum, d) => sum + d.shiftLeadShort, 0) * 10) / 10,
+        };
+      })
       .filter((obj) => obj.days.length > 0);
   }, [rawShortages, dismissedKeys]);
 
@@ -109,7 +116,7 @@ export function GlobalScheduleShortageBell({
   const handleDismiss = useCallback(
     async (objectId: string, dateIso: string) => {
       const key = dismissKey(objectId, dateIso);
-      setDismissingKey(key);
+      setDismissingKeys((prev) => new Set(prev).add(key));
       setDismissedKeys((prev) => new Set(prev).add(key));
       try {
         await dismissDayShortage(objectId, dateIso);
@@ -128,7 +135,11 @@ export function GlobalScheduleShortageBell({
           durationMs: 6500,
         });
       } finally {
-        setDismissingKey((prev) => (prev === key ? null : prev));
+        setDismissingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
       }
     },
     [controlled, load],
@@ -242,7 +253,7 @@ export function GlobalScheduleShortageBell({
                 <ul className="mt-1.5 list-none space-y-1 border-l-2 pl-2.5" style={{ borderColor: "rgba(185, 28, 28, 0.2)" }}>
                   {obj.days.map((day) => {
                     const key = dismissKey(obj.objectId, day.dateIso);
-                    const isDismissing = dismissingKey === key;
+                    const isDismissing = dismissingKeys.has(key);
                     return (
                       <li
                         key={day.dateIso}
