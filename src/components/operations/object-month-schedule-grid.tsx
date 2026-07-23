@@ -12,11 +12,12 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  NotebookPen,
 } from "lucide-react";
 import { deleteShiftAction } from "../../app/scheduler/actions";
 import { upsertObjectMonthlySettingAction } from "../../app/objects/actions";
 import { Button } from "../ui/button";
-import type { Shift, ShiftKind } from "../../lib/scheduling/types";
+import type { Shift, ShiftKind, GuardStatus } from "../../lib/scheduling/types";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import { toast } from "../../store/toast-store";
 import { designTokens } from "../../lib/design-tokens";
@@ -27,6 +28,7 @@ import {
   getDayKhabarovsk,
   getHoursKhabarovsk,
   getKhabarovskComponents,
+  isIsoInCurrentKhabarovskWeek,
   toDateIsoKhabarovsk,
 } from "../../lib/format/display-date";
 import {
@@ -34,10 +36,24 @@ import {
   resolveShiftKindForTemplate,
   type ExpectedShifts,
 } from "../../lib/scheduling/object-shift-templates";
-import { computeDayPlanMetrics, formatTemplateCountWithHours } from "../../lib/scheduling/schedule-shortage";
+import {
+  computeDayPlanMetrics,
+  dayPlanHasHoursShortage,
+  formatTemplateCountWithHours,
+} from "../../lib/scheduling/schedule-shortage";
+import {
+  isFullNoShow,
+  isPartialAttendance,
+  partialAttendanceWindow,
+  shiftCoverageMinutes,
+} from "../../lib/scheduling/shift-attendance";
+import { incidentCategoryLabels } from "../../lib/operations/status-labels";
 import { shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
 import { scheduleShiftColumnDateIso } from "../../lib/scheduling/operational-day-timeline";
 import { confirmDeleteShift } from "../../lib/scheduling/shift-delete-confirm";
+import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard-shift-alert";
+import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
+import { ScheduleHoursShortageIcon } from "./schedule-hours-shortage-icon";
 import {
   buildScheduleDayColumnStyle,
   mergeScheduleCellStyles,
@@ -86,6 +102,7 @@ export type ScheduleGridGuardRow = {
   guardId: string;
   displayName: string;
   isAssigned: boolean;
+  status?: GuardStatus;
 };
 
 export type QuickAssignDraft = {
@@ -111,6 +128,15 @@ export type IncidentDraft = {
   shiftKind: ShiftKind;
 };
 
+export type ShiftLogDraft = {
+  shiftId: string;
+  guardName: string;
+  dateIso: string;
+  startTime: string;
+  endTime: string;
+  shiftKind: ShiftKind;
+};
+
 export type ObjectMonthScheduleGridProps = {
   objectId: string;
   objectName: string;
@@ -129,6 +155,8 @@ export type ObjectMonthScheduleGridProps = {
   monthShifts: Shift[];
   expectedShiftsByDateIso: Record<string, ExpectedShifts>;
   operationalDayStartTime: string;
+  /** Валидные на текущую неделю dismiss-даты недобора для этого объекта (`YYYY-MM-DD`). */
+  dismissedShortageDateIsos?: ReadonlyArray<string>;
   canWrite: boolean;
   canManageOperationalDay: boolean;
   bulkCreateShiftsAction?: (
@@ -142,6 +170,7 @@ export type ObjectMonthScheduleGridProps = {
   onCloseGuardPreview: () => void;
   onQuickAssign: (draft: QuickAssignDraft) => void;
   onIncidentDraft: (draft: IncidentDraft) => void;
+  onShiftLogDraft: (draft: ShiftLogDraft) => void;
 };
 
 export function ObjectMonthScheduleGrid({
@@ -162,6 +191,7 @@ export function ObjectMonthScheduleGrid({
   monthShifts,
   expectedShiftsByDateIso,
   operationalDayStartTime,
+  dismissedShortageDateIsos = [],
   canWrite,
   canManageOperationalDay,
   bulkCreateShiftsAction,
@@ -170,6 +200,7 @@ export function ObjectMonthScheduleGrid({
   onCloseGuardPreview,
   onQuickAssign,
   onIncidentDraft,
+  onShiftLogDraft,
 }: ObjectMonthScheduleGridProps) {
   const router = useRouter();
   const [operationalDayDraft, setOperationalDayDraft] = useState(operationalDayStartTime);
@@ -393,6 +424,73 @@ export function ObjectMonthScheduleGrid({
       .filter((s) => shiftMatchesPost(s.postId, postId, firstPostId));
   }
 
+  function dateIsoForDay(d: number): string {
+    return (
+      dayColumnMetaByDay.get(d)?.dateIso ??
+      `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    );
+  }
+
+  function dayHasCurrentWeekHoursShortage(d: number): boolean {
+    const dateIso = dateIsoForDay(d);
+    if (!isIsoInCurrentKhabarovskWeek(dateIso)) return false;
+    if (posts.length > 0) {
+      return posts.some((post) => {
+        const metrics = computeDayPlanMetrics(
+          shiftsOnDayForPost(d, post.id),
+          (monthPlanByPost?.[post.id] ?? monthPlan)[d],
+        );
+        return metrics != null && dayPlanHasHoursShortage(metrics);
+      });
+    }
+    const metrics = computeDayPlanMetrics(shiftsOnDayForPost(d, null), monthPlan[d]);
+    return metrics != null && dayPlanHasHoursShortage(metrics);
+  }
+
+  const dismissedShortageDateIsoSet = useMemo(
+    () => new Set(dismissedShortageDateIsos),
+    [dismissedShortageDateIsos],
+  );
+  const [optimisticDismissedIsos, setOptimisticDismissedIsos] = useState<Set<string>>(() => new Set());
+  const [dismissingShortageIsos, setDismissingShortageIsos] = useState<Set<string>>(() => new Set());
+
+  const dismissedShortageSet = useMemo(() => {
+    const merged = new Set(dismissedShortageDateIsoSet);
+    for (const iso of optimisticDismissedIsos) merged.add(iso);
+    return merged;
+  }, [dismissedShortageDateIsoSet, optimisticDismissedIsos]);
+
+  function dayShortageVisible(d: number): boolean {
+    return dayHasCurrentWeekHoursShortage(d) && !dismissedShortageSet.has(dateIsoForDay(d));
+  }
+
+  async function handleDismissShortageDay(dateIso: string) {
+    setOptimisticDismissedIsos((prev) => new Set(prev).add(dateIso));
+    setDismissingShortageIsos((prev) => new Set(prev).add(dateIso));
+    try {
+      await dismissDayShortage(objectId, dateIso);
+      router.refresh();
+    } catch (err) {
+      setOptimisticDismissedIsos((prev) => {
+        const next = new Set(prev);
+        next.delete(dateIso);
+        return next;
+      });
+      toast({
+        title: "Не удалось скрыть недобор",
+        message: err instanceof Error ? err.message : "Не удалось скрыть недобор",
+        variant: "error",
+        durationMs: 6500,
+      });
+    } finally {
+      setDismissingShortageIsos((prev) => {
+        const next = new Set(prev);
+        next.delete(dateIso);
+        return next;
+      });
+    }
+  }
+
   function renderPlanRow(plan: Record<number, ExpectedShifts>, postId: string | null) {
     return (
       <tr className="bg-app-elevated/40 border-b-2 border-app-border">
@@ -403,9 +501,7 @@ export function ObjectMonthScheduleGrid({
           const dayPlan = plan[d];
           const dayShifts = shiftsOnDayForPost(d, postId);
           const metrics = computeDayPlanMetrics(dayShifts, dayPlan);
-          const totalMinutes = dayShifts
-            .filter((s) => !s.isNoShow)
-            .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60000, 0);
+          const totalMinutes = dayShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
           const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
           const colMeta = dayColumnMetaByDay.get(d);
 
@@ -566,6 +662,15 @@ export function ObjectMonthScheduleGrid({
           const isCellHovered = gridHover?.guardId === sg.guardId && gridHover?.day === d;
           const isDragTarget =
             dragTargetIso === dateIso && dragSource?.guardId === sg.guardId;
+          // 4 иконки (~88px) шире ячейки (~45px): у края месяца absolute уезжает за overflow и обрезает корзину.
+          const lastDayNum = days[days.length - 1] ?? d;
+          const firstDayNum = days[0] ?? d;
+          const actionsDockClass =
+            d >= lastDayNum - 1
+              ? "right-0"
+              : d <= firstDayNum + 1
+                ? "left-0"
+                : "left-1/2 -translate-x-1/2";
           return (
             <td
               key={d}
@@ -613,9 +718,12 @@ export function ObjectMonthScheduleGrid({
                     return a.id.localeCompare(b.id);
                   })
                   .map((s) => {
+                    const partial = isPartialAttendance(s);
+                    const fullNoShow = isFullNoShow(s);
+                    const workedWindow = partialAttendanceWindow(s);
                     const cardStyle: CSSProperties = {};
                     let surface = "border";
-                    if (s.isNoShow) {
+                    if (fullNoShow) {
                       cardStyle.textDecoration = "line-through";
                       if (s.shiftKind === "Reinforcement") {
                         surface = "border-2";
@@ -644,11 +752,28 @@ export function ObjectMonthScheduleGrid({
                       surface = "border-2";
                       cardStyle.backgroundColor = designTokens.color.shiftKind.ShiftLead.bg;
                       cardStyle.borderColor = designTokens.color.shiftKind.ShiftLead.border;
+                    } else if (partial) {
+                      surface = "border border-app-border bg-app-elevated/80";
+                      cardStyle.backgroundColor = designTokens.color.shift.regularCellBg;
+                      cardStyle.borderColor = designTokens.color.border;
                     } else {
                       surface = "border";
                       cardStyle.backgroundColor = designTokens.color.shift.regularCellBg;
                       cardStyle.borderColor = designTokens.color.border;
                     }
+                    const displayStart = workedWindow?.start ?? s.startsAt;
+                    const displayEnd = workedWindow?.end ?? s.endsAt;
+                    const missedEnd = workedWindow && workedWindow.end.getTime() < s.endsAt.getTime()
+                      ? s.endsAt
+                      : null;
+                    const incidentLabel = fullNoShow
+                      ? "невыход"
+                      : partial && s.incidentCategory
+                        ? incidentCategoryLabels[s.incidentCategory]
+                        : partial
+                          ? "частично"
+                          : null;
+                    const showSickAlert = shouldAlertSickGuardFutureShift(sg.status, dateIso);
                     return (
                       <div
                         key={s.id}
@@ -684,9 +809,29 @@ export function ObjectMonthScheduleGrid({
                         ) : null}
                         {canWrite && deleteFocus ? (
                           <div
-                            className="pointer-events-auto absolute inset-x-0 top-0 z-30 flex items-start justify-center gap-0.5 px-0.5"
+                            className={`pointer-events-auto absolute top-0 z-30 flex w-max items-start gap-0.5 px-0.5 ${actionsDockClass}`}
                             onClick={(e) => e.stopPropagation()}
                           >
+                            <button
+                              type="button"
+                              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-app-border bg-app-surface shadow-sm outline-none transition hover:bg-accent-primary/15 focus-visible:ring-2 focus-visible:ring-accent-primary/50"
+                              style={{ color: designTokens.color.accent.primary }}
+                              title="Запись в журнал смены"
+                              aria-label="Запись в журнал смены"
+                              onClick={() => {
+                                onShiftLogDraft({
+                                  shiftId: s.id,
+                                  guardName: sg.displayName,
+                                  dateIso,
+                                  startTime: toTimeKh(s.startsAt),
+                                  endTime: toTimeKh(s.endsAt),
+                                  shiftKind: s.shiftKind,
+                                });
+                                setShiftDeleteFocus(null);
+                              }}
+                            >
+                              <NotebookPen className="size-3" strokeWidth={2.25} aria-hidden />
+                            </button>
                             {!s.isNoShow && !s.incidentRecordedAt ? (
                               <button
                                 type="button"
@@ -794,8 +939,14 @@ export function ObjectMonthScheduleGrid({
                             )}
                           </div>
                         ) : null}
-                        <span className="text-[10px] font-semibold tabular-nums leading-none">
-                          {formatDurationRuHours(s.startsAt, s.endsAt)}
+                        <span className="inline-flex items-center justify-center gap-0.5 text-[10px] font-semibold tabular-nums leading-none">
+                          {formatDurationRuHours(displayStart, displayEnd)}
+                          {showSickAlert ? (
+                            <ScheduleHoursShortageIcon
+                              title="Охранник на больничном — нужна замена"
+                              className="shrink-0 [&_svg]:size-3"
+                            />
+                          ) : null}
                         </span>
                         {s.isNoShow ? (
                           <button
@@ -809,7 +960,7 @@ export function ObjectMonthScheduleGrid({
                                 dateIso,
                                 replaceShiftId: s.id,
                                 replacedGuardName: sg.displayName,
-                                startTime: toTimeKh(s.startsAt),
+                                startTime: toTimeKh(workedWindow?.end ?? s.startsAt),
                                 endTime: toTimeKh(s.endsAt),
                                 shiftKind: resolveShiftKindForTemplate(
                                   expectedForCell(dateIso, postId),
@@ -820,19 +971,27 @@ export function ObjectMonthScheduleGrid({
                             }}
                             title="Назначить замену по инциденту"
                           >
-                            {getHoursKhabarovsk(s.startsAt)}-{getHoursKhabarovsk(s.endsAt)}
+                            {getHoursKhabarovsk(displayStart)}-{getHoursKhabarovsk(displayEnd)}
                           </button>
                         ) : (
                           <span className="text-[9px] text-app-muted leading-none">
-                            {getHoursKhabarovsk(s.startsAt)}-{getHoursKhabarovsk(s.endsAt)}
+                            {getHoursKhabarovsk(displayStart)}-{getHoursKhabarovsk(displayEnd)}
                           </span>
                         )}
-                        {s.isNoShow ? (
+                        {missedEnd && workedWindow ? (
+                          <span
+                            className="text-[9px] text-app-muted leading-none line-through"
+                            title="Пропущенный интервал"
+                          >
+                            {getHoursKhabarovsk(workedWindow.end)}-{getHoursKhabarovsk(missedEnd)}
+                          </span>
+                        ) : null}
+                        {incidentLabel ? (
                           <span
                             className="mt-0.5 text-[8px] font-semibold uppercase leading-none"
                             style={{ color: designTokens.color.accent.danger }}
                           >
-                            невыход
+                            {incidentLabel}
                           </span>
                         ) : null}
                         {replacementShiftIds.has(s.id) ? (
@@ -1011,6 +1170,8 @@ export function ObjectMonthScheduleGrid({
                 if (meta?.isToday && headerStyle) {
                   headerStyle.boxShadow = `inset 0 -3px 0 0 ${designTokens.color.accent.primary}`;
                 }
+                const showShortageIcon = dayShortageVisible(d);
+                const shortageDateIso = dateIsoForDay(d);
                 return (
                   <th
                     key={d}
@@ -1021,8 +1182,9 @@ export function ObjectMonthScheduleGrid({
                       scheduleGridColumnHoverStyle(gridHover, d),
                     )}
                   >
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-center">
                       <span
+                        className="inline-flex items-center justify-center gap-0.5"
                         style={
                           meta?.isToday
                             ? { color: designTokens.color.accent.primary, fontWeight: 700 }
@@ -1030,6 +1192,13 @@ export function ObjectMonthScheduleGrid({
                         }
                       >
                         {d}
+                        {showShortageIcon ? (
+                          <ScheduleHoursShortageIcon
+                            canDismiss={canWrite}
+                            dismissing={dismissingShortageIsos.has(shortageDateIso)}
+                            onDismiss={() => handleDismissShortageDay(shortageDateIso)}
+                          />
+                        ) : null}
                       </span>
                       <span className="text-[10px] font-normal text-app-muted">
                         {weekdays[getDayKhabarovsk(dateObj)]}
@@ -1089,6 +1258,8 @@ export function ObjectMonthScheduleGrid({
                 if (meta?.isToday && headerStyle) {
                   headerStyle.boxShadow = `inset 0 3px 0 0 ${designTokens.color.accent.primary}`;
                 }
+                const showShortageIcon = dayShortageVisible(d);
+                const shortageDateIso = dateIsoForDay(d);
                 return (
                   <th
                     key={`footer-${d}`}
@@ -1096,8 +1267,9 @@ export function ObjectMonthScheduleGrid({
                     className="border border-app-border bg-app-elevated/95 p-1 text-center min-w-[2.5rem] sm:min-w-[45px]"
                     style={headerStyle}
                   >
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-center">
                       <span
+                        className="inline-flex items-center justify-center gap-0.5"
                         style={
                           meta?.isToday
                             ? { color: designTokens.color.accent.primary, fontWeight: 700 }
@@ -1105,6 +1277,13 @@ export function ObjectMonthScheduleGrid({
                         }
                       >
                         {d}
+                        {showShortageIcon ? (
+                          <ScheduleHoursShortageIcon
+                            canDismiss={canWrite}
+                            dismissing={dismissingShortageIsos.has(shortageDateIso)}
+                            onDismiss={() => handleDismissShortageDay(shortageDateIso)}
+                          />
+                        ) : null}
                       </span>
                       <span className="text-[10px] font-normal text-app-muted">
                         {weekdays[getDayKhabarovsk(dateObj)]}
@@ -1150,6 +1329,12 @@ export function ObjectMonthScheduleGrid({
             <span className="mt-0.5 flex shrink-0 items-center gap-0.5">
               <span
                 className="flex size-5 items-center justify-center rounded-full border bg-app-surface"
+                style={{ color: designTokens.color.accent.primary, borderColor: designTokens.color.border }}
+              >
+                <NotebookPen className="size-3" aria-hidden />
+              </span>
+              <span
+                className="flex size-5 items-center justify-center rounded-full border bg-app-surface"
                 style={{ color: designTokens.color.accent.warning, borderColor: designTokens.color.border }}
               >
                 <AlertTriangle className="size-3" aria-hidden />
@@ -1168,8 +1353,8 @@ export function ObjectMonthScheduleGrid({
               </span>
             </span>
             <p>
-              Нажмите на ячейку со сменой — появятся иконки инцидента, редактирования (охранник, время, тип) и
-              удаления. Для смены с невыходом нажмите на время, чтобы назначить замену, или на ячейку — чтобы
+              Нажмите на ячейку со сменой — появятся иконки: блокнот (запись в журнал), инцидент, редактирование
+              и удаление. Для смены с невыходом нажмите на время, чтобы назначить замену, или на ячейку — чтобы
               удалить запись об инциденте.
             </p>
           </div>

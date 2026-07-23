@@ -4,11 +4,14 @@ import { assertPermission, hasPermission } from "../../lib/auth/rbac";
 import { requireSession } from "../../lib/auth/session";
 import { loadHolidayDateSetForLocalRange } from "../../lib/rates/holiday-calendar";
 import { listObjectRateRulesForObjects } from "../../lib/operations/object-rate-rules-repository";
+import { listGuardObjectIdsByGuardId } from "../../lib/operations/guards-repository";
+import { listProfilePeriodsForGuards } from "../../lib/operations/guard-profile-periods-repository";
 import {
   getSchedulerSnapshot,
   listScheduledGuardsByObjectForLocalMonth,
 } from "../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../lib/operations/shift-templates-repository";
+import { buildCurrentWeekValidShortageDismissKeySet } from "../../lib/operations/schedule-shortage-dismissals-repository";
 import { listManagedUsers } from "../../lib/auth/user-service";
 import { formatMonthYearLongRu, toDateIso, getKhabarovskComponents, toDateIsoKhabarovsk } from "../../lib/format/display-date";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../lib/scheduling/object-shift-templates";
@@ -46,15 +49,24 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
     if (!rateRulesByObjectId[rule.objectId]) rateRulesByObjectId[rule.objectId] = [];
     rateRulesByObjectId[rule.objectId]!.push(rule);
   }
-  const [templates, guardsScheduledByObjectMonth] = await Promise.all([
-    objectIds.length > 0 ? listShiftTemplatesForObjectIds(objectIds) : Promise.resolve([]),
-    listScheduledGuardsByObjectForLocalMonth(
-      objectIds, 
-      getKhabarovskComponents(weekStart).year, 
-      getKhabarovskComponents(weekStart).month0
-    ),
-  ]);
+  const [templates, guardsScheduledByObjectMonth, guardObjectIdsByGuardId, profilePeriods, shortageDismissState] =
+    await Promise.all([
+      objectIds.length > 0 ? listShiftTemplatesForObjectIds(objectIds) : Promise.resolve([]),
+      listScheduledGuardsByObjectForLocalMonth(
+        objectIds, 
+        getKhabarovskComponents(weekStart).year, 
+        getKhabarovskComponents(weekStart).month0
+      ),
+      listGuardObjectIdsByGuardId(),
+      snapshot.guards.length > 0
+        ? listProfilePeriodsForGuards(snapshot.guards.map((g) => g.id))
+        : Promise.resolve([]),
+      objectIds.length > 0
+        ? buildCurrentWeekValidShortageDismissKeySet(objectIds)
+        : Promise.resolve({ weekDayIsos: [] as string[], validKeys: new Set<string>() }),
+    ]);
   const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
+  const dismissedShortageKeys = Array.from(shortageDismissState.validKeys);
   const users = await listManagedUsers();
   const userMap = new Map(users.map((u) => [u.id, u.name]));
   const enrichedLogs = snapshot.logs.map(log => ({
@@ -65,10 +77,10 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
   const objectMonthTitle = formatMonthYearLongRu(kh.year, kh.month0);
   return (
     <main
-      className="grid min-h-screen gap-6 bg-app-bg p-6 text-app-text"
+      className="grid min-h-screen gap-4 bg-app-bg p-3 text-app-text [--scheduler-page-padding:0.75rem] md:gap-6 md:p-6 md:[--scheduler-page-padding:1.5rem]"
       style={{
         paddingTop:
-          "calc(1.5rem + var(--incident-banner-offset, 0px) + var(--compliance-banner-offset, 0px))",
+          "calc(var(--scheduler-page-padding) + var(--incident-banner-offset, 0px) + var(--compliance-banner-offset, 0px))",
       }}
     >
       <SchedulerGridLazy
@@ -77,8 +89,10 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
         shifts={snapshot.shifts}
         holidayDateKeys={holidayDateKeys}
         rateRulesByObjectId={rateRulesByObjectId}
+        profilePeriods={profilePeriods}
         expectedShiftsByObjectDay={expectedShiftsByObjectDay}
         guardsScheduledOnObjectByMonth={guardsScheduledByObjectMonth}
+        guardObjectIdsByGuardId={guardObjectIdsByGuardId}
         objectMonthTitle={objectMonthTitle}
         currentRole={session.user.role}
         weekStart={weekStart}
@@ -86,6 +100,7 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
         createShiftLogAction={createShiftLogAction}
         cloneObjectWeekShiftsAction={cloneObjectWeekShiftsAction}
         bulkCreateShiftsAction={bulkCreateShiftsAction}
+        dismissedShortageKeys={dismissedShortageKeys}
         errorMessage={params.error}
         successMessage={(() => {
           const s = params.success;

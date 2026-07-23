@@ -22,10 +22,12 @@ import { normalizeHolidayDateKey, type DayColumnMeta } from "./object-detail-sch
 import { setObjectGuardsAction, updateObjectAction } from "../../app/objects/actions";
 import {
   createShiftAction,
+  createShiftLogAction,
   recordShiftIncidentAction,
   updateShiftAction,
 } from "../../app/scheduler/actions";
 import { Button, ButtonLink } from "../ui/button";
+import type { ShiftLogDraft } from "./object-month-schedule-grid";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import type { GuardSchedulePickerRow } from "../../lib/operations/guards-repository";
 import type { ObjectHolidayRecord } from "../../lib/operations/object-holidays-repository";
@@ -34,7 +36,7 @@ import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import type { ObjectShiftTemplateRow } from "../../lib/operations/shift-templates-repository";
 import type { ObjectMonthScheduledGuard } from "../../lib/operations/scheduler-repository";
-import type { Shift, ShiftKind } from "../../lib/scheduling/types";
+import type { GuardStatus, Shift, ShiftKind } from "../../lib/scheduling/types";
 import { toast } from "../../store/toast-store";
 import { designTokens } from "../../lib/design-tokens";
 import { dispatchIncidentReplacementsRefresh } from "./global-incident-replacements-banner";
@@ -174,6 +176,7 @@ export type ObjectDetailViewProps = {
   object: ObjectListRow;
   posts: ObjectPost[];
   gridGuardNames: Record<string, string>;
+  gridGuardStatuses?: Record<string, GuardStatus>;
   rateRules: ObjectRateRuleRecord[];
   /** План смен по каждой дате месяца (версии шаблона + наследование МП/усиления). */
   expectedShiftsByDateIso: Record<string, ExpectedShifts>;
@@ -184,8 +187,6 @@ export type ObjectDetailViewProps = {
   globalHolidayDateKeys?: readonly string[];
   scheduledGuards: ObjectMonthScheduledGuard[];
   shifts: Shift[];
-  /** Смены всех объектов за месяц — для проверки пересечений и подсказки «на других объектах». */
-  monthAvailabilityShifts: Shift[];
   viewYear: number;
   viewMonth0: number;
   error?: string;
@@ -197,6 +198,8 @@ export type ObjectDetailViewProps = {
   ) => Promise<{ created: number; skipped: Array<{ objectId: string; dateIso: string; reason: string }> } | void>;
   operationalDayStartTime: string;
   monthlyPostGuardsByPostId: MonthlyPostGuardsByPostId;
+  /** Валидные на текущую неделю dismiss-даты недобора часов для этого объекта (`YYYY-MM-DD`). */
+  dismissedShortageDateIsos?: readonly string[];
 };
 
 function toTimeKh(date: Date): string {
@@ -237,6 +240,7 @@ export function ObjectDetailView({
   object,
   posts,
   gridGuardNames,
+  gridGuardStatuses = {},
   rateRules,
   expectedShiftsByDateIso,
   shiftTemplates,
@@ -245,7 +249,6 @@ export function ObjectDetailView({
   globalHolidayDateKeys = [],
   scheduledGuards,
   shifts,
-  monthAvailabilityShifts,
   viewYear,
   viewMonth0,
   error,
@@ -254,6 +257,7 @@ export function ObjectDetailView({
   bulkCreateShiftsAction,
   operationalDayStartTime,
   monthlyPostGuardsByPostId,
+  dismissedShortageDateIsos = [],
 }: ObjectDetailViewProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
@@ -295,6 +299,7 @@ export function ObjectDetailView({
     endTime: string;
     shiftKind: "Regular" | "Reinforcement" | "RapidResponse" | "ShiftLead";
   } | null>(null);
+  const [shiftLogDraft, setShiftLogDraft] = useState<ShiftLogDraft | null>(null);
   const [incidentModeLocal, setIncidentModeLocal] = useState<"full" | "partial">("full");
   const incidentFormScrollRef = useRef<HTMLInputElement | null>(null);
 
@@ -315,6 +320,10 @@ export function ObjectDetailView({
   const [pickerGuards, setPickerGuards] = useState<GuardSchedulePickerRow[] | null>(null);
   const [pickerGuardsLoading, setPickerGuardsLoading] = useState(false);
   const pickerGuardsRequestRef = useRef(false);
+  /** Смены всех объектов за месяц — только для пикера конфликтов; грузим лениво. */
+  const [availabilityShifts, setAvailabilityShifts] = useState<Shift[] | null>(null);
+  const availabilityMonthKeyRef = useRef<string | null>(null);
+  const availabilityEpochRef = useRef(0);
   const [switchObjects, setSwitchObjects] = useState<ObjectSwitchTabRow[] | null>(null);
 
   const canWrite = hasPermission(currentRole, "schedule:write");
@@ -458,7 +467,38 @@ export function ObjectDetailView({
     };
   }, [guardSchedulePreview, viewYear, viewMonth0]);
 
-  const shiftsForAvailability = useMemo(() => monthAvailabilityShifts, [monthAvailabilityShifts]);
+  const availabilityMonthKey = `${viewYear}-${viewMonth0}`;
+
+  const invalidateAvailabilityShifts = useCallback(() => {
+    availabilityEpochRef.current += 1;
+    availabilityMonthKeyRef.current = null;
+    setAvailabilityShifts(null);
+  }, []);
+
+  const ensureAvailabilityShifts = useCallback(async () => {
+    if (availabilityMonthKeyRef.current === availabilityMonthKey) return;
+    const epoch = availabilityEpochRef.current;
+    const monthStart = new Date(Date.UTC(viewYear, viewMonth0, 1, 0, 0, 0, 0) - 10 * 3600_000);
+    const monthEndExclusive = new Date(
+      Date.UTC(viewYear, viewMonth0 + 1, 1, 0, 0, 0, 0) - 10 * 3600_000,
+    );
+    try {
+      const res = await fetch(
+        `/api/scheduler/shifts-query?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEndExclusive.toISOString())}`,
+        { credentials: "same-origin" },
+      );
+      if (!res.ok || epoch !== availabilityEpochRef.current) return;
+      const body = (await res.json()) as { ok?: boolean; shifts?: ShiftApiRow[] };
+      if (!body.ok || !Array.isArray(body.shifts) || epoch !== availabilityEpochRef.current) return;
+      setAvailabilityShifts(body.shifts.map(parseShiftFromApi));
+      availabilityMonthKeyRef.current = availabilityMonthKey;
+    } catch {
+      /* ignore */
+    }
+  }, [availabilityMonthKey, viewYear, viewMonth0]);
+
+  /** Пока ленивый запрос не пришёл — хотя бы смены текущего объекта (конфликты на других объектах подтянутся). */
+  const shiftsForAvailability = availabilityShifts ?? shifts;
 
   const ensurePickerGuards = useCallback(async () => {
     if (pickerGuards !== null || pickerGuardsRequestRef.current) return;
@@ -481,8 +521,15 @@ export function ObjectDetailView({
   useEffect(() => {
     if (quickAssign || incidentDraft) {
       void ensurePickerGuards();
+      void ensureAvailabilityShifts();
     }
-  }, [quickAssign, incidentDraft, ensurePickerGuards]);
+  }, [quickAssign, incidentDraft, ensurePickerGuards, ensureAvailabilityShifts]);
+
+  // После router.refresh() props.shifts обновляются — сбрасываем кэш availability, иначе пикер видит старые конфликты.
+  const shiftsFingerprint = useMemo(() => shifts.map((s) => s.id).join(","), [shifts]);
+  useEffect(() => {
+    invalidateAvailabilityShifts();
+  }, [shiftsFingerprint, invalidateAvailabilityShifts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -682,9 +729,10 @@ export function ObjectDetailView({
           scheduledGuards.find((g) => g.guardId === id)?.displayName ??
           "Неизвестный",
         isAssigned: assignedIds.has(id),
+        status: gridGuardStatuses[id],
       }))
       .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
-  }, [object.guardIds, shifts, gridGuardNames, scheduledGuards]);
+  }, [object.guardIds, shifts, gridGuardNames, gridGuardStatuses, scheduledGuards]);
 
   const monthKey = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
 
@@ -712,11 +760,12 @@ export function ObjectDetailView({
             scheduledGuards.find((g) => g.guardId === id)?.displayName ??
             "Неизвестный",
           isAssigned: assignedIds.has(id),
+          status: gridGuardStatuses[id],
         }))
         .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
     }
     return result;
-  }, [posts, monthlyPostGuardsByPostId, shifts, guardsForGrid, gridGuardNames, scheduledGuards, firstPostId]);
+  }, [posts, monthlyPostGuardsByPostId, shifts, guardsForGrid, gridGuardNames, gridGuardStatuses, scheduledGuards, firstPostId]);
 
   const pickerGuardList = pickerGuards ?? [];
 
@@ -983,7 +1032,9 @@ export function ObjectDetailView({
 
   const filteredQuickAssignGuardAvailability = useMemo(() => {
     if (!quickAssign || !quickAssignIntervalReady) return [];
-    const assignable = quickAssignGuardAvailability.filter((item) => item.available);
+    const assignable = quickAssignGuardAvailability.filter(
+      (item) => item.available && item.guard.status === "Active",
+    );
     const sortedGuards = sortGuardsForShiftAssignment(
       assignable.map((item) => item.guard),
       quickAssign.shiftKind,
@@ -1301,6 +1352,7 @@ export function ObjectDetailView({
         monthShifts={normalizedShifts}
         expectedShiftsByDateIso={expectedShiftsByDateIso}
         operationalDayStartTime={operationalDayStartTime}
+        dismissedShortageDateIsos={dismissedShortageDateIsos}
         canWrite={canWrite}
         canManageOperationalDay={canManageOperationalDay}
         bulkCreateShiftsAction={bulkCreateShiftsAction}
@@ -1309,6 +1361,7 @@ export function ObjectDetailView({
         onCloseGuardPreview={scheduleCloseGuardSchedulePreview}
         onQuickAssign={setQuickAssign}
         onIncidentDraft={setIncidentDraft}
+        onShiftLogDraft={setShiftLogDraft}
       />
 
       <ObjectSwitchTabs
@@ -1458,6 +1511,7 @@ export function ObjectDetailView({
                     }
                   }
                   setQuickAssign(null);
+                  invalidateAvailabilityShifts();
                   router.refresh();
                 } catch (err) {
                   if (
@@ -1875,7 +1929,7 @@ export function ObjectDetailView({
                     >
                       <option value="">— Нет замены (будет напоминание) —</option>
                       {pickerGuardList
-                        .filter((g) => g.id !== incidentDraft.guardId)
+                        .filter((g) => g.id !== incidentDraft.guardId && g.status === "Active")
                         .map((g) => (
                           <option key={g.id} value={g.id}>
                             {g.lastName} {g.firstName}
@@ -1889,6 +1943,96 @@ export function ObjectDetailView({
                     </Button>
                     <Button type="submit" disabled={!canWrite}>
                       Сохранить
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {shiftLogDraft && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+              role="presentation"
+              onClick={() => setShiftLogDraft(null)}
+            >
+              <div
+                role="dialog"
+                aria-labelledby="shift-log-dialog-title-obj"
+                className="w-full max-w-lg rounded-card border border-app-border bg-app-surface p-4 shadow-glow sm:p-5"
+                style={{ boxShadow: designTokens.shadow.glow }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 id="shift-log-dialog-title-obj" className="text-lg font-semibold text-app-text">
+                  Запись по смене
+                </h3>
+                <p className="mt-1 text-sm text-app-muted">
+                  {shiftLogDraft.guardName} · {shiftKindLabels[shiftLogDraft.shiftKind]} ·{" "}
+                  {shiftLogDraft.startTime}–{shiftLogDraft.endTime} (
+                  {formatDisplayDateFromIso(shiftLogDraft.dateIso)})
+                </p>
+                <form
+                  key={shiftLogDraft.shiftId}
+                  className="mt-4 grid gap-3"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const fd = new FormData(e.currentTarget);
+                    fd.set("noRedirect", "true");
+                    fd.set("scrollY", String(Math.max(0, Math.round(window.scrollY))));
+                    fd.set("redirect", `/objects/${object.id}?month=${redirectMonth}`);
+                    try {
+                      await createShiftLogAction(fd);
+                      setShiftLogDraft(null);
+                      toast({
+                        title: "Запись добавлена",
+                        message: "Журнал смен обновлён",
+                        variant: "success",
+                      });
+                      router.refresh();
+                    } catch (err) {
+                      toast({
+                        title: "Запись не сохранена",
+                        message: err instanceof Error ? err.message : "Не удалось добавить запись",
+                        variant: "error",
+                        durationMs: 6500,
+                      });
+                    }
+                  }}
+                >
+                  <input type="hidden" name="shiftId" value={shiftLogDraft.shiftId} />
+                  <label className="grid gap-1 text-xs font-medium text-app-muted">
+                    Уровень
+                    <select
+                      name="incidentLevel"
+                      defaultValue="Info"
+                      className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-accent-primary"
+                      required
+                    >
+                      <option value="None">Без инцидента</option>
+                      <option value="Info">Инфо</option>
+                      <option value="Warning">Предупреждение</option>
+                      <option value="Critical">Критично</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-app-muted">
+                    Текст записи
+                    <input
+                      name="note"
+                      minLength={3}
+                      required
+                      placeholder="Запись по этой смене"
+                      className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-accent-primary"
+                    />
+                  </label>
+                  <div className="mt-1 flex flex-wrap justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={() => setShiftLogDraft(null)}>
+                      Отмена
+                    </Button>
+                    <Button type="submit" disabled={!canWrite}>
+                      Добавить запись
                     </Button>
                   </div>
                 </form>

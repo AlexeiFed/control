@@ -8,6 +8,7 @@ import { hasPermission, type Role } from "../../lib/auth/rbac";
 import { designTokens } from "../../lib/design-tokens";
 import { rateUnitLabels, shiftKindLabels, shiftKindShortLabels, incidentCategoryLabels } from "../../lib/operations/status-labels";
 import type { Guard, SecurityObject, Shift, ShiftKind } from "../../lib/scheduling/types";
+import { GuardProfileResolver, type GuardProfilePeriodRecord } from "../../lib/guards/profile-periods";
 import {
   formatCompactTimeRangeLocal,
   formatDisplayDateFromIso,
@@ -19,6 +20,7 @@ import {
   getHoursKhabarovsk,
   toDateIsoKhabarovsk,
   getKhabarovskComponents,
+  isIsoInCurrentKhabarovskWeek,
 } from "../../lib/format/display-date";
 import {
   defaultDayShiftInterval,
@@ -38,6 +40,11 @@ import {
 } from "../../lib/scheduling/replacement-availability";
 import { formatGuardOtherObjectsHint } from "../../lib/scheduling/guard-assignment-hints";
 import {
+  formatNeighborDayShiftsHint,
+  getNeighborDayShifts,
+  hasNeighborDayShifts,
+} from "../../lib/scheduling/guard-neighbor-day-shifts";
+import {
   formatGuardAssignmentLabel,
   sortGuardsForShiftAssignment,
 } from "../../lib/scheduling/guard-car-sort";
@@ -48,7 +55,16 @@ import {
   shiftKindsInTemplate,
   type ExpectedShifts,
 } from "../../lib/scheduling/object-shift-templates";
-import { computeDayPlanMetrics, formatTemplateCountWithHours } from "../../lib/scheduling/schedule-shortage";
+import { computeDayPlanMetrics, dayPlanHasHoursShortage, formatTemplateCountWithHours } from "../../lib/scheduling/schedule-shortage";
+import {
+  isFullNoShow,
+  isPartialAttendance,
+  partialAttendanceWindow,
+  shiftCoverageMinutes,
+} from "../../lib/scheduling/shift-attendance";
+import { ScheduleHoursShortageIcon } from "./schedule-hours-shortage-icon";
+import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard-shift-alert";
+import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import {
   buildRateRuleTimePresets,
@@ -64,6 +80,8 @@ import {
   shiftAssignSubmitDisabled,
 } from "./shift-assign-time-rate-fields";
 import { ShiftAssignGuardProfileSummary } from "./shift-assign-guard-profile-summary";
+import { SchedulerMobileCalendar } from "./scheduler-mobile-calendar";
+import { buildMobileScheduleCards } from "../../lib/scheduling/mobile-schedule-calendar";
 
 /** Вспомогательная функция для получения времени в формате HH:mm */
 function toTime(date: Date): string {
@@ -163,10 +181,14 @@ export type SchedulerGridProps = {
   expectedShiftsByObjectDay?: Record<string, Record<string, ExpectedShifts>>;
   /** Охранники с сменами на объекте в месяце, совпадающем с календарём недели `weekStart`. */
   guardsScheduledOnObjectByMonth?: Record<string, ReadonlyArray<MonthScheduledGuardRow>>;
+  /** Назначения охранник → objectIds из `guard_object_assignments` (фильтр «Объект»). */
+  guardObjectIdsByGuardId?: Record<string, ReadonlyArray<string>>;
   /** Подпись месяца для блока охранников (напр. «май 2026 г.»). */
   objectMonthTitle?: string;
   /** Правила ставок по objectId (для плашек времени и выбора тарифа). */
   rateRulesByObjectId?: Record<string, ObjectRateRuleRecord[]>;
+  /** Периоды профиля (ЛК/ТУ) — матчинг ставки на дату смены. */
+  profilePeriods?: ReadonlyArray<GuardProfilePeriodRecord>;
   currentRole: Role;
   weekStart: Date;
   createShiftAction: (formData: FormData) => Promise<void>;
@@ -180,7 +202,14 @@ export type SchedulerGridProps = {
   errorMessage?: string;
   successMessage?: string;
   initialScrollY?: number;
+  /** Валидные на текущую неделю dismiss-ключи недобора часов, формат `objectId|dateIso`. */
+  dismissedShortageKeys?: readonly string[];
 };
+
+/** Ключ dismiss недобора часов дня объекта — совпадает по формату с `shortageDismissKey` на сервере. */
+function shortageDismissKeyLocal(objectId: string, dateIso: string): string {
+  return `${objectId}|${dateIso}`;
+}
 
 const OBJECT_COLUMN_WIDTH = "14rem";
 
@@ -190,8 +219,10 @@ export function SchedulerGrid({
   shifts,
   holidayDateKeys = new Set<string>(),
   rateRulesByObjectId = {},
+  profilePeriods = [],
   expectedShiftsByObjectDay = {},
   guardsScheduledOnObjectByMonth = {},
+  guardObjectIdsByGuardId = {},
   objectMonthTitle = "",
   currentRole,
   weekStart,
@@ -202,12 +233,14 @@ export function SchedulerGrid({
   errorMessage,
   successMessage,
   initialScrollY,
+  dismissedShortageKeys = [],
 }: SchedulerGridProps) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const quickScrollYInputRef = useRef<HTMLInputElement | null>(null);
   const quickAssignFormRef = useRef<HTMLFormElement | null>(null);
-  const [openQuickMenu, setOpenQuickMenu] = useState<"guard" | null>(null);
   const [quickGuardSearch, setQuickGuardSearch] = useState("");
+  const [quickGuardObjectFilter, setQuickGuardObjectFilter] = useState("");
+  const [quickGuardCarOnly, setQuickGuardCarOnly] = useState(false);
 
   const weekDays = Array.from({ length: 14 }, (_, index) => {
     const date = new Date(weekStart.getTime() + index * 24 * 60 * 60_000);
@@ -232,6 +265,44 @@ export function SchedulerGrid({
   const activeGuards = guards.filter((guard) => guard.status === "Active");
   const canWrite = hasPermission(currentRole, "schedule:write");
   const [selectedGuardId, setSelectedGuardId] = useState(activeGuards[0]?.id ?? "");
+
+  const [optimisticDismissedShortageKeys, setOptimisticDismissedShortageKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [dismissingShortageKeys, setDismissingShortageKeys] = useState<Set<string>>(() => new Set());
+  const dismissedShortageKeySet = useMemo(() => {
+    const merged = new Set(dismissedShortageKeys);
+    for (const key of optimisticDismissedShortageKeys) merged.add(key);
+    return merged;
+  }, [dismissedShortageKeys, optimisticDismissedShortageKeys]);
+
+  async function handleDismissShortageDay(objectId: string, dateIso: string) {
+    const key = shortageDismissKeyLocal(objectId, dateIso);
+    setOptimisticDismissedShortageKeys((prev) => new Set(prev).add(key));
+    setDismissingShortageKeys((prev) => new Set(prev).add(key));
+    try {
+      await dismissDayShortage(objectId, dateIso);
+      router.refresh();
+    } catch (err) {
+      setOptimisticDismissedShortageKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      toast({
+        title: "Не удалось скрыть недобор",
+        message: err instanceof Error ? err.message : "Не удалось скрыть недобор",
+        variant: "error",
+        durationMs: 6500,
+      });
+    } finally {
+      setDismissingShortageKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
 
   const sortedActiveGuards = useMemo(() => {
     return [...activeGuards].sort((a, b) => {
@@ -397,7 +468,6 @@ export function SchedulerGrid({
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (!sectionRef.current?.contains(target)) {
-        setOpenQuickMenu(null);
         setOpenTableMenu(null);
       }
     }
@@ -572,6 +642,8 @@ export function SchedulerGrid({
       setQuickEndTime(lastUsed?.endTime ?? defaultSutki.endTime);
     }
     setQuickGuardSearch("");
+    setQuickGuardObjectFilter("");
+    setQuickGuardCarOnly(false);
     const rateForm = initializeShiftRateFormFromShift(replaced);
     setUseCustomRate(rateForm.useCustomRate);
     setManualGuardRubles(rateForm.manualGuardRubles);
@@ -586,7 +658,6 @@ export function SchedulerGrid({
       setSelectedRateRuleId("");
     }
     setOpenTableMenu(null);
-    setOpenQuickMenu(null);
     setSelectedGuardId("");
   }, [quickAssign, shifts, expectedShiftsByObjectDay, guards, selectedGuardId, rateRulesByObjectId, holidayDateKeys, resolveObjectAnchor]);
 
@@ -810,7 +881,7 @@ export function SchedulerGrid({
       ? shifts.find((shift) => shift.id === quickAssign.replaceShiftId)
       : undefined;
     return listGuardsWithAvailability(
-      guards,
+      activeGuards,
       shifts,
       { ...interval, objectId: quickAssign.objectId },
       {
@@ -820,7 +891,7 @@ export function SchedulerGrid({
         assignmentDateIso: quickAssign.dateIso,
       },
     );
-  }, [guards, quickAssign, quickStartTime, quickEndTime, quickAssignAnchor, quickAssignIntervalReady, shifts]);
+  }, [activeGuards, quickAssign, quickStartTime, quickEndTime, quickAssignAnchor, quickAssignIntervalReady, shifts]);
 
   const filteredGuardAvailability = useMemo(() => {
     if (!quickAssign || !quickAssignIntervalReady) return [];
@@ -828,15 +899,48 @@ export function SchedulerGrid({
     const searched = normalized
       ? guardAvailability.filter((item) => item.guard.name.toLowerCase().includes(normalized))
       : guardAvailability;
-    const assignable = searched.filter((item) => item.available);
-    const sortedGuards = sortGuardsForShiftAssignment(assignable.map((item) => item.guard), quickShiftKind, (a, b) =>
-      a.name.localeCompare(b.name, "ru-RU"),
+    // Только Active; недоступные с соседними сменами — серым (нагрузка).
+    const visible = searched.filter((item) => {
+      if (item.guard.status !== "Active") return false;
+      if (quickGuardCarOnly && !item.guard.hasCar) return false;
+      if (quickGuardObjectFilter) {
+        const assigned = guardObjectIdsByGuardId[item.guard.id] ?? [];
+        if (!assigned.includes(quickGuardObjectFilter)) return false;
+      }
+      if (item.available) return true;
+      if (item.reason === "Sick" || item.reason === "OnVacation" || item.reason === "Inactive" || item.reason === "Dismissed") {
+        return false;
+      }
+      const neighbors = getNeighborDayShifts(item.guard.id, quickAssign.dateIso, shifts, objectNameById, {
+        operationalDayStartTime: quickAssignAnchor,
+        anchorByObjectId: objectAnchorById,
+      });
+      return hasNeighborDayShifts(neighbors);
+    });
+    const sortedGuards = sortGuardsForShiftAssignment(
+      visible.map((item) => item.guard),
+      quickShiftKind,
+      (a, b) => a.name.localeCompare(b.name, "ru-RU"),
     );
     const sortedGuardOrder = new Map(sortedGuards.map((guard, index) => [guard.id, index]));
-    return assignable.sort(
-      (a, b) => (sortedGuardOrder.get(a.guard.id) ?? 0) - (sortedGuardOrder.get(b.guard.id) ?? 0),
-    );
-  }, [guardAvailability, quickAssign, quickGuardSearch, quickShiftKind, quickAssignIntervalReady]);
+    return visible.sort((a, b) => {
+      if (a.available !== b.available) return a.available ? -1 : 1;
+      return (sortedGuardOrder.get(a.guard.id) ?? 0) - (sortedGuardOrder.get(b.guard.id) ?? 0);
+    });
+  }, [
+    guardAvailability,
+    quickAssign,
+    quickGuardSearch,
+    quickGuardObjectFilter,
+    quickGuardCarOnly,
+    guardObjectIdsByGuardId,
+    quickShiftKind,
+    quickAssignIntervalReady,
+    shifts,
+    objectNameById,
+    quickAssignAnchor,
+    objectAnchorById,
+  ]);
 
   useEffect(() => {
     if (!quickAssign || !selectedGuardId) return;
@@ -851,6 +955,17 @@ export function SchedulerGrid({
   const selectedGuardAvailability = useMemo(
     () => guardAvailability.find((item) => item.guard.id === selectedGuardId) ?? null,
     [guardAvailability, selectedGuardId],
+  );
+
+  const profileResolver = useMemo(
+    () => (profilePeriods.length > 0 ? new GuardProfileResolver(profilePeriods) : null),
+    [profilePeriods],
+  );
+
+  const resolveGuardForShiftDate = useCallback(
+    (guard: Guard, dateIso: string): Guard =>
+      profileResolver ? profileResolver.resolveGuardAt(guard, dateIso) : guard,
+    [profileResolver],
   );
 
   const quickObjectRateRules = useMemo(
@@ -883,7 +998,7 @@ export function SchedulerGrid({
     if (!quickAssign || !selectedGuardAvailability?.guard || quickObjectRateRules.length === 0) return false;
     return shiftNeedsManualRateRuleSelection({
       objectId: quickAssign.objectId,
-      guard: selectedGuardAvailability.guard,
+      guard: resolveGuardForShiftDate(selectedGuardAvailability.guard, quickAssign.dateIso),
       shiftKind: quickShiftKind,
       shiftDateIso: quickAssign.dateIso,
       startTime: quickStartTime,
@@ -905,6 +1020,7 @@ export function SchedulerGrid({
     referenceShiftForRates?.manualClientRateCents,
     referenceShiftForRates?.manualGuardRateCents,
     quickAssignAnchor,
+    resolveGuardForShiftDate,
   ]);
 
   const quickAssignShowRateSelectionBlock = useMemo(
@@ -920,10 +1036,11 @@ export function SchedulerGrid({
 
   const quickAssignSelectableRulesCount = useMemo(() => {
     if (!quickAssign || !selectedGuardAvailability?.guard) return 0;
+    const resolved = resolveGuardForShiftDate(selectedGuardAvailability.guard, quickAssign.dateIso);
     const { dayMatched, otherWeekdays } = listManualSelectableRateRules(
       quickObjectRateRules,
       quickAssign.objectId,
-      selectedGuardAvailability.guard,
+      resolved,
       quickShiftKind,
       quickAssign.dateIso,
       holidayDateKeys,
@@ -944,6 +1061,7 @@ export function SchedulerGrid({
     quickAssign,
     selectedGuardAvailability,
     quickObjectRateRules,
+    resolveGuardForShiftDate,
     quickShiftKind,
     holidayDateKeys,
     referenceShiftForRates?.selectedRateRuleId,
@@ -977,15 +1095,47 @@ export function SchedulerGrid({
     }
     return list;
   }, [objects, tableObjectId, hideEmptyObjects, shifts, weekStart, expectedShiftsByObjectDay]);
+  const mobileScheduleCards = buildMobileScheduleCards({
+    objects: visibleObjects,
+    guards,
+    shifts,
+    weekDays,
+    expectedShiftsByObjectDay,
+    holidayDateKeys,
+    todayIso,
+  });
+
+  function openMobileAssignment(objectId: string, dateIso: string, shiftKind: ShiftKind) {
+    const dayInterval = defaultDayShiftInterval(resolveObjectAnchor(objectId));
+    setQuickAssign({
+      objectId,
+      dateIso,
+      startTime: dayInterval.startTime,
+      endTime: dayInterval.endTime,
+      shiftKind,
+    });
+  }
+
+  function openMobileShift(objectId: string, dateIso: string, shiftId: string) {
+    const shift = shifts.find((item) => item.id === shiftId);
+    if (!shift) return;
+    setQuickAssign({
+      objectId,
+      dateIso,
+      replaceShiftId: shift.id,
+      startTime: toTime(shift.startsAt),
+      endTime: toTime(shift.endsAt),
+      shiftKind: shift.shiftKind,
+    });
+  }
 
   return (
     <section
       ref={sectionRef}
-      className="rounded-card border border-app-border bg-app-surface p-6 shadow-glow"
+      className="rounded-card border border-app-border bg-app-surface p-3 shadow-glow md:p-6"
       onClickCapture={(event) => {
         const target = event.target;
         if (target instanceof Element && !target.closest("[data-dropdown]")) {
-          setOpenQuickMenu(null);
           setOpenTableMenu(null);
         }
       }}
@@ -1217,7 +1367,14 @@ export function SchedulerGrid({
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-card border border-app-border bg-app-surface">
+      <SchedulerMobileCalendar
+        cards={mobileScheduleCards}
+        canWrite={canWrite}
+        onAssign={openMobileAssignment}
+        onEditShift={openMobileShift}
+      />
+
+      <div className="mt-6 hidden overflow-hidden rounded-card border border-app-border bg-app-surface md:block">
         <div className="sticky top-0 z-10 border-b border-app-border bg-app-elevated">
           <div
             ref={headerScrollerRef}
@@ -1327,26 +1484,28 @@ export function SchedulerGrid({
                       planMpHours += norm.rapidResponse * norm.rapidResponseShiftHours;
                       planShiftLeadHours += norm.shiftLead * norm.shiftLeadShiftHours;
                     }
-                    const objShifts = shifts.filter((s) => s.objectId === objectItem.id && !s.isNoShow);
+                    const objShifts = shifts.filter(
+                      (s) => s.objectId === objectItem.id && shiftCoverageMinutes(s) > 0,
+                    );
                     const factRegularHours = Math.round(
                       (objShifts
                         .filter((s) => s.shiftKind === "Regular")
-                        .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 3_600_000, 0)) * 10,
+                        .reduce((sum, s) => sum + shiftCoverageMinutes(s) / 60, 0)) * 10,
                     ) / 10;
                     const factReinforcementHours = Math.round(
                       (objShifts
                         .filter((s) => s.shiftKind === "Reinforcement")
-                        .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 3_600_000, 0)) * 10,
+                        .reduce((sum, s) => sum + shiftCoverageMinutes(s) / 60, 0)) * 10,
                     ) / 10;
                     const factMpHours = Math.round(
                       (objShifts
                         .filter((s) => s.shiftKind === "RapidResponse")
-                        .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 3_600_000, 0)) * 10,
+                        .reduce((sum, s) => sum + shiftCoverageMinutes(s) / 60, 0)) * 10,
                     ) / 10;
                     const factShiftLeadHours = Math.round(
                       (objShifts
                         .filter((s) => s.shiftKind === "ShiftLead")
-                        .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 3_600_000, 0)) * 10,
+                        .reduce((sum, s) => sum + shiftCoverageMinutes(s) / 60, 0)) * 10,
                     ) / 10;
                     const shortHours = Math.max(0, planRegularHours - factRegularHours);
                     const shortReinforcementHours = Math.max(0, planReinforcementHours - factReinforcementHours);
@@ -1486,9 +1645,10 @@ export function SchedulerGrid({
                         const weekHoursByGuard = new Map<string, number>();
                         for (const s of shifts) {
                           if (s.objectId !== objectItem.id) continue;
-                          if (s.isNoShow) continue;
+                          const coverageMin = shiftCoverageMinutes(s);
+                          if (coverageMin <= 0) continue;
                           if (s.startsAt.getTime() >= weekEndMs || s.endsAt.getTime() <= weekStart.getTime()) continue;
-                          const h = (s.endsAt.getTime() - s.startsAt.getTime()) / 3_600_000;
+                          const h = coverageMin / 60;
                           weekHoursByGuard.set(s.guardId, (weekHoursByGuard.get(s.guardId) ?? 0) + h);
                         }
                         return (
@@ -1499,7 +1659,7 @@ export function SchedulerGrid({
                               return (
                                 <span
                                   key={row.guardId}
-                                  className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] leading-tight ${
+                                  className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs leading-tight ${
                                     hasWeekShifts
                                       ? "border-accent-primary/30 bg-accent-primary/5 text-app-text"
                                       : "border-app-border bg-app-bg/50 text-app-muted"
@@ -1550,9 +1710,10 @@ export function SchedulerGrid({
                       if (a.isNoShow !== b.isNoShow) return a.isNoShow ? -1 : 1;
                       return a.id.localeCompare(b.id);
                     });
-                  const totalDayMinutes = dayShifts
-                    .filter((s) => !s.isNoShow)
-                    .reduce((sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60000, 0);
+                  const totalDayMinutes = dayShifts.reduce(
+                    (sum, s) => sum + shiftCoverageMinutes(s),
+                    0,
+                  );
                   const totalDayHours = Math.round((totalDayMinutes / 60) * 10) / 10;
 
                   const norms = expectedShiftsByObjectDay[objectItem.id]?.[day.iso];
@@ -1607,6 +1768,19 @@ export function SchedulerGrid({
                         <div className="grid min-w-0 gap-0.5">
                           {planMetrics ? (
                             <div className="text-center text-[8px] leading-tight text-app-muted">
+                              {dayPlanHasHoursShortage(planMetrics) &&
+                              isIsoInCurrentKhabarovskWeek(day.iso) &&
+                              !dismissedShortageKeySet.has(shortageDismissKeyLocal(objectItem.id, day.iso)) ? (
+                                <div className="mb-0.5 flex justify-center">
+                                  <ScheduleHoursShortageIcon
+                                    canDismiss={canWrite}
+                                    dismissing={dismissingShortageKeys.has(
+                                      shortageDismissKeyLocal(objectItem.id, day.iso),
+                                    )}
+                                    onDismiss={() => handleDismissShortageDay(objectItem.id, day.iso)}
+                                  />
+                                </div>
+                              ) : null}
                               {planMetrics.expectedHoursRegular > 0 ? (
                                 <p style={{ color: designTokens.color.accent.warning }}>
                                   осн 0/{planMetrics.expectedHoursRegular}
@@ -1729,6 +1903,19 @@ export function SchedulerGrid({
                         <div className="grid min-w-0 gap-1">
                           {planMetrics ? (
                             <div className="text-[9px] leading-tight text-app-muted">
+                              {dayPlanHasHoursShortage(planMetrics) &&
+                              isIsoInCurrentKhabarovskWeek(day.iso) &&
+                              !dismissedShortageKeySet.has(shortageDismissKeyLocal(objectItem.id, day.iso)) ? (
+                                <div className="mb-0.5 flex justify-center">
+                                  <ScheduleHoursShortageIcon
+                                    canDismiss={canWrite}
+                                    dismissing={dismissingShortageKeys.has(
+                                      shortageDismissKeyLocal(objectItem.id, day.iso),
+                                    )}
+                                    onDismiss={() => handleDismissShortageDay(objectItem.id, day.iso)}
+                                  />
+                                </div>
+                              ) : null}
                               {planMetrics.expectedHoursRegular > 0 ? (
                                 <p
                                   className="font-semibold"
@@ -1812,11 +1999,13 @@ export function SchedulerGrid({
                               const isReinf = shift.shiftKind === "Reinforcement";
                               const isRapid = shift.shiftKind === "RapidResponse";
                               const isShiftLead = shift.shiftKind === "ShiftLead";
-                              const isNoShow = shift.isNoShow;
+                              const partial = isPartialAttendance(shift);
+                              const fullNoShow = isFullNoShow(shift);
+                              const workedWindow = partialAttendanceWindow(shift);
 
                               const cardStyle: React.CSSProperties = {};
                               let cardSurface = "border bg-app-bg";
-                              if (isNoShow) {
+                              if (fullNoShow) {
                                 cardSurface = "border bg-slate-500/10";
                                 cardStyle.borderColor = designTokens.color.border;
                                 cardStyle.textDecoration = "line-through";
@@ -1839,13 +2028,23 @@ export function SchedulerGrid({
                               }
 
                               const cardLabel = formatGuardLastNameOnly(guard?.name ?? shift.guardId);
-                              const timeLine = formatCompactTimeRangeLocal(shift.startsAt, shift.endsAt);
-                              const incidentTag =
-                                shift.isNoShow && shift.incidentRecordedAt && shift.incidentCategory
+                              const showSickAlert = shouldAlertSickGuardFutureShift(guard?.status, day.iso);
+                              const displayStart = workedWindow?.start ?? shift.startsAt;
+                              const displayEnd = workedWindow?.end ?? shift.endsAt;
+                              const timeLine = formatCompactTimeRangeLocal(displayStart, displayEnd);
+                              const missedLine =
+                                workedWindow && workedWindow.end.getTime() < shift.endsAt.getTime()
+                                  ? formatCompactTimeRangeLocal(workedWindow.end, shift.endsAt)
+                                  : null;
+                              const incidentTag = fullNoShow
+                                ? shift.incidentCategory
                                   ? incidentCategoryLabels[shift.incidentCategory]
-                                  : shift.isNoShow
-                                    ? "Инцидент"
-                                    : null;
+                                  : "невыход"
+                                : partial
+                                  ? shift.incidentCategory
+                                    ? incidentCategoryLabels[shift.incidentCategory]
+                                    : "частично"
+                                  : null;
                               return (
                                 <div key={shift.id} className="group/shift relative min-w-0 w-full">
                                   {canWrite && bulkCreateShiftsAction && !shift.isNoShow ? (
@@ -1873,13 +2072,14 @@ export function SchedulerGrid({
                                     </button>
                                   ) : null}
                                   <div
-                                    className={`flex min-w-0 w-full flex-col items-stretch gap-0 rounded-button px-0.5 py-px text-center text-[10px] leading-tight transition-colors ${cardSurface}`}
+                                    className={`flex min-w-0 w-full flex-col items-stretch gap-0 overflow-hidden rounded-button px-0.5 py-px text-center text-xs leading-tight transition-colors ${cardSurface}`}
                                     style={cardStyle}
                                   >
                                     <button
                                       type="button"
                                       data-guard-preview-trigger
-                                      className="w-full cursor-pointer rounded-t-button border-0 bg-transparent px-0 py-0.5 text-center font-semibold text-app-text outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary/35"
+                                      title={guard?.name ?? cardLabel}
+                                      className="min-w-0 w-full cursor-pointer overflow-hidden rounded-t-button border-0 bg-transparent px-0 py-0.5 text-center text-[13px] font-semibold text-app-text outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary/35"
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         const p = guardSchedulePreview;
@@ -1912,11 +2112,19 @@ export function SchedulerGrid({
                                         );
                                       }}
                                     >
-                                      <span className="block min-w-0 break-words">{cardLabel}</span>
+                                      <span className="flex min-w-0 w-full items-center justify-center gap-0.5 overflow-hidden">
+                                        <span className="min-w-0 truncate">{cardLabel}</span>
+                                        {showSickAlert ? (
+                                          <ScheduleHoursShortageIcon
+                                            title="Охранник на больничном — нужна замена"
+                                            className="shrink-0"
+                                          />
+                                        ) : null}
+                                      </span>
                                     </button>
                                     <button
                                       type="button"
-                                      className="w-full cursor-pointer rounded-b-button border-0 bg-transparent px-0 py-0 text-[9px] text-app-muted outline-none tabular-nums hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary/35"
+                                      className="w-full cursor-pointer rounded-b-button border-0 bg-transparent px-0 py-0 text-[11px] text-app-muted outline-none tabular-nums hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary/35"
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         setQuickAssign({
@@ -1930,8 +2138,13 @@ export function SchedulerGrid({
                                       }}
                                     >
                                       <time className="block w-full min-w-0">{timeLine}</time>
+                                      {missedLine ? (
+                                        <time className="mt-0.5 block w-full min-w-0 line-through opacity-70">
+                                          {missedLine}
+                                        </time>
+                                      ) : null}
                                       {incidentTag ? (
-                                        <span className="mt-0.5 block w-full text-[8px] font-semibold uppercase leading-none text-accent-danger">
+                                        <span className="mt-0.5 block w-full text-[10px] font-semibold uppercase leading-none text-accent-danger">
                                           {incidentTag}
                                         </span>
                                       ) : null}
@@ -1988,25 +2201,26 @@ export function SchedulerGrid({
 
       {quickAssign ? (
         <div
-          className="fixed inset-0 z-30 grid place-items-center bg-black/50 p-4 sm:p-6"
+          className="fixed inset-0 z-[110] grid bg-black/50 p-0 md:items-start md:justify-items-center md:px-4 md:pb-4 md:pt-3"
           role="presentation"
           onClick={() => setQuickAssign(null)}
         >
           <div
             role="dialog"
             aria-modal="true"
-            className="max-h-[min(92vh,56rem)] w-full max-w-[min(98vw,85rem)] min-h-[min(72vh,42rem)] overflow-y-auto overscroll-contain rounded-card border border-app-border bg-app-surface p-8 sm:p-10 shadow-glow"
+            aria-label="Назначение смены"
+            className="flex h-dvh w-full flex-col overflow-hidden bg-app-surface p-3 shadow-glow md:h-[min(98vh,72rem)] md:max-w-[min(98vw,92rem)] md:rounded-card md:border md:border-app-border md:p-8"
             style={{ boxShadow: designTokens.shadow.glow }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 text-app-text">
-              <div>
-                <div className="text-sm uppercase tracking-[0.24em] text-accent-primary">Быстрое назначение</div>
-                <div className="mt-2 text-xl font-semibold">
+            <div className="flex shrink-0 items-start justify-between gap-3 text-app-text">
+              <div className="min-w-0">
+                <div className="text-xs uppercase tracking-[0.18em] text-accent-primary md:text-sm md:tracking-[0.24em]">Быстрое назначение</div>
+                <div className="mt-1 truncate text-base font-semibold md:mt-2 md:text-xl">
                   {objects.find((item) => item.id === quickAssign.objectId)?.name ?? "Объект"} •{" "}
                   {formatDisplayDateFromIso(quickAssign.dateIso)}
                 </div>
-                <div className="mt-1 text-sm text-app-muted">
+                <div className="mt-0.5 truncate text-xs text-app-muted md:mt-1 md:text-sm">
                   {quickAssign.replaceShiftId ? (
                     (() => {
                       const replaced = shifts.find(s => s.id === quickAssign.replaceShiftId);
@@ -2019,6 +2233,7 @@ export function SchedulerGrid({
               <Button
                 type="button"
                 variant="secondary"
+                className="min-h-11 shrink-0 px-3"
                 onClick={() => {
                   setQuickAssign(null);
                 }}
@@ -2030,7 +2245,7 @@ export function SchedulerGrid({
             <form
               ref={quickAssignFormRef}
               action={createShiftAction}
-              className="mt-6 flex flex-col gap-6 rounded-card border border-app-border bg-app-elevated p-6 sm:p-8"
+              className="mt-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-app-elevated p-3 md:mt-4 md:overflow-hidden md:rounded-card md:border md:border-app-border md:p-6"
               onSubmit={(event) => {
                 if (
                   selectedGuardAvailability &&
@@ -2075,6 +2290,7 @@ export function SchedulerGrid({
                 operationalDayStartTime={quickAssignAnchor}
                 rateRules={quickObjectRateRules}
                 guard={selectedGuardAvailability?.guard ?? null}
+                profilePeriods={profilePeriods}
                 shiftKind={quickShiftKind}
                 shiftDateIso={quickAssign.dateIso}
                 holidayDateKeys={holidayDateKeys}
@@ -2106,99 +2322,8 @@ export function SchedulerGrid({
                 onManualRateReasonChange={setManualRateReason}
                 editingShift={referenceShiftForRates}
                 occupiedIntervals={quickAssignOccupiedIntervals}
-              />
-
-              <div className="grid gap-6 md:grid-cols-12 md:[&>*]:min-w-0">
-                <div className="md:col-span-4 min-w-0">
-                  <div className="text-xs font-medium text-app-muted">Охранник</div>
-                  <div className="relative mt-1.5" data-dropdown="guard">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="lg"
-                      className="w-full justify-start bg-app-bg font-normal"
-                      disabled={!quickAssignIntervalReady}
-                      onClick={() =>
-                        setOpenQuickMenu((curr) => (curr === "guard" ? null : "guard"))
-                      }
-                    >
-                      {(() => {
-                        if (!quickAssignIntervalReady) return "Сначала укажите время";
-                        const g = activeGuards.find((x) => x.id === selectedGuardId);
-                        return g
-                          ? formatGuardAssignmentLabel(g.name, g.hasCar, quickShiftKind)
-                          : "Выберите охранника";
-                      })()}
-                    </Button>
-                    {openQuickMenu === "guard" ? (
-                      <div className="absolute z-40 mt-2 w-full rounded-button border border-app-border bg-app-surface p-2 shadow-glow">
-                        <input
-                          value={quickGuardSearch}
-                          onChange={(event) => setQuickGuardSearch(event.target.value)}
-                          placeholder="Поиск охранника"
-                          className="mb-2 w-full rounded-button border border-app-border bg-app-bg px-2 py-2 text-sm text-app-text outline-none focus:border-accent-primary"
-                        />
-                        <div
-                          className="max-h-56 overflow-auto"
-                        >
-                          {filteredGuardAvailability.length === 0 ? (
-                            <div className="px-2 py-2 text-xs text-app-muted">
-                              {quickAssignIntervalReady ? "Нет свободных охранников" : "Сначала укажите время"}
-                            </div>
-                          ) : null}
-                          {filteredGuardAvailability.map((item) => {
-                            const g = item.guard;
-                            return (
-                              <Button
-                                key={g.id}
-                                type="button"
-                                variant="menu"
-                                size="sm"
-                                className="mb-1 w-full justify-start font-normal"
-                                onClick={() => {
-                                  setSelectedGuardId(g.id);
-                                  setSelectedRateRuleId("");
-                                  setUseCustomRate(false);
-                                  setOpenQuickMenu(null);
-                                }}
-                              >
-                                {formatGuardAssignmentLabel(g.name, g.hasCar, quickShiftKind)}
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                  <input type="hidden" name="guardId" value={selectedGuardId} />
-                  {selectedGuardAvailability &&
-                  formatGuardOtherObjectsHint(selectedGuardAvailability, objectNameById) ? (
-                    <p
-                      className="mt-2 rounded-button border-2 px-2.5 py-1.5 text-xs font-bold leading-snug"
-                      style={{
-                        borderColor: designTokens.color.accent.warning,
-                        backgroundColor: `${designTokens.color.accent.warning}18`,
-                        color: designTokens.color.accent.warning,
-                      }}
-                    >
-                      {formatGuardOtherObjectsHint(selectedGuardAvailability, objectNameById)}
-                    </p>
-                  ) : null}
-                  <p className="mt-2 text-[10px] text-app-muted leading-snug">
-                    Пересечение по времени с любой сменой охранника запрещено. Суточный лимит — 24 ч.
-                  </p>
-                  <ShiftAssignGuardProfileSummary
-                    guard={selectedGuardAvailability?.guard ?? null}
-                    objectId={quickAssign.objectId}
-                    rateRules={quickObjectRateRules}
-                    shiftKind={quickShiftKind}
-                    shiftDateIso={quickAssign.dateIso}
-                    holidayDateKeys={holidayDateKeys}
-                  />
-                </div>
-
-                <div className="md:col-span-4">
-                  <label className="grid min-w-0 gap-1.5 text-xs font-medium text-app-muted">
+                timelineHeaderTrailing={
+                  <label className="inline-flex min-w-[8.5rem] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-app-muted">
                     Тип
                     <select
                       name="shiftKind"
@@ -2209,7 +2334,7 @@ export function SchedulerGrid({
                         setSelectedRateRuleId("");
                         setUseCustomRate(false);
                       }}
-                      className="rounded-button border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text outline-none focus:border-accent-primary w-full"
+                      className="rounded-button border border-app-border bg-app-surface px-2 py-1 text-xs font-medium normal-case tracking-normal text-app-text outline-none focus:border-accent-primary"
                     >
                       {quickAssignAllowedShiftKinds.includes("Regular") ? (
                         <option value="Regular">{shiftKindLabels.Regular}</option>
@@ -2225,71 +2350,217 @@ export function SchedulerGrid({
                       ) : null}
                     </select>
                   </label>
-                </div>
-
-                <div className="md:col-span-8 flex items-end">
-                  <div className="flex w-full min-w-0 flex-wrap gap-2">
-                    <Button
-                      type="submit"
-                      disabled={
-                        !canWrite ||
-                        shiftAssignSubmitDisabled({
-                          guardId: selectedGuardId,
-                          showRateSelection: quickAssignShowRateSelectionBlock,
-                          selectedRateRuleId,
-                          manualSelectableRulesCount: quickAssignSelectableRulesCount,
-                          useCustomRate,
-                          manualGuardRubles,
-                          manualRateUnit,
-                        })
-                      }
-                      className="min-w-[8rem] flex-1"
-                    >
-                      {quickAssign.replaceShiftId ? "Заменить" : "Назначить"}
-                    </Button>
-                    <input type="hidden" name="isNoShow" value="false" />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={
-                        !canWrite ||
-                        (quickAssign.replaceShiftId
-                          ? !shifts.some((s) => s.id === quickAssign.replaceShiftId) ||
-                            !!shifts.find((s) => s.id === quickAssign.replaceShiftId)?.incidentRecordedAt
-                          : !selectedGuardId)
-                      }
-                      className="min-w-[7.5rem] shrink-0 px-4 text-accent-danger border-accent-danger hover:bg-accent-danger/10"
-                      onClick={() => {
-                        if (quickAssign.replaceShiftId) {
-                          const replaced = shifts.find((s) => s.id === quickAssign.replaceShiftId);
-                          const guard = replaced && guards.find((g) => g.id === replaced.guardId);
-                          if (replaced && !replaced.incidentRecordedAt) {
-                            openIncidentFromShift(replaced, guard?.name ?? replaced.guardId);
-                            return;
-                          }
+                }
+                sidePanel={
+                  <>
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                      <div className="shrink-0 text-xs font-medium text-app-muted">Охранник</div>
+                      <div
+                        className="mt-1.5 flex min-h-0 flex-1 flex-col rounded-button border border-app-border bg-app-surface p-2"
+                        data-dropdown="guard"
+                      >
+                        <div className="shrink-0 truncate rounded-button border border-app-border bg-app-bg px-3 py-2 text-[15px] text-app-text">
+                          {(() => {
+                            if (!quickAssignIntervalReady) return "Сначала укажите время";
+                            const g = activeGuards.find((x) => x.id === selectedGuardId);
+                            return g
+                              ? formatGuardAssignmentLabel(g.name, g.hasCar, quickShiftKind)
+                              : "Выберите охранника";
+                          })()}
+                        </div>
+                        <div className="mt-2 flex shrink-0 gap-2">
+                          <label className="min-w-0 flex-1">
+                            <span className="sr-only">Объект</span>
+                            <select
+                              value={quickGuardObjectFilter}
+                              onChange={(event) => setQuickGuardObjectFilter(event.target.value)}
+                              disabled={!quickAssignIntervalReady}
+                              className="h-10 w-full rounded-button border border-app-border bg-app-bg px-2 text-[13px] text-app-text outline-none focus:border-accent-primary disabled:opacity-60"
+                            >
+                              <option value="">Все объекты</option>
+                              {objects
+                                .filter((obj) => obj.status === "Active")
+                                .map((obj) => (
+                                  <option key={obj.id} value={obj.id}>
+                                    {obj.name}
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                          <label
+                            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-button border border-app-border bg-app-bg px-2.5 text-[13px] text-app-text"
+                            style={{ opacity: quickAssignIntervalReady ? 1 : 0.6 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={quickGuardCarOnly}
+                              onChange={(event) => setQuickGuardCarOnly(event.target.checked)}
+                              disabled={!quickAssignIntervalReady}
+                              className="size-4 accent-accent-primary"
+                            />
+                            Авто
+                          </label>
+                        </div>
+                        <input
+                          value={quickGuardSearch}
+                          onChange={(event) => setQuickGuardSearch(event.target.value)}
+                          placeholder="Поиск охранника"
+                          disabled={!quickAssignIntervalReady}
+                          className="mt-2 w-full shrink-0 rounded-button border border-app-border bg-app-bg px-2 py-2 text-[15px] text-app-text outline-none focus:border-accent-primary disabled:opacity-60"
+                        />
+                        <div className="mt-2 min-h-[16rem] flex-1 overflow-auto lg:min-h-0">
+                          {!quickAssignIntervalReady ? (
+                            <div className="px-2 py-2 text-sm text-app-muted">Сначала укажите время</div>
+                          ) : filteredGuardAvailability.length === 0 ? (
+                            <div className="px-2 py-2 text-sm text-app-muted">Нет свободных охранников</div>
+                          ) : (
+                            filteredGuardAvailability.map((item) => {
+                              const g = item.guard;
+                              const selected = g.id === selectedGuardId;
+                              const neighbors = getNeighborDayShifts(
+                                g.id,
+                                quickAssign.dateIso,
+                                shifts,
+                                objectNameById,
+                                {
+                                  operationalDayStartTime: quickAssignAnchor,
+                                  anchorByObjectId: objectAnchorById,
+                                },
+                              );
+                              const neighborHint = formatNeighborDayShiftsHint(neighbors);
+                              const canSelect = item.available;
+                              return (
+                                <Button
+                                  key={g.id}
+                                  type="button"
+                                  variant={selected ? "secondary" : "menu"}
+                                  size="sm"
+                                  disabled={!canSelect}
+                                  className={`mb-1 h-auto w-full justify-start gap-2 py-2 text-[15px] font-normal ${
+                                    canSelect ? "" : "opacity-60"
+                                  }`}
+                                  onClick={() => {
+                                    if (!canSelect) return;
+                                    setSelectedGuardId(g.id);
+                                    setSelectedRateRuleId("");
+                                    setUseCustomRate(false);
+                                  }}
+                                >
+                                  <span className="min-w-0 flex-1 truncate text-left">
+                                    {formatGuardAssignmentLabel(g.name, g.hasCar, quickShiftKind)}
+                                  </span>
+                                  {neighborHint ? (
+                                    <span
+                                      className="max-w-[58%] shrink-0 truncate text-right text-xs leading-snug"
+                                      style={{
+                                        color: canSelect
+                                          ? designTokens.color.textMuted
+                                          : designTokens.color.accent.warning,
+                                      }}
+                                      title={neighborHint}
+                                    >
+                                      {neighborHint}
+                                    </span>
+                                  ) : null}
+                                </Button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                      <input type="hidden" name="guardId" value={selectedGuardId} />
+                      {selectedGuardAvailability &&
+                      formatGuardOtherObjectsHint(selectedGuardAvailability, objectNameById) ? (
+                        <p
+                          className="mt-2 shrink-0 rounded-button border-2 px-2.5 py-1.5 text-xs font-bold leading-snug"
+                          style={{
+                            borderColor: designTokens.color.accent.warning,
+                            backgroundColor: `${designTokens.color.accent.warning}18`,
+                            color: designTokens.color.accent.warning,
+                          }}
+                        >
+                          {formatGuardOtherObjectsHint(selectedGuardAvailability, objectNameById)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
+                }
+                leftFooter={
+                  <>
+                    <div className="flex w-full min-w-0 flex-wrap gap-2">
+                      <Button
+                        type="submit"
+                        disabled={
+                          !canWrite ||
+                          shiftAssignSubmitDisabled({
+                            guardId: selectedGuardId,
+                            showRateSelection: quickAssignShowRateSelectionBlock,
+                            selectedRateRuleId,
+                            manualSelectableRulesCount: quickAssignSelectableRulesCount,
+                            useCustomRate,
+                            manualGuardRubles,
+                            manualRateUnit,
+                          })
                         }
-                        const form = quickAssignFormRef.current;
-                        if (!form) return;
-                        const noShowInput = form.querySelector('input[name="isNoShow"]') as HTMLInputElement | null;
-                        const guardInput = form.querySelector('input[name="guardId"]') as HTMLInputElement | null;
-                        if (!noShowInput || !guardInput) return;
-                        const replaced = quickAssign.replaceShiftId
-                          ? shifts.find((s) => s.id === quickAssign.replaceShiftId)
-                          : undefined;
-                        guardInput.value = replaced?.guardId ?? selectedGuardId;
-                        noShowInput.value = "true";
-                        if (quickScrollYInputRef.current) quickScrollYInputRef.current.value = String(window.scrollY);
-                        form.requestSubmit();
-                      }}
-                    >
-                      {quickAssign.replaceShiftId ? "Инцидент" : "Невыход в график"}
-                    </Button>
-                  </div>
-                </div>
-              </div>
+                        className="min-w-[8rem] flex-1"
+                      >
+                        {quickAssign.replaceShiftId ? "Заменить" : "Назначить"}
+                      </Button>
+                      <input type="hidden" name="isNoShow" value="false" />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={
+                          !canWrite ||
+                          (quickAssign.replaceShiftId
+                            ? !shifts.some((s) => s.id === quickAssign.replaceShiftId) ||
+                              !!shifts.find((s) => s.id === quickAssign.replaceShiftId)?.incidentRecordedAt
+                            : !selectedGuardId)
+                        }
+                        className="min-w-[7.5rem] shrink-0 px-4 text-accent-danger border-accent-danger hover:bg-accent-danger/10"
+                        onClick={() => {
+                          if (quickAssign.replaceShiftId) {
+                            const replaced = shifts.find((s) => s.id === quickAssign.replaceShiftId);
+                            const guard = replaced && guards.find((g) => g.id === replaced.guardId);
+                            if (replaced && !replaced.incidentRecordedAt) {
+                              openIncidentFromShift(replaced, guard?.name ?? replaced.guardId);
+                              return;
+                            }
+                          }
+                          const form = quickAssignFormRef.current;
+                          if (!form) return;
+                          const noShowInput = form.querySelector('input[name="isNoShow"]') as HTMLInputElement | null;
+                          const guardInput = form.querySelector('input[name="guardId"]') as HTMLInputElement | null;
+                          if (!noShowInput || !guardInput) return;
+                          const replaced = quickAssign.replaceShiftId
+                            ? shifts.find((s) => s.id === quickAssign.replaceShiftId)
+                            : undefined;
+                          guardInput.value = replaced?.guardId ?? selectedGuardId;
+                          noShowInput.value = "true";
+                          if (quickScrollYInputRef.current) quickScrollYInputRef.current.value = String(window.scrollY);
+                          form.requestSubmit();
+                        }}
+                      >
+                        {quickAssign.replaceShiftId ? "Инцидент" : "Невыход в график"}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-app-muted leading-snug">
+                      Пересечение по времени с любой сменой охранника запрещено. Суточный лимит — 24 ч.
+                    </p>
+                    <ShiftAssignGuardProfileSummary
+                      guard={selectedGuardAvailability?.guard ?? null}
+                      objectId={quickAssign.objectId}
+                      rateRules={quickObjectRateRules}
+                      shiftKind={quickShiftKind}
+                      shiftDateIso={quickAssign.dateIso}
+                      holidayDateKeys={holidayDateKeys}
+                    />
+                  </>
+                }
+              />
             </form>
 
-            <div className="mt-4 flex items-center gap-2 text-xs text-app-muted">
+            <div className="mt-3 hidden shrink-0 items-center gap-2 text-xs text-app-muted md:flex">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-app-elevated text-[10px] font-bold text-app-text">i</span>
               Подсказка: суточная смена — поставь одинаковое время начала и конца (например {quickAssignAnchor} → {quickAssignAnchor} следующего дня).
             </div>

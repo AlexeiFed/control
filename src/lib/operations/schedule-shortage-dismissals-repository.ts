@@ -1,10 +1,13 @@
 import { isUndefinedColumnOrTableError } from "../db/column-compat";
 import { query } from "../db/pool";
-import type { ExpectedShifts } from "../scheduling/object-shift-templates";
+import { getMondayWeekStartKhabarovsk } from "../format/display-date";
+import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate, type ExpectedShifts } from "../scheduling/object-shift-templates";
 import type { ScheduleObjectRef, ScheduleObjectShortage } from "../scheduling/schedule-shortage";
 import { buildValidShortageDismissKeySet } from "../scheduling/build-shortage-dismiss-state";
 import { filterShortagesByDismissals, shortageDismissKey } from "../scheduling/schedule-shortage-dismiss";
 import type { Shift } from "../scheduling/types";
+import { getSchedulerSnapshot } from "./scheduler-repository";
+import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
 
 export async function listShortageDismissals(
   objectIds: string[],
@@ -96,4 +99,49 @@ export async function upsertShortageDismissal(input: {
     }
     throw error;
   }
+}
+
+function currentWeekDayIsos(): string[] {
+  const weekStart = getMondayWeekStartKhabarovsk();
+  return Array.from({ length: 7 }, (_, index) =>
+    civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60_000)),
+  );
+}
+
+/**
+ * Пересчитывает валидные dismiss'ы недобора на текущую неделю для UI сетки объекта/планировщика.
+ * Использует тот же снимок и ту же логику фингерпринтов, что и GET /shortages и POST /dismiss-day-shortage —
+ * клиент никогда не должен просто доверять сохранённым в БД строкам без пересчёта.
+ */
+export async function buildCurrentWeekValidShortageDismissKeySet(
+  objectIds: ReadonlyArray<string> = [],
+): Promise<{ weekDayIsos: string[]; validKeys: Set<string> }> {
+  const weekDayIsos = currentWeekDayIsos();
+  const weekStart = getMondayWeekStartKhabarovsk();
+  const snapshot = await getSchedulerSnapshot(weekStart);
+  const objects =
+    objectIds.length > 0 ? snapshot.objects.filter((o) => objectIds.includes(o.id)) : snapshot.objects;
+  const scopedObjectIds = objects.map((o) => o.id);
+
+  if (scopedObjectIds.length === 0) return { weekDayIsos, validKeys: new Set() };
+
+  const templates = await listShiftTemplatesForObjectIds(scopedObjectIds);
+  const expectedByObjectDay = buildExpectedShiftsByObjectAndDay(scopedObjectIds, weekDayIsos, templates);
+  const storedDismissals = await listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[6]!);
+
+  const validKeys = buildValidShortageDismissKeySet({
+    objects,
+    shifts: snapshot.shifts,
+    expectedByObjectDay,
+    weekDayIsos,
+    storedDismissals,
+  });
+
+  return { weekDayIsos, validKeys };
+}
+
+/** Список валидных на текущую неделю dismiss-дат (`YYYY-MM-DD`) для одного объекта, для страницы объекта. */
+export async function listValidShortageDismissDateIsosForObject(objectId: string): Promise<string[]> {
+  const { weekDayIsos, validKeys } = await buildCurrentWeekValidShortageDismissKeySet([objectId]);
+  return weekDayIsos.filter((dateIso) => validKeys.has(shortageDismissKey(objectId, dateIso)));
 }

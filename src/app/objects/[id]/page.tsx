@@ -8,7 +8,7 @@ import { z } from "zod";
 import { assertPermission, hasPermission } from "../../../lib/auth/rbac";
 import { requireSession } from "../../../lib/auth/session";
 import { getObject } from "../../../lib/operations/objects-repository";
-import { listGuardDisplayNamesByIds } from "../../../lib/operations/guards-repository";
+import { listGuardDisplayNamesByIds, listGuardStatusesByIds } from "../../../lib/operations/guards-repository";
 import { listObjectRateRulesForObjects } from "../../../lib/operations/object-rate-rules-repository";
 import { listShiftTemplatesForObjectIds } from "../../../lib/operations/shift-templates-repository";
 import { buildExpectedShiftsForLocalMonth } from "../../../lib/scheduling/object-shift-templates";
@@ -19,10 +19,9 @@ import { listMonthlyPostGuardsByObject } from "../../../lib/operations/object-mo
 import {
   listScheduledGuardsByObjectForLocalMonth,
   listShiftsForObjectInLocalMonth,
-  listShiftsInLocalRange,
 } from "../../../lib/operations/scheduler-repository";
-import { listObjects } from "../../../lib/operations/objects-repository";
 import { bulkCreateShiftsAction } from "../../scheduler/actions";
+import { listValidShortageDismissDateIsosForObject } from "../../../lib/operations/schedule-shortage-dismissals-repository";
 import { ObjectDetailViewLazy } from "../../../components/operations/object-detail-view-lazy";
 import { getKhabarovskComponents } from "../../../lib/format/display-date";
 import { loadHolidayDateSetForLocalRange } from "../../../lib/rates/holiday-calendar";
@@ -66,22 +65,38 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
 
   await ensureMonthlyPostsInherited(id, monthKey);
 
-  const [templates, rateRules, objectHolidays, scheduledGuardsMap, shifts, monthAvailabilityShifts, globalHolidayDateKeys, posts, operationalDayStartTime, monthlyPostGuardsByPostId] =
-    await Promise.all([
-      listShiftTemplatesForObjectIds([id]),
-      canReadRates || canAssignShifts ? listObjectRateRulesForObjects([id]) : Promise.resolve([]),
-      listObjectHolidays(id),
-      listScheduledGuardsByObjectForLocalMonth([id], year, month0),
-      listShiftsForObjectInLocalMonth(id, year, month0),
-      listShiftsInLocalRange(monthStart, monthEndExclusive),
-      loadHolidayDateSetForLocalRange(monthStart, monthEndExclusive),
-      getObjectPosts(id, monthKey),
-      getObjectOperationalDayStartTimeForMonth(id, monthKey),
-      listMonthlyPostGuardsByObject(id, monthKey),
-    ]);
+  // Смены всех объектов за месяц для пикера доступности — НЕ грузим в SSR:
+  // это главный тормоз загрузки и router.refresh() после назначения.
+  // Клиент подтягивает их лениво при открытии модалки назначения.
+  const [
+    templates,
+    rateRules,
+    objectHolidays,
+    scheduledGuardsMap,
+    shifts,
+    globalHolidayDateKeys,
+    posts,
+    operationalDayStartTime,
+    monthlyPostGuardsByPostId,
+    dismissedShortageDateIsos,
+  ] = await Promise.all([
+    listShiftTemplatesForObjectIds([id]),
+    canReadRates || canAssignShifts ? listObjectRateRulesForObjects([id]) : Promise.resolve([]),
+    listObjectHolidays(id),
+    listScheduledGuardsByObjectForLocalMonth([id], year, month0),
+    listShiftsForObjectInLocalMonth(id, year, month0),
+    loadHolidayDateSetForLocalRange(monthStart, monthEndExclusive),
+    getObjectPosts(id, monthKey),
+    getObjectOperationalDayStartTimeForMonth(id, monthKey),
+    listMonthlyPostGuardsByObject(id, monthKey),
+    listValidShortageDismissDateIsosForObject(id),
+  ]);
 
   const gridGuardIds = [...new Set([...object.guardIds, ...shifts.map((s) => s.guardId)])];
-  const gridGuardNames = await listGuardDisplayNamesByIds(gridGuardIds);
+  const [gridGuardNames, gridGuardStatuses] = await Promise.all([
+    listGuardDisplayNamesByIds(gridGuardIds),
+    listGuardStatusesByIds(gridGuardIds),
+  ]);
 
   const expectedShiftsByDateIso = buildExpectedShiftsForLocalMonth(id, year, month0, templates);
   const scheduledGuards = scheduledGuardsMap[id] ?? [];
@@ -92,6 +107,7 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
         object={object}
         posts={posts}
         gridGuardNames={gridGuardNames}
+        gridGuardStatuses={gridGuardStatuses}
         rateRules={rateRules}
         expectedShiftsByDateIso={expectedShiftsByDateIso}
         shiftTemplates={templates}
@@ -100,7 +116,6 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
         globalHolidayDateKeys={[...globalHolidayDateKeys]}
         scheduledGuards={scheduledGuards}
         shifts={shifts}
-        monthAvailabilityShifts={monthAvailabilityShifts}
         viewYear={year}
         viewMonth0={month0}
         error={error}
@@ -109,6 +124,7 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
         bulkCreateShiftsAction={bulkCreateShiftsAction}
         operationalDayStartTime={operationalDayStartTime}
         monthlyPostGuardsByPostId={monthlyPostGuardsByPostId}
+        dismissedShortageDateIsos={dismissedShortageDateIsos}
       />
     </main>
   );
