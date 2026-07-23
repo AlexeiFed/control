@@ -162,9 +162,17 @@ CREATE TABLE IF NOT EXISTS object_shift_templates (
   shifts_per_day int NOT NULL CHECK (shifts_per_day >= 0),
   effective_from date NOT NULL DEFAULT CURRENT_DATE,
   effective_to date,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (object_id, day_of_week, effective_from)
+  created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Уникальность версии: объект + пост (NULL) + день недели + effective_from
+CREATE UNIQUE INDEX IF NOT EXISTS object_shift_templates_object_post_dow_from_uidx
+  ON object_shift_templates (
+    object_id,
+    COALESCE(post_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    day_of_week,
+    effective_from
+  );
 
 ALTER TABLE IF EXISTS object_shift_templates
   ADD COLUMN IF NOT EXISTS shifts_reinforcement_per_day int NOT NULL DEFAULT 0 CHECK (shifts_reinforcement_per_day >= 0);
@@ -364,3 +372,15 @@ CREATE INDEX IF NOT EXISTS timesheet_shift_entries_object_date_idx
   ON timesheet_shift_entries (object_id, work_date);
 CREATE INDEX IF NOT EXISTS timesheet_shift_entries_range_idx
   ON timesheet_shift_entries (starts_at, ends_at);
+
+CREATE TABLE IF NOT EXISTS schedule_day_shortage_dismissals (
+  object_id uuid NOT NULL REFERENCES security_objects(id) ON DELETE CASCADE,
+  date_iso date NOT NULL,
+  fingerprint text NOT NULL,
+  dismissed_by text NOT NULL,
+  dismissed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (object_id, date_iso)
+);
+
+CREATE INDEX IF NOT EXISTS schedule_day_shortage_dismissals_date_idx
+  ON schedule_day_shortage_dismissals (date_iso);
