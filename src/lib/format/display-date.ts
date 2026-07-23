@@ -167,6 +167,15 @@ export function khabarovskWeekRangeContaining(isoDate: string): KhabarovskInterv
   return { start, endExclusive: new Date(start.getTime() + 7 * 24 * 3600_000) };
 }
 
+/** `YYYY-MM-DD` попадает в текущую календарную неделю пн–вс (Хабаровск). */
+export function isIsoInCurrentKhabarovskWeek(dateIso: string, now = new Date()): boolean {
+  const todayIso = toDateIsoKhabarovsk(now);
+  const { start, endExclusive } = khabarovskWeekRangeContaining(todayIso);
+  const startIso = toDateIsoKhabarovsk(start);
+  const lastIso = toDateIsoKhabarovsk(new Date(endExclusive.getTime() - 1));
+  return dateIso >= startIso && dateIso <= lastIso;
+}
+
 /** Календарный месяц в Хабаровске для anchor `YYYY-MM-DD`. */
 export function khabarovskMonthRangeContaining(isoDate: string): KhabarovskInterval {
   const parsed = parseIsoDateKhabarovskOrNull(isoDate);

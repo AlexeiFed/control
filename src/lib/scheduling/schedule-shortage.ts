@@ -3,6 +3,7 @@ import {
   shiftBelongsToOperationalDayColumn,
 } from "./operational-day-timeline";
 import type { ExpectedShifts } from "./object-shift-templates";
+import { shiftCoverageMinutes } from "./shift-attendance";
 import type { Shift } from "./types";
 
 export type ScheduleObjectRef = {
@@ -83,6 +84,16 @@ export type DayPlanMetrics = {
   shiftLeadHoursOver: number;
 };
 
+/** Есть ли недобор часов (осн/ус/мп/СтМ) относительно плана дня. */
+export function dayPlanHasHoursShortage(metrics: DayPlanMetrics): boolean {
+  return (
+    metrics.hoursShort > 0 ||
+    metrics.reinforcementHoursShort > 0 ||
+    metrics.rapidResponseHoursShort > 0 ||
+    metrics.shiftLeadHoursShort > 0
+  );
+}
+
 /** Подпись плана: «2 × 14 ч» или «1 чел.» */
 export function formatTemplateCountWithHours(count: number, hours: number, unit: string): string {
   if (count <= 0) return "";
@@ -110,27 +121,22 @@ export function computeDayPlanMetrics(
   const expectedShiftLeadHours = expectedShiftLead * norms.shiftLeadShiftHours;
   if (expectedHoursRegular <= 0 && expectedReinf <= 0 && expectedMp <= 0 && expectedShiftLead <= 0) return null;
 
-  const active = dayShifts.filter((s) => !s.isNoShow);
+  // Полный невыход не даёт часов; частичная отработка (workedUntil) — даёт отработанный фрагмент.
+  const active = dayShifts.filter((s) => shiftCoverageMinutes(s) > 0);
   const regularShifts = active.filter((s) => s.shiftKind === "Regular");
   const reinforcementShifts = active.filter((s) => s.shiftKind === "Reinforcement");
   const rapidResponseShifts = active.filter((s) => s.shiftKind === "RapidResponse");
   const shiftLeadShifts = active.filter((s) => s.shiftKind === "ShiftLead");
-  const regularDayMinutes = regularShifts.reduce(
-    (sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60_000,
-    0,
-  );
+  const regularDayMinutes = regularShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
   const reinforcementDayMinutes = reinforcementShifts.reduce(
-    (sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60_000,
+    (sum, s) => sum + shiftCoverageMinutes(s),
     0,
   );
   const rapidResponseDayMinutes = rapidResponseShifts.reduce(
-    (sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60_000,
+    (sum, s) => sum + shiftCoverageMinutes(s),
     0,
   );
-  const shiftLeadDayMinutes = shiftLeadShifts.reduce(
-    (sum, s) => sum + (s.endsAt.getTime() - s.startsAt.getTime()) / 60_000,
-    0,
-  );
+  const shiftLeadDayMinutes = shiftLeadShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
   const regularDayHours = roundHours(regularDayMinutes / 60);
   const reinforcementDayHours = roundHours(reinforcementDayMinutes / 60);
   const rapidResponseDayHours = roundHours(rapidResponseDayMinutes / 60);

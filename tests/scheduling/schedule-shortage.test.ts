@@ -200,4 +200,161 @@ describe("schedule-shortage", () => {
     expect(result[0]?.days[0]?.dateIso).toBe("2026-06-15");
     expect(result[0]?.days[0]?.regularDayHours).toBe(1);
   });
+
+  it("counts partial attendance hours toward plan coverage", () => {
+    const metrics = computeDayPlanMetrics(
+      [
+        {
+          id: "partial",
+          guardId: "g1",
+          objectId: "obj1",
+          startsAt: new Date("2026-07-12T08:00:00+10:00"),
+          endsAt: new Date("2026-07-13T08:00:00+10:00"),
+          shiftKind: "Regular",
+          manualClientRateCents: null,
+          manualGuardRateCents: null,
+          manualRateUnit: null,
+          manualRateReason: "",
+          isNoShow: true,
+          incidentCategory: "LeftWork",
+          incidentComment: "",
+          incidentWorkedUntilAt: new Date("2026-07-12T20:00:00+10:00"),
+          incidentRecordedAt: new Date("2026-07-12T20:05:00+10:00"),
+          replacedByShiftId: null,
+          selectedRateRuleId: null,
+          postId: null,
+        },
+        {
+          id: "replacement",
+          guardId: "g2",
+          objectId: "obj1",
+          startsAt: new Date("2026-07-12T20:00:00+10:00"),
+          endsAt: new Date("2026-07-13T08:00:00+10:00"),
+          shiftKind: "Regular",
+          manualClientRateCents: null,
+          manualGuardRateCents: null,
+          manualRateUnit: null,
+          manualRateReason: "",
+          isNoShow: false,
+          incidentCategory: null,
+          incidentComment: "",
+          incidentWorkedUntilAt: null,
+          incidentRecordedAt: null,
+          replacedByShiftId: null,
+          selectedRateRuleId: null,
+          postId: null,
+        },
+      ],
+      {
+        regular: 1,
+        reinforcement: 0,
+        shiftHours: 24,
+        reinforcementShiftHours: 24,
+        rapidResponse: 0,
+        rapidResponseShiftHours: 24,
+        shiftLead: 0,
+        shiftLeadShiftHours: 24,
+      },
+    );
+    expect(metrics?.regularDayHours).toBe(24);
+    expect(metrics?.hoursShort).toBe(0);
+  });
+
+  it("ignores full no-show without workedUntil in plan coverage", () => {
+    const metrics = computeDayPlanMetrics(
+      [
+        {
+          id: "noshow",
+          guardId: "g1",
+          objectId: "obj1",
+          startsAt: new Date("2026-07-12T08:00:00+10:00"),
+          endsAt: new Date("2026-07-13T08:00:00+10:00"),
+          shiftKind: "Regular",
+          manualClientRateCents: null,
+          manualGuardRateCents: null,
+          manualRateUnit: null,
+          manualRateReason: "",
+          isNoShow: true,
+          incidentCategory: "FullNoShow",
+          incidentComment: "",
+          incidentWorkedUntilAt: null,
+          incidentRecordedAt: new Date("2026-07-12T09:00:00+10:00"),
+          replacedByShiftId: null,
+          selectedRateRuleId: null,
+          postId: null,
+        },
+      ],
+      {
+        regular: 1,
+        reinforcement: 0,
+        shiftHours: 24,
+        reinforcementShiftHours: 24,
+        rapidResponse: 0,
+        rapidResponseShiftHours: 24,
+        shiftLead: 0,
+        shiftLeadShiftHours: 24,
+      },
+    );
+    expect(metrics?.regularDayHours).toBe(0);
+    expect(metrics?.hoursShort).toBe(24);
+  });
+
+  it("counts LeftWork without workedUntil as full planned shift hours", () => {
+    const metrics = computeDayPlanMetrics(
+      [
+        {
+          id: "left-no-until",
+          guardId: "g1",
+          objectId: "obj1",
+          startsAt: new Date("2026-07-12T08:00:00+10:00"),
+          endsAt: new Date("2026-07-12T20:00:00+10:00"),
+          shiftKind: "Regular",
+          manualClientRateCents: null,
+          manualGuardRateCents: null,
+          manualRateUnit: null,
+          manualRateReason: "",
+          isNoShow: true,
+          incidentCategory: "LeftWork",
+          incidentComment: "",
+          incidentWorkedUntilAt: null,
+          incidentRecordedAt: new Date("2026-07-12T20:05:00+10:00"),
+          replacedByShiftId: null,
+          selectedRateRuleId: null,
+          postId: null,
+        },
+        {
+          id: "tail",
+          guardId: "g2",
+          objectId: "obj1",
+          startsAt: new Date("2026-07-12T20:00:00+10:00"),
+          endsAt: new Date("2026-07-13T08:00:00+10:00"),
+          shiftKind: "Regular",
+          manualClientRateCents: null,
+          manualGuardRateCents: null,
+          manualRateUnit: null,
+          manualRateReason: "",
+          isNoShow: false,
+          incidentCategory: null,
+          incidentComment: "",
+          incidentWorkedUntilAt: null,
+          incidentRecordedAt: null,
+          replacedByShiftId: null,
+          selectedRateRuleId: null,
+          postId: null,
+        },
+      ],
+      {
+        regular: 1,
+        reinforcement: 0,
+        shiftHours: 24,
+        reinforcementShiftHours: 24,
+        rapidResponse: 0,
+        rapidResponseShiftHours: 24,
+        shiftLead: 0,
+        shiftLeadShiftHours: 24,
+      },
+    );
+    expect(metrics?.regularDayHours).toBe(24);
+    expect(metrics?.hoursShort).toBe(0);
+  });
 });
