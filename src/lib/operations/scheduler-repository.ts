@@ -1515,6 +1515,9 @@ export async function recordShiftIncident(input: {
     if (input.category === "FullNoShow" && workedUntilIso) {
       throw new Error("Для полного невыхода не указывают время отработки");
     }
+    if (input.category === "LeftWork" && !workedUntilIso) {
+      throw new Error("Для «Ушёл с работы» укажите время, до которого охранник отработал");
+    }
 
     const replacementStartsAt = workedUntilIso ? new Date(workedUntilIso) : startsAt;
 

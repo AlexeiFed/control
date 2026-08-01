@@ -2,7 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
-import { formatCompactTimeRangeLocal, formatDisplayDateTimeLocal, formatDisplayDateFromIso, toDateIsoKhabarovsk } from "../../lib/format/display-date";
+import {
+  formatCompactTimeRangeLocal,
+  formatDisplayDateTimeLocal,
+  formatDisplayDateFromIso,
+  toDateIsoKhabarovsk,
+} from "../../lib/format/display-date";
 import { filterShiftLogs } from "../../lib/scheduling/shift-log-filters";
 import type { ShiftLog } from "../../lib/scheduling/types";
 
@@ -18,10 +23,30 @@ const incidentLevelLabels: Record<ShiftLog["incidentLevel"], string> = {
   Critical: "Критично",
 };
 
+function formatMonthKeyRu(monthKey: string): string {
+  const [yearRaw, monthRaw] = monthKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return monthKey;
+  const label = new Intl.DateTimeFormat("ru-RU", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1, 12)));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** 12 месяцев текущего года (Хабаровск), янв → дек. */
+function buildYearMonthKeys(year: number): string[] {
+  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
+}
+
 export function ShiftLogPanel({
   logs,
   currentRole,
 }: ShiftLogPanelProps) {
+  const currentMonthKey = useMemo(() => toDateIsoKhabarovsk(new Date()).slice(0, 7), []);
+  const [monthKey, setMonthKey] = useState(currentMonthKey);
   const [objectName, setObjectName] = useState("");
   const [guardQuery, setGuardQuery] = useState("");
   const [level, setLevel] = useState<ShiftLog["incidentLevel"] | "">("");
@@ -34,9 +59,13 @@ export function ShiftLogPanel({
       a.localeCompare(b, "ru-RU"),
     );
   }, [logs]);
+  const monthOptions = useMemo(() => {
+    const year = Number(currentMonthKey.slice(0, 4));
+    return buildYearMonthKeys(Number.isFinite(year) ? year : new Date().getFullYear());
+  }, [currentMonthKey]);
   const filteredLogs = useMemo(
-    () => filterShiftLogs(logs, { objectName, guardQuery, level, textQuery }),
-    [logs, objectName, guardQuery, level, textQuery],
+    () => filterShiftLogs(logs, { monthKey, objectName, guardQuery, level, textQuery }),
+    [logs, monthKey, objectName, guardQuery, level, textQuery],
   );
 
   return (
@@ -57,7 +86,22 @@ export function ShiftLogPanel({
         </p>
       ) : null}
 
-      <div className="mt-6 grid gap-3 rounded-card border border-app-border bg-app-elevated p-4 md:grid-cols-4">
+      <div className="mt-6 grid gap-3 rounded-card border border-app-border bg-app-elevated p-4 md:grid-cols-2 xl:grid-cols-5">
+        <label className="grid gap-1 text-sm">
+          <span className="text-app-muted">Месяц</span>
+          <select
+            value={monthKey}
+            onChange={(event) => setMonthKey(event.target.value)}
+            className="rounded-button border border-app-border bg-app-surface px-3 py-2 text-app-text"
+          >
+            <option value="">Все месяцы</option>
+            {monthOptions.map((key) => (
+              <option key={key} value={key}>
+                {formatMonthKeyRu(key)}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="grid gap-1 text-sm">
           <span className="text-app-muted">Объект</span>
           <select
@@ -79,7 +123,7 @@ export function ShiftLogPanel({
             value={guardQuery}
             onChange={(event) => setGuardQuery(event.target.value)}
             className="rounded-button border border-app-border bg-app-surface px-3 py-2 text-app-text outline-none focus:border-accent-primary"
-            placeholder="Фамилия или имя"
+            placeholder="Фамилия или имя (по всем объектам)"
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -124,14 +168,19 @@ export function ShiftLogPanel({
                   </span>
                 ) : null}
               </div>
-              <time className="text-sm text-app-muted">{formatDisplayDateTimeLocal(log.createdAt)}</time>
+              <div className="text-right text-sm text-app-muted">
+                <div className="text-[10px] uppercase tracking-wider text-app-muted/80">Дата записи</div>
+                <time dateTime={log.createdAt instanceof Date ? log.createdAt.toISOString() : undefined}>
+                  {formatDisplayDateTimeLocal(log.createdAt)}
+                </time>
+              </div>
             </div>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-app-muted">
               {log.objectName ? <span>{log.objectName}</span> : null}
               {log.guardName ? <span>{log.guardName}</span> : null}
               {log.shiftStartsAt && log.shiftEndsAt ? (
                 <span>
-                  {formatDisplayDateFromIso(toDateIsoKhabarovsk(log.shiftStartsAt))} ·{" "}
+                  Смена: {formatDisplayDateFromIso(toDateIsoKhabarovsk(log.shiftStartsAt))} ·{" "}
                   {formatCompactTimeRangeLocal(log.shiftStartsAt, log.shiftEndsAt)}
                 </span>
               ) : null}

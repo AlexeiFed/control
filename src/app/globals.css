@@ -82,6 +82,20 @@ textarea {
   }
 }
 
+@keyframes schedule-shortage-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.schedule-shortage-blink {
+  animation: schedule-shortage-blink 0.9s ease-in-out infinite;
+}
+
 .toast-shake {
   animation: toast-shake 240ms ease-in-out;
 }

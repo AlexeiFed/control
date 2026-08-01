@@ -16,6 +16,8 @@ type TimesheetFiltersProps = {
     objectId?: string;
     month?: string;
     week?: string;
+    /** `1` — только смены без ставки */
+    unpriced?: string;
   };
 };
 
@@ -25,7 +27,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
   const searchParams = useSearchParams();
   const sectionRef = useRef<HTMLDivElement | null>(null);
 
-  const [openMenu, setOpenMenu] = useState<"guard" | "object" | "week" | "month" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"guard" | "object" | "week" | "month" | "unpriced" | null>(null);
   const [guardSearch, setGuardSearch] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
   const [weekSearch, setWeekSearch] = useState("");
@@ -33,6 +35,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
   const [objectId, setObjectId] = useState(filters.objectId ?? "");
   const [month, setMonth] = useState(filters.month ?? "");
   const [week, setWeek] = useState(filters.week ?? "");
+  const [unpricedOnly, setUnpricedOnly] = useState(filters.unpriced === "1");
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -40,7 +43,8 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
     setObjectId(filters.objectId ?? "");
     setMonth(filters.month ?? "");
     setWeek(filters.week ?? "");
-  }, [filters.guardId, filters.objectId, filters.month, filters.week]);
+    setUnpricedOnly(filters.unpriced === "1");
+  }, [filters.guardId, filters.objectId, filters.month, filters.week, filters.unpriced]);
 
   useEffect(() => {
     function onDocumentMouseDown(event: MouseEvent) {
@@ -84,12 +88,18 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
   useEffect(() => {
     if (week && !weekOptions.some((item) => item.id === week)) {
       setWeek("");
-      pushNext({ guardId, objectId, month, week: "" });
+      pushNext({ guardId, objectId, month, week: "", unpricedOnly });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
-  function buildHref(next: { guardId: string; objectId: string; month: string; week: string }) {
+  function buildHref(next: {
+    guardId: string;
+    objectId: string;
+    month: string;
+    week: string;
+    unpricedOnly: boolean;
+  }) {
     const params = new URLSearchParams(searchParams?.toString());
     if (next.guardId) params.set("guardId", next.guardId);
     else params.delete("guardId");
@@ -99,12 +109,20 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
     else params.delete("month");
     if (next.week) params.set("week", next.week);
     else params.delete("week");
+    if (next.unpricedOnly) params.set("unpriced", "1");
+    else params.delete("unpriced");
     params.delete("q");
     const qs = params.toString();
     return qs ? `${pathname}?${qs}` : pathname;
   }
 
-  function pushNext(next: { guardId: string; objectId: string; month: string; week: string }) {
+  function pushNext(next: {
+    guardId: string;
+    objectId: string;
+    month: string;
+    week: string;
+    unpricedOnly: boolean;
+  }) {
     const href = buildHref(next);
     window.dispatchEvent(new CustomEvent("app:nav-pending", { detail: { pending: true } }));
     startTransition(() => {
@@ -126,10 +144,10 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
     const nextDate = new Date(y, m, 1);
     const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
     const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
-    router.prefetch(buildHref({ guardId, objectId, month: prevMonth, week: "" }));
-    router.prefetch(buildHref({ guardId, objectId, month: nextMonth, week: "" }));
+    router.prefetch(buildHref({ guardId, objectId, month: prevMonth, week: "", unpricedOnly }));
+    router.prefetch(buildHref({ guardId, objectId, month: nextMonth, week: "", unpricedOnly }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month, guardId, objectId]);
+  }, [month, guardId, objectId, unpricedOnly]);
 
   const monthLabel = useMemo(() => {
     if (!month) return "Выберите месяц";
@@ -171,7 +189,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
     ) : null}
     <div
       ref={sectionRef}
-      className={`grid gap-3 rounded-card border border-app-border bg-app-elevated p-3 sm:p-4 md:grid-cols-2 lg:grid-cols-4 ${isPending ? "pointer-events-none opacity-60" : ""}`}
+      className={`grid gap-3 rounded-card border border-app-border bg-app-elevated p-3 sm:p-4 md:grid-cols-2 lg:grid-cols-5 ${isPending ? "pointer-events-none opacity-60" : ""}`}
       onClickCapture={(event) => {
         const target = event.target;
         if (target instanceof Element && !target.closest("[data-dropdown]")) setOpenMenu(null);
@@ -208,7 +226,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                   onClick={() => {
                     setGuardId("");
                     setOpenMenu(null);
-                    pushNext({ guardId: "", objectId, month, week });
+                    pushNext({ guardId: "", objectId, month, week, unpricedOnly });
                   }}
                 >
                   Все охранники
@@ -223,7 +241,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                     onClick={() => {
                       setGuardId(g.id);
                       setOpenMenu(null);
-                      pushNext({ guardId: g.id, objectId, month, week });
+                      pushNext({ guardId: g.id, objectId, month, week, unpricedOnly });
                     }}
                   >
                     {g.name}
@@ -269,7 +287,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                   onClick={() => {
                     setObjectId("");
                     setOpenMenu(null);
-                    pushNext({ guardId, objectId: "", month, week });
+                    pushNext({ guardId, objectId: "", month, week, unpricedOnly });
                   }}
                 >
                   Все объекты
@@ -284,7 +302,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                     onClick={() => {
                       setObjectId(o.id);
                       setOpenMenu(null);
-                      pushNext({ guardId, objectId: o.id, month, week });
+                      pushNext({ guardId, objectId: o.id, month, week, unpricedOnly });
                     }}
                   >
                     {o.name}
@@ -313,7 +331,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                 const prev = new Date(y, m - 2, 1);
                 const nextVal = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
                 setMonth(nextVal);
-                pushNext({ guardId, objectId, month: nextVal, week: "" });
+                pushNext({ guardId, objectId, month: nextVal, week: "", unpricedOnly });
               }}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -337,7 +355,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                 const next = new Date(y, m, 1);
                 const nextVal = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
                 setMonth(nextVal);
-                pushNext({ guardId, objectId, month: nextVal, week: "" });
+                pushNext({ guardId, objectId, month: nextVal, week: "", unpricedOnly });
               }}
             >
               <ChevronRight className="h-4 w-4" />
@@ -356,7 +374,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                     onClick={() => {
                       setMonth(opt.id);
                       setOpenMenu(null);
-                      pushNext({ guardId, objectId, month: opt.id, week: "" });
+                      pushNext({ guardId, objectId, month: opt.id, week: "", unpricedOnly });
                     }}
                   >
                     {opt.label}
@@ -401,7 +419,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                   onClick={() => {
                     setWeek("");
                     setOpenMenu(null);
-                    pushNext({ guardId, objectId, month, week: "" });
+                    pushNext({ guardId, objectId, month, week: "", unpricedOnly });
                   }}
                 >
                   Все недели
@@ -416,7 +434,7 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                     onClick={() => {
                       setWeek(item.id);
                       setOpenMenu(null);
-                      pushNext({ guardId, objectId, month, week: item.id });
+                      pushNext({ guardId, objectId, month, week: item.id, unpricedOnly });
                     }}
                   >
                     {item.label}
@@ -426,6 +444,50 @@ export function TimesheetFilters({ guardOptions, objectOptions, filters }: Times
                   <div className="px-2 py-2 text-xs text-app-muted">Совпадений нет</div>
                 ) : null}
               </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-2 text-sm">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted">Без ставки</span>
+        <div className="relative" data-dropdown="unpriced">
+          <Button
+            type="button"
+            variant="outline"
+            className={`w-full justify-start bg-app-bg font-medium ${unpricedOnly ? "border-accent-warning text-accent-warning" : ""}`}
+            onClick={() => setOpenMenu((current) => (current === "unpriced" ? null : "unpriced"))}
+          >
+            {unpricedOnly ? "Только без ставки" : "Все смены"}
+          </Button>
+          {openMenu === "unpriced" ? (
+            <div className="absolute z-20 mt-2 w-full rounded-button border border-app-border bg-app-surface p-2 shadow-glow">
+              <Button
+                type="button"
+                variant="menu"
+                size="sm"
+                className={`mb-1 justify-start text-left ${!unpricedOnly ? "bg-accent-primary/10 text-accent-primary" : ""}`}
+                onClick={() => {
+                  setUnpricedOnly(false);
+                  setOpenMenu(null);
+                  pushNext({ guardId, objectId, month, week, unpricedOnly: false });
+                }}
+              >
+                Все смены
+              </Button>
+              <Button
+                type="button"
+                variant="menu"
+                size="sm"
+                className={`mb-1 justify-start text-left ${unpricedOnly ? "bg-accent-warning/10 text-accent-warning" : ""}`}
+                onClick={() => {
+                  setUnpricedOnly(true);
+                  setOpenMenu(null);
+                  pushNext({ guardId, objectId, month, week, unpricedOnly: true });
+                }}
+              >
+                Только без ставки
+              </Button>
             </div>
           ) : null}
         </div>

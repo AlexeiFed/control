@@ -14,6 +14,8 @@ export type AttendanceIncidentLine = {
 
 export type TimesheetRow = {
   guardName: string;
+  /** Стабильный id объекта; группировка/ведомость по нему, не по имени. */
+  objectId?: string;
   objectName: string;
   postId?: string | null;
   postName?: string | null;
@@ -193,6 +195,7 @@ function buildTimesheetRow(input: BuildTimesheetRowInput): TimesheetRow {
   const attendanceIncident = buildAttendanceIncident(input.shift, input.unworkedHours);
   return {
     guardName: input.guard?.name ?? input.shift.guardId,
+    objectId: input.shift.objectId,
     objectName: input.object?.name ?? input.shift.objectId,
     postId: input.shift.postId,
     postName: input.postName ?? null,

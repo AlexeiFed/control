@@ -18,7 +18,7 @@ import {
 import type { Guard, IncidentCategory, SecurityObject, Shift } from "../scheduling/types";
 import { normalizeShiftKindFromDb } from "../scheduling/types";
 
-const TIMESHEET_ENTRY_COMPUTATION_VERSION = 3;
+const TIMESHEET_ENTRY_COMPUTATION_VERSION = 4;
 
 type ShiftSyncRow = {
   id: string;
@@ -154,6 +154,52 @@ async function loadIncidentLogLines(shiftId: string): Promise<Array<{ createdAt:
     [shiftId],
   );
   return rows.map((row) => ({ createdAt: row.created_at, note: row.note }));
+}
+
+async function loadIncidentLogLinesForShifts(
+  shiftIds: readonly string[],
+): Promise<Map<string, Array<{ createdAt: string; note: string }>>> {
+  const result = new Map<string, Array<{ createdAt: string; note: string }>>();
+  if (shiftIds.length === 0) return result;
+  for (const id of shiftIds) result.set(id, []);
+
+  const rows = await query<LogLineRow & { shift_id: string }>(
+    `
+      SELECT shift_id::text, note, created_at::text AS created_at
+      FROM (
+        SELECT
+          shift_id,
+          note,
+          created_at,
+          ROW_NUMBER() OVER (PARTITION BY shift_id ORDER BY created_at DESC) AS rn
+        FROM shift_logs
+        WHERE shift_id = ANY($1::uuid[])
+      ) ranked
+      WHERE rn <= 15
+      ORDER BY shift_id, created_at DESC
+    `,
+    [shiftIds],
+  );
+  for (const row of rows) {
+    const list = result.get(row.shift_id) ?? [];
+    list.push({ createdAt: row.created_at, note: row.note });
+    result.set(row.shift_id, list);
+  }
+  return result;
+}
+
+async function mapPool<T>(items: readonly T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  if (items.length === 0) return;
+  const limit = Math.max(1, concurrency);
+  let index = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const current = items[index]!;
+      index += 1;
+      await fn(current);
+    }
+  });
+  await Promise.all(workers);
 }
 
 async function upsertTimesheetEntry(shift: Shift, row: TimesheetRow): Promise<void> {
@@ -411,6 +457,121 @@ export async function backfillTimesheetEntriesForObjectSafe(objectId: string): P
   } catch (error) {
     if (isUndefinedColumnOrTableError(error)) return;
     console.error("[timesheet-backfill] object", objectId, error);
+  }
+}
+
+/**
+ * Пересчёт табеля объекта только для смен, пересекающих интервал с localFromIso (Хабаровск) и далее.
+ * Архивные месяцы до этой даты не трогаем.
+ * Батч: ставки/праздники/профили один раз, upsert параллельно — иначе «Изменить с даты» висит минутами.
+ */
+export async function backfillTimesheetEntriesForObjectFromDate(
+  objectId: string,
+  localFromIso: string,
+): Promise<number> {
+  const rangeStart = new Date(`${localFromIso}T00:00:00+10:00`);
+  const [incidentSel, rateRuleSel] = await Promise.all([
+    getShiftIncidentSelectColumns("s"),
+    getShiftSelectedRateRuleSelect("s"),
+  ]);
+  const loadedRows = await query<ShiftSyncRow>(
+    `
+      SELECT
+        s.id,
+        s.guard_id,
+        s.object_id,
+        s.starts_at::text,
+        s.ends_at::text,
+        s.shift_kind,
+        s.manual_client_rate_cents,
+        s.manual_guard_rate_cents,
+        s.manual_rate_unit,
+        s.manual_rate_reason,
+        s.is_no_show,
+        s.post_id,
+        p.name AS post_name,
+        ${incidentSel},
+        ${rateRuleSel},
+        g.first_name,
+        g.last_name,
+        g.status,
+        g.position,
+        g.license_type,
+        g.employment_type,
+        g.is_trainee,
+        g.trainee_until::text,
+        o.name AS object_name
+      FROM shifts s
+      JOIN guards g ON g.id = s.guard_id
+      JOIN security_objects o ON o.id = s.object_id
+      LEFT JOIN object_posts p ON p.id = s.post_id
+      WHERE s.object_id = $1::uuid
+        AND s.ends_at > $2
+      ORDER BY s.starts_at ASC
+    `,
+    [objectId, rangeStart.toISOString()],
+  );
+  if (loadedRows.length === 0) return 0;
+
+  const mapped = loadedRows.map(mapShiftSyncRow);
+  let minStart = mapped[0]!.shift.startsAt;
+  let maxEnd = mapped[0]!.shift.endsAt;
+  const guardIds = new Set<string>();
+  for (const item of mapped) {
+    guardIds.add(item.guard.id);
+    if (item.shift.startsAt < minStart) minStart = item.shift.startsAt;
+    if (item.shift.endsAt > maxEnd) maxEnd = item.shift.endsAt;
+  }
+
+  const shiftIds = loadedRows.map((row) => row.id);
+  const [rateRules, holidayDates, periods, incidentLogLinesByShiftId] = await Promise.all([
+    listObjectRateRules(objectId),
+    loadHolidayDateSetForLocalRange(minStart, maxEnd),
+    listProfilePeriodsForGuards([...guardIds]),
+    loadIncidentLogLinesForShifts(shiftIds),
+  ]);
+  const profileResolver = new GuardProfileResolver(periods);
+  const rateRulesByObjectId = { [objectId]: rateRules };
+  const postsByPostId = new Map<string, { id: string; name: string }>();
+  for (const row of loadedRows) {
+    if (row.post_id && row.post_name) {
+      postsByPostId.set(row.post_id, { id: row.post_id, name: row.post_name });
+    }
+  }
+
+  await mapPool(mapped, 12, async (item) => {
+    const { shift, guard, object } = item;
+    const rows = buildTimesheetRows({
+      guards: [guard],
+      objects: [object],
+      shifts: [shift],
+      holidayDates,
+      incidentLogLinesByShiftId,
+      rateRulesByObjectId,
+      postsByPostId: postsByPostId.size > 0 ? postsByPostId : undefined,
+      timeZone: DEFAULT_SHIFT_TIMEZONE,
+      profileResolver,
+    });
+    const row = rows[0];
+    if (!row) {
+      await query(`DELETE FROM timesheet_shift_entries WHERE shift_id = $1::uuid`, [shift.id]);
+      return;
+    }
+    await upsertTimesheetEntry(shift, row);
+  });
+
+  return loadedRows.length;
+}
+
+export async function backfillTimesheetEntriesForObjectFromDateSafe(
+  objectId: string,
+  localFromIso: string,
+): Promise<void> {
+  try {
+    await backfillTimesheetEntriesForObjectFromDate(objectId, localFromIso);
+  } catch (error) {
+    if (isUndefinedColumnOrTableError(error)) return;
+    console.error("[timesheet-backfill] object-from", objectId, localFromIso, error);
   }
 }
 

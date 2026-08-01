@@ -481,7 +481,6 @@ export async function syncGuardProfilePeriodsFromCompliance(
 
   const licenseSegments = buildLicensePeriodSegments({
     initialFrom,
-    licenseType: input.licenseType,
     personalCardAssignedOn: input.personalCardAssignedOn,
   });
   const employmentSegments = buildEmploymentPeriodSegments({

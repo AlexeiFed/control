@@ -6,10 +6,10 @@
     "role": "Administrator",
     "active": true,
     "sessionVersion": 1,
-    "lastLoginAt": "2026-07-06T13:46:15.980Z",
+    "lastLoginAt": "2026-07-12T11:56:13.161Z",
     "passwordHash": "$argon2id$v=19$m=19456,t=2,p=1$GVdwF/YvrLLB7QNHhhXTaw$ADXeYc5AbKvfiCQ9LWWNEygNF0lPSAtowxDHJtDDhCc",
     "createdAt": "2026-04-29T05:26:07.624Z",
-    "updatedAt": "2026-07-06T13:46:15.980Z"
+    "updatedAt": "2026-07-12T11:56:13.161Z"
   },
   {
     "id": "8ff2c63e-ce71-461d-aae0-7fa2a08200b9",

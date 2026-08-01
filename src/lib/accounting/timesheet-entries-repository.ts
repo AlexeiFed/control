@@ -19,6 +19,7 @@ function parseGuardRateContributions(value: unknown): GuardRateContribution[] {
 }
 
 type TimesheetEntryDbRow = {
+  object_id: string;
   guard_name: string;
   object_name: string;
   post_id: string | null;
@@ -54,6 +55,7 @@ function toIsoTimestamp(value: string | Date): string {
 function mapDbRowToTimesheetRow(row: TimesheetEntryDbRow): TimesheetRow {
   return {
     guardName: row.guard_name,
+    objectId: row.object_id,
     objectName: row.object_name,
     postId: row.post_id,
     postName: row.post_name,
@@ -207,34 +209,36 @@ export async function listTimesheetEntries(
     const rows = await query<TimesheetEntryDbRow>(
       `
         SELECT
-          guard_name,
-          object_name,
-          post_id,
-          post_name,
-          starts_at,
-          ends_at,
-          total_hours::text,
-          night_hours::text,
-          holiday_hours::text,
-          regular_hours::text,
-          reinforcement_hours::text,
-          rapid_response_hours::text,
-          unworked_hours::text,
-          client_amount_cents,
-          guard_amount_cents,
-          margin_cents,
-          unpriced,
-          is_no_show,
-          incidents_count,
-          attendance_incident,
-          incident_log_lines,
-          guard_rate_contributions
-        FROM timesheet_shift_entries
-        WHERE ends_at > $1
-          AND starts_at < $2
-          AND ($3::uuid IS NULL OR guard_id = $3)
-          AND ($4::uuid IS NULL OR object_id = $4)
-        ORDER BY starts_at ASC
+          e.object_id::text AS object_id,
+          e.guard_name,
+          COALESCE(o.name, e.object_name) AS object_name,
+          e.post_id,
+          e.post_name,
+          e.starts_at,
+          e.ends_at,
+          e.total_hours::text,
+          e.night_hours::text,
+          e.holiday_hours::text,
+          e.regular_hours::text,
+          e.reinforcement_hours::text,
+          e.rapid_response_hours::text,
+          e.unworked_hours::text,
+          e.client_amount_cents,
+          e.guard_amount_cents,
+          e.margin_cents,
+          e.unpriced,
+          e.is_no_show,
+          e.incidents_count,
+          e.attendance_incident,
+          e.incident_log_lines,
+          e.guard_rate_contributions
+        FROM timesheet_shift_entries e
+        LEFT JOIN security_objects o ON o.id = e.object_id
+        WHERE e.ends_at > $1
+          AND e.starts_at < $2
+          AND ($3::uuid IS NULL OR e.guard_id = $3)
+          AND ($4::uuid IS NULL OR e.object_id = $4)
+        ORDER BY e.starts_at ASC
       `,
       [rangeStart.toISOString(), rangeEnd.toISOString(), guardId, objectId],
     );

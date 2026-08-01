@@ -33,7 +33,7 @@ export async function buildPayrollStatementWorkbook(
       { width: 28 },
       { width: 14 },
       { width: 10 },
-      { width: 8 },
+      { width: 12 },
       { width: 14 },
       { width: 22 },
     ];
@@ -54,18 +54,19 @@ export async function buildPayrollStatementWorkbook(
       half,
     );
     subtitleCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    subtitleCell.font = { size: 11 };
+    subtitleCell.font = { size: 14 };
+    ws.getRow(2).height = 60;
 
     const headerRowIndex = 4;
     const headerRow = ws.getRow(headerRowIndex);
     TABLE_HEADERS.forEach((label, index) => {
       const cell = headerRow.getCell(index + 1);
       cell.value = label;
-      cell.font = { bold: true, size: 10 };
+      cell.font = { bold: true, size: 14 };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       applyTableBorder(cell);
     });
-    headerRow.height = 28;
+    headerRow.height = 115;
 
     sheet.rows.forEach((row, index) => {
       const excelRow = ws.getRow(headerRowIndex + 1 + index);
@@ -78,16 +79,22 @@ export async function buildPayrollStatementWorkbook(
         row.toPayRub != null && row.toPayRub > 0 ? row.toPayRub : "",
         "",
       ];
+      excelRow.height = 45;
       values.forEach((value, colIndex) => {
         const cell = excelRow.getCell(colIndex + 1);
         cell.value = value;
-        cell.font = { size: 10 };
+        cell.font = { size: 14 };
+        const isFifthColumn = colIndex === 4;
         if (colIndex === 0 || colIndex === 4) {
-          cell.alignment = { horizontal: "center", vertical: "middle" };
+          cell.alignment = {
+            horizontal: "center",
+            vertical: "middle",
+            wrapText: !isFifthColumn,
+          };
         } else if (colIndex >= 2 && colIndex <= 5) {
-          cell.alignment = { horizontal: "right", vertical: "middle" };
+          cell.alignment = { horizontal: "right", vertical: "middle", wrapText: false };
         } else {
-          cell.alignment = { horizontal: "left", vertical: "middle" };
+          cell.alignment = { horizontal: "left", vertical: "middle", wrapText: false };
         }
         applyTableBorder(cell);
       });
@@ -99,6 +106,14 @@ export async function buildPayrollStatementWorkbook(
     footerCell.value = formatPayrollStatementFooter(year, monthIndex0);
     footerCell.alignment = { horizontal: "right", vertical: "middle" };
     footerCell.font = { size: 11 };
+
+    ws.pageSetup = {
+      orientation: "portrait",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      printArea: `A1:G${footerRowIndex}`,
+    };
   }
 
   const buffer = await workbook.xlsx.writeBuffer();

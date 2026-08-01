@@ -11,9 +11,9 @@ import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
-import { upsertShortageDismissal } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
+import { upsertShortageDismissal, loadMonthlyOperationalOverridesForDays } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
-import { buildOperationalDayAnchorByObjectId } from "../../../../lib/scheduling/schedule-shortage";
+import { buildOperationalDayAnchorByObjectIdForDate } from "../../../../lib/scheduling/operational-day-anchors";
 import { shiftBelongsToOperationalDayColumn } from "../../../../lib/scheduling/operational-day-timeline";
 import { aggregatePlanSnapshot, shiftToDismissInput } from "../../../../lib/scheduling/build-shortage-dismiss-state";
 import { buildShortageDayFingerprint } from "../../../../lib/scheduling/schedule-shortage-dismiss";
@@ -62,8 +62,16 @@ export async function POST(request: Request) {
 
     const templates = await listShiftTemplatesForObjectIds([objectId]);
     const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay([objectId], weekDayIsos, templates);
+    const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+      [objectId],
+      weekDayIsos,
+    );
 
-    const anchorByObjectId = buildOperationalDayAnchorByObjectId([object]);
+    const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
+      [object],
+      dateIso,
+      monthlyOperationalOverrides,
+    );
     const dayShifts = snapshot.shifts.filter(
       (s) => s.objectId === objectId && shiftBelongsToOperationalDayColumn(s, dateIso, anchorByObjectId),
     );

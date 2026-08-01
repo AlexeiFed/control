@@ -31,6 +31,7 @@ import {
 } from "../../lib/scheduling/operational-day-timeline";
 import { formatGuardLastNameOnly } from "../../lib/format/guard-display";
 import { toast } from "../../store/toast-store";
+import { humanizeClientError } from "../../lib/ui/humanize-client-error";
 import { Trash2, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { createShiftAction, deleteShiftAction, recordShiftIncidentAction } from "../../app/scheduler/actions";
 import {
@@ -521,7 +522,7 @@ export function SchedulerGrid({
         fd.set("items", JSON.stringify(payload));
         fd.set("weekStart", weekStartIso);
         fd.set("objectIdFilter", tableObjectId);
-        fd.set("scrollY", String(window.scrollY));
+        fd.set("scrollY", String(Math.max(0, Math.round(window.scrollY))));
         fd.set("noRedirect", "true");
         try {
           const result = await bulkCreateShiftsAction(fd);
@@ -547,7 +548,7 @@ export function SchedulerGrid({
         } catch (err) {
           toast({
             title: "Смены не созданы",
-            message: err instanceof Error ? err.message : "Не удалось создать смены",
+            message: humanizeClientError(err, "Не удалось создать смены"),
             variant: "error",
             durationMs: 6500,
           });

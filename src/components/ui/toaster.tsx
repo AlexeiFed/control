@@ -55,7 +55,13 @@ export function Toaster() {
   }, [toasts]);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-0 z-[60] flex flex-col items-center gap-2 p-4">
+    <div
+      className="pointer-events-none fixed inset-x-0 z-[120] flex flex-col items-center gap-2 px-4"
+      style={{
+        // Выше баннеров инцидентов/внимания (z-99…110); ниже стека баннеров по вертикали.
+        top: "calc(1rem + var(--incident-banner-offset, 0px) + var(--compliance-banner-offset, 0px) + var(--periodic-check-banner-offset, 0px) + var(--medical-commission-banner-offset, 0px))",
+      }}
+    >
       <div className="grid w-full max-w-xl gap-2">
         {toasts.map((toast) => (
           <ToastRow key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />

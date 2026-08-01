@@ -156,9 +156,9 @@ export function GlobalIncidentReplacementsBanner({
   return (
     <div
       ref={bannerRef}
-      className="pointer-events-auto fixed left-1/2 top-4 z-[100] w-[min(calc(100vw-2rem),52rem)] -translate-x-1/2 rounded-card border text-xs shadow-glow transition-all duration-300"
+      className="pointer-events-auto fixed left-1/2 top-4 z-[110] w-[min(calc(100vw-1.5rem),52rem)] -translate-x-1/2 overflow-hidden rounded-card border text-xs shadow-glow transition-all duration-300"
       style={{
-        backgroundColor: "rgba(185, 28, 28, 0.12)",
+        backgroundColor: designTokens.color.surface,
         borderColor: designTokens.color.accent.danger,
         color: designTokens.color.text,
         boxShadow: designTokens.shadow.glow,
@@ -217,7 +217,7 @@ export function GlobalIncidentReplacementsBanner({
       </div>
 
       {expanded ? (
-        <ul className="list-none space-y-2 border-t border-app-border/60 p-3 pt-2">
+        <ul className="max-h-[min(60vh,28rem)] list-none space-y-2 overflow-y-auto border-t border-app-border/60 bg-app-surface p-3 pt-2">
           {items.map((item) => (
             <li key={item.shiftId} className="flex items-start justify-between gap-3 leading-snug">
               <span className="min-w-0">
@@ -236,7 +236,7 @@ export function GlobalIncidentReplacementsBanner({
                     event.stopPropagation();
                     void hideIncidentAlert(item.shiftId);
                   }}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-button border border-app-border bg-app-surface px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-app-muted transition hover:border-accent-primary hover:text-accent-primary disabled:opacity-50"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-button border border-app-border bg-app-elevated px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-app-muted transition hover:border-accent-primary hover:text-accent-primary disabled:opacity-50"
                 >
                   <EyeOff className="size-3.5" aria-hidden />
                   {hidingShiftId === item.shiftId ? "…" : "Скрыть"}

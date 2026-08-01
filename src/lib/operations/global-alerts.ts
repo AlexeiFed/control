@@ -8,7 +8,7 @@ import {
 } from "./guards-repository";
 import { getSchedulerSnapshot, listPendingIncidentReplacements } from "./scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
-import { filterShortagesByStoredDismissals } from "./schedule-shortage-dismissals-repository";
+import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDays } from "./schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../scheduling/schedule-shortage";
 import type { IncidentCategory } from "../scheduling/types";
@@ -160,11 +160,16 @@ async function loadScheduleShortages(): Promise<{
   const templates =
     objectIds.length > 0 ? await listShiftTemplatesForObjectIds(objectIds) : [];
   const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
+  const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+    objectIds,
+    weekDayIsos,
+  );
   const rawShortages = computeScheduleShortages(
     snapshot.objects,
     snapshot.shifts,
     expectedShiftsByObjectDay,
     weekDays,
+    monthlyOperationalOverrides,
   );
   const shortages = await filterShortagesByStoredDismissals({
     objectIds,
@@ -173,6 +178,7 @@ async function loadScheduleShortages(): Promise<{
     shifts: snapshot.shifts,
     expectedByObjectDay: expectedShiftsByObjectDay,
     rawShortages,
+    monthlyOperationalOverrides,
   });
 
   return { shortages, weekStartIso: toDateIsoKhabarovsk(weekStart) };
@@ -180,7 +186,7 @@ async function loadScheduleShortages(): Promise<{
 
 const getGlobalAlertsCached = unstable_cache(
   (role: string) => loadGlobalAlertsForRole(role as Role),
-  ["global-alerts:v3"],
+  ["global-alerts:v4"],
   {
     tags: ["global-alerts", "scheduler", "shifts", "guards", "directory"],
     revalidate: 180,

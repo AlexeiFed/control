@@ -21,7 +21,14 @@ import {
 import { listGuardsByIds } from "../../../lib/operations/guards-repository";
 
 type TimesheetPageProps = {
-  searchParams?: Promise<{ guardId?: string; objectId?: string; month?: string; week?: string; q?: string }>;
+  searchParams?: Promise<{
+    guardId?: string;
+    objectId?: string;
+    month?: string;
+    week?: string;
+    q?: string;
+    unpriced?: string;
+  }>;
 };
 
 export default async function TimesheetPage({ searchParams }: TimesheetPageProps) {
@@ -32,6 +39,7 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
   const filters = (await searchParams) ?? {};
   const guardId = filters.guardId?.trim() ? filters.guardId.trim() : undefined;
   const objectId = filters.objectId?.trim() ? filters.objectId.trim() : undefined;
+  const unpricedOnly = filters.unpriced === "1";
 
   const month = normalizeMonth(filters.month) ?? normalizeMonth(currentMonthKey());
   const week = normalizeWeekStart(filters.week);
@@ -52,12 +60,15 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
   ]);
 
   const query = filters.q?.trim().toLowerCase() ?? "";
-  const rows = query
+  let rows = query
     ? rowsRaw.filter((row) => {
         const haystack = `${row.guardName} ${row.objectName}`.toLowerCase();
         return haystack.includes(query);
       })
     : rowsRaw;
+  if (unpricedOnly) {
+    rows = rows.filter((row) => row.unpriced);
+  }
 
   const showPayrollHalves =
     !!month &&
@@ -69,14 +80,15 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
   if (showPayrollHalves && month) {
     const advancesByGuardId = await sumAdvancesByGuardForMonth(month.year, month.monthIndex);
     const guardIdByName = new Map(filterOptions.guards.map((g) => [g.name, g.id] as const));
+    const payrollRows = unpricedOnly ? rows : rowsRaw;
     const summaries = buildGuardPayrollHalfSummaries({
-      rows: rowsRaw,
+      rows: payrollRows,
       guardIdByName,
       advancesByGuardId,
       month: { year: month.year, monthIndex0: month.monthIndex },
     });
     payrollHalfByGuardName = payrollHalfSummaryByGuardName(summaries);
-    objectPayrollHalves = buildObjectPayrollHalfSummaries(rowsRaw, {
+    objectPayrollHalves = buildObjectPayrollHalfSummaries(payrollRows, {
       year: month.year,
       monthIndex0: month.monthIndex,
     });

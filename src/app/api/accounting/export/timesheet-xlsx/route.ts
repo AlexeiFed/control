@@ -64,8 +64,11 @@ export async function GET(request: Request) {
     ? snapshot.objects.filter((o) => selectedObjectIds.has(o.id))
     : snapshot.objects;
 
+  const objectIdSet = new Set(objects.map((o) => o.id));
   const objectNameSet = new Set(objects.map((o) => o.name));
-  const rowsFiltered = rows.filter((r) => objectNameSet.has(r.objectName));
+  const rowsFiltered = rows.filter((r) =>
+    r.objectId ? objectIdSet.has(r.objectId) : objectNameSet.has(r.objectName),
+  );
   const approvalsByObjectId = await listObjectTimesheetApprovalsByIds(objects.map((o) => o.id));
 
   const sheets: TimesheetObjectWorkbookSheet[] = objects
@@ -74,7 +77,9 @@ export async function GET(request: Request) {
       return {
         objectName: o.name,
         objectAddress: o.address ?? "",
-        rows: rowsFiltered.filter((r) => r.objectName === o.name),
+        rows: rowsFiltered.filter((r) =>
+          r.objectId ? r.objectId === o.id : r.objectName === o.name,
+        ),
         approval: {
           directorName: approvalRow?.timesheetDirectorName ?? "",
           directorRole: approvalRow?.timesheetDirectorRole ?? "",

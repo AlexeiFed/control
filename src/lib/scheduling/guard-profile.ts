@@ -19,6 +19,14 @@ export function effectiveGuardLicenseType(licenseType: GuardLicenseType | null):
   return licenseType ?? "None";
 }
 
-export function mapGuardLicenseForRates(guard: Pick<Guard, "licenseType">): GuardLicenseType {
+/**
+ * Лицензия для матчинга ставок.
+ * Профиль «Licensed» на дату смены = правило «У»: с даты ЛК (удостоверение + личная карточка).
+ * ТУ (Employed) приоритетнее: без даты ЛК всё равно матчим правила «ТУ + с ЛК».
+ */
+export function mapGuardLicenseForRates(
+  guard: Pick<Guard, "licenseType" | "employmentType">,
+): GuardLicenseType {
+  if (guard.employmentType === "Employed") return "Licensed";
   return effectiveGuardLicenseType(guard.licenseType);
 }

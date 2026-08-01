@@ -38,6 +38,7 @@ export function ObjectPostsAndStaffSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activePostId, setActivePostId] = useState<string | null>(posts[0]?.id ?? null);
   const [pendingStaff, setPendingStaff] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
 
   useEffect(() => {
     if (posts.length === 0) {
@@ -49,8 +50,19 @@ export function ObjectPostsAndStaffSection({
     }
   }, [posts, activePostId]);
 
+  useEffect(() => {
+    setStaffSearch("");
+  }, [activePostId]);
+
   const activePost = posts.find((p) => p.id === activePostId) ?? null;
   const activeGuardIds = activePost ? (monthlyPostGuardsByPostId[activePost.id] ?? []) : [];
+  const staffQuery = staffSearch.trim().toLowerCase();
+  const filteredObjectGuardIds =
+    staffQuery.length === 0
+      ? objectGuardIds
+      : objectGuardIds.filter((guardId) =>
+          (guardNames[guardId] ?? "").toLowerCase().includes(staffQuery),
+        );
 
   async function toggleGuard(guardId: string, checked: boolean) {
     if (!canManage || !activePost || pendingStaff) return;
@@ -224,25 +236,40 @@ export function ObjectPostsAndStaffSection({
               Сначала назначьте охранников на объект (блок выше).
             </p>
           ) : (
-            <div className="max-h-64 space-y-1 overflow-auto rounded-button border border-app-border bg-app-bg p-2">
-              {objectGuardIds.map((guardId) => {
-                const checked = activeGuardIds.includes(guardId);
-                return (
-                  <label
-                    key={guardId}
-                    className="flex cursor-pointer items-center gap-3 rounded-button p-2 transition hover:bg-app-elevated"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={!canManage || pendingStaff}
-                      onChange={(e) => void toggleGuard(guardId, e.target.checked)}
-                      className="size-4 rounded border-app-border"
-                    />
-                    <span className="text-sm">{guardNames[guardId] ?? "Неизвестный"}</span>
-                  </label>
-                );
-              })}
+            <div className="space-y-2 rounded-button border border-app-border bg-app-bg p-2">
+              <input
+                type="search"
+                value={staffSearch}
+                onChange={(e) => setStaffSearch(e.target.value)}
+                placeholder="Поиск по фамилии"
+                aria-label="Поиск охранника по фамилии"
+                className="w-full rounded-button border border-app-border bg-app-surface px-2 py-2 text-sm text-app-text outline-none focus:border-accent-primary"
+                style={{ borderColor: designTokens.color.border }}
+              />
+              <div className="max-h-64 space-y-1 overflow-auto">
+                {filteredObjectGuardIds.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-app-muted">Никого не найдено</p>
+                ) : (
+                  filteredObjectGuardIds.map((guardId) => {
+                    const checked = activeGuardIds.includes(guardId);
+                    return (
+                      <label
+                        key={guardId}
+                        className="flex cursor-pointer items-center gap-3 rounded-button p-2 transition hover:bg-app-elevated"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!canManage || pendingStaff}
+                          onChange={(e) => void toggleGuard(guardId, e.target.checked)}
+                          className="size-4 rounded border-app-border"
+                        />
+                        <span className="text-sm">{guardNames[guardId] ?? "Неизвестный"}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
         </div>

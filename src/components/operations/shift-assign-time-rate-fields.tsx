@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import { designTokens } from "../../lib/design-tokens";
 import { rateUnitLabels } from "../../lib/operations/status-labels";
@@ -8,6 +8,7 @@ import { buildQuickTimePresets, type QuickTimePreset } from "../../lib/schedulin
 import { offsetsToHmPair, presetToOffsets } from "../../lib/scheduling/operational-day-timeline";
 import { ShiftOperationalDayTimeline } from "./shift-operational-day-timeline";
 import type { Guard, RateUnit, Shift, ShiftKind } from "../../lib/scheduling/types";
+import { GuardProfileResolver, type GuardProfilePeriodRecord } from "../../lib/guards/profile-periods";
 import {
   buildRateRuleTimePresets,
   describeShiftRateAssignment,
@@ -30,6 +31,8 @@ export type ShiftAssignTimeRateFieldsProps = {
   operationalDayStartTime?: string;
   rateRules: readonly ObjectRateRuleRecord[];
   guard: Guard | null;
+  /** Периоды ЛК/ТУ — превью ставки на дату смены, не по текущей карточке. */
+  profilePeriods?: readonly GuardProfilePeriodRecord[];
   shiftKind: ShiftKind;
   shiftDateIso: string;
   holidayDateKeys: ReadonlySet<string>;
@@ -55,6 +58,12 @@ export type ShiftAssignTimeRateFieldsProps = {
   editingShift?: Shift | null;
   /** Уже назначенные смены охранника — подсветка занятости на шкале. */
   occupiedIntervals?: ReadonlyArray<{ startsAt: Date; endsAt: Date }>;
+  /** Правая колонка рядом со шкалой (список охранников). */
+  sidePanel?: ReactNode;
+  /** Блок под шкалой в левой колонке (кнопки назначения). */
+  leftFooter?: ReactNode;
+  /** Справа от часов в шапке периода (тип смены). */
+  timelineHeaderTrailing?: ReactNode;
 };
 
 export function ShiftAssignTimeRateFields({
@@ -62,6 +71,7 @@ export function ShiftAssignTimeRateFields({
   operationalDayStartTime,
   rateRules,
   guard,
+  profilePeriods,
   shiftKind,
   shiftDateIso,
   holidayDateKeys,
@@ -85,11 +95,20 @@ export function ShiftAssignTimeRateFields({
   onManualRateReasonChange,
   editingShift = null,
   occupiedIntervals = [],
+  sidePanel,
+  leftFooter,
+  timelineHeaderTrailing,
 }: ShiftAssignTimeRateFieldsProps) {
   const durationMinutes = useMemo(
     () => shiftDurationMinutesFromTimes(shiftDateIso, startTime, endTime, operationalDayStartTime),
     [shiftDateIso, startTime, endTime, operationalDayStartTime],
   );
+
+  const effectiveGuard = useMemo(() => {
+    if (!guard) return null;
+    if (!profilePeriods || profilePeriods.length === 0) return guard;
+    return new GuardProfileResolver(profilePeriods).resolveGuardAt(guard, shiftDateIso);
+  }, [guard, profilePeriods, shiftDateIso]);
 
   const quickPresets = useMemo(
     () => buildQuickTimePresets(operationalDayStartTime),
@@ -97,29 +116,29 @@ export function ShiftAssignTimeRateFields({
   );
 
   const timePresets = useMemo((): ReadonlyArray<QuickTimePreset | RateRuleTimePreset> => {
-    if (!guard || rateRules.length === 0) return quickPresets;
+    if (!effectiveGuard || rateRules.length === 0) return quickPresets;
     const fromRules = buildRateRuleTimePresets(
       rateRules,
       objectId,
-      guard,
+      effectiveGuard,
       shiftKind,
       shiftDateIso,
       holidayDateKeys,
     );
     return fromRules.length > 0 ? fromRules : quickPresets;
-  }, [guard, rateRules, objectId, shiftKind, shiftDateIso, holidayDateKeys, quickPresets]);
+  }, [effectiveGuard, rateRules, objectId, shiftKind, shiftDateIso, holidayDateKeys, quickPresets]);
 
   const manualRateRules = useMemo(() => {
-    if (!guard) return { dayMatched: [], otherWeekdays: [] };
+    if (!effectiveGuard) return { dayMatched: [], otherWeekdays: [] };
     return listManualSelectableRateRules(
       rateRules,
       objectId,
-      guard,
+      effectiveGuard,
       shiftKind,
       shiftDateIso,
       holidayDateKeys,
     );
-  }, [guard, rateRules, objectId, shiftKind, shiftDateIso, holidayDateKeys]);
+  }, [effectiveGuard, rateRules, objectId, shiftKind, shiftDateIso, holidayDateKeys]);
 
   const selectableRules = manualRateRules.dayMatched;
   const otherWeekdayRules = manualRateRules.otherWeekdays;
@@ -138,10 +157,10 @@ export function ShiftAssignTimeRateFields({
     selectableRules.length + otherWeekdayRules.length + pinnedAssignedRules.length;
 
   const needsManualRate = useMemo(() => {
-    if (!guard || rateRules.length === 0) return false;
+    if (!effectiveGuard || rateRules.length === 0) return false;
     return shiftNeedsManualRateRuleSelection({
       objectId,
-      guard,
+      guard: effectiveGuard,
       shiftKind,
       shiftDateIso,
       startTime,
@@ -153,7 +172,7 @@ export function ShiftAssignTimeRateFields({
       operationalDayStartTime,
     });
   }, [
-    guard,
+    effectiveGuard,
     rateRules,
     objectId,
     shiftKind,
@@ -169,9 +188,9 @@ export function ShiftAssignTimeRateFields({
   const showRateSelection = needsManualRate || shiftHasStoredRateAssignment(editingShift);
 
   const assignmentSummary = useMemo(() => {
-    if (!editingShift || !guard) return null;
-    return describeShiftRateAssignment(editingShift, guard, rateRules, holidayDateKeys);
-  }, [editingShift, guard, rateRules, holidayDateKeys]);
+    if (!editingShift || !effectiveGuard) return null;
+    return describeShiftRateAssignment(editingShift, effectiveGuard, rateRules, holidayDateKeys);
+  }, [editingShift, effectiveGuard, rateRules, holidayDateKeys]);
 
   const customEstimateCents = useMemo(
     () => estimateCustomGuardAmountCents(manualGuardRubles, manualRateUnit, durationMinutes),
@@ -217,7 +236,7 @@ export function ShiftAssignTimeRateFields({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-muted">
           {rateRules.length > 0 && guard ? "Время по ставкам:" : "Шаблон времени:"}
         </span>
@@ -253,19 +272,45 @@ export function ShiftAssignTimeRateFields({
         })}
       </div>
 
-      <ShiftOperationalDayTimeline
-        shiftDateIso={shiftDateIso}
-        operationalDayStartTime={operationalDayStartTime}
-        startTime={startTime}
-        endTime={endTime}
-        onStartTimeChange={onStartTimeChange}
-        onEndTimeChange={onEndTimeChange}
-        occupiedIntervals={occupiedIntervals}
-      />
+      {sidePanel ? (
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2 lg:items-stretch lg:gap-6 lg:[&>*]:min-w-0">
+          <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-1 lg:min-h-0">
+            <ShiftOperationalDayTimeline
+              shiftDateIso={shiftDateIso}
+              operationalDayStartTime={operationalDayStartTime}
+              startTime={startTime}
+              endTime={endTime}
+              onStartTimeChange={onStartTimeChange}
+              onEndTimeChange={onEndTimeChange}
+              occupiedIntervals={occupiedIntervals}
+              headerTrailing={timelineHeaderTrailing}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:min-h-0">
+            {sidePanel}
+          </div>
+          {leftFooter ? (
+            <div className="flex shrink-0 flex-col gap-2 lg:col-start-1 lg:row-start-2 lg:mt-auto">
+              {leftFooter}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <ShiftOperationalDayTimeline
+          shiftDateIso={shiftDateIso}
+          operationalDayStartTime={operationalDayStartTime}
+          startTime={startTime}
+          endTime={endTime}
+          onStartTimeChange={onStartTimeChange}
+          onEndTimeChange={onEndTimeChange}
+          occupiedIntervals={occupiedIntervals}
+          headerTrailing={timelineHeaderTrailing}
+        />
+      )}
 
       {assignmentSummary ? (
         <div
-          className="rounded-button border px-3 py-2.5"
+          className="shrink-0 rounded-button border px-3 py-2.5"
           style={{
             borderColor: `${designTokens.color.accent.primary}55`,
             backgroundColor: `${designTokens.color.accent.primary}10`,
@@ -282,7 +327,7 @@ export function ShiftAssignTimeRateFields({
 
       {showRateSelection ? (
         <div
-          className="grid gap-2 rounded-button border px-3 py-3"
+          className="grid shrink-0 gap-2 rounded-button border px-3 py-3"
           style={{
             borderColor: `${designTokens.color.accent.warning}55`,
             backgroundColor: `${designTokens.color.accent.warning}10`,

@@ -2,6 +2,7 @@ import {
   DEFAULT_OPERATIONAL_DAY_START_TIME,
   shiftBelongsToOperationalDayColumn,
 } from "./operational-day-timeline";
+import { buildOperationalDayAnchorByObjectIdForDate } from "./operational-day-anchors";
 import type { ExpectedShifts } from "./object-shift-templates";
 import { shiftCoverageMinutes } from "./shift-attendance";
 import type { Shift } from "./types";
@@ -213,15 +214,21 @@ export function computeDayScheduleShortage(
   };
 }
 
-/** Смены, чьи операционные сутки попадают в видимые колонки графика (14 дней на экране). */
+/** Смены, чьи операционные сутки попадают в видимые колонки. */
 export function filterShiftsToVisibleScheduleDays(
   shifts: ReadonlyArray<Shift>,
   weekDays: ReadonlyArray<WeekDayRef>,
-  anchorByObjectId: ReadonlyMap<string, string>,
+  objects: ReadonlyArray<ScheduleObjectRef>,
+  monthlyOperationalOverrides: ReadonlyMap<string, string> = new Map(),
 ): Shift[] {
-  const visibleIsos = new Set(weekDays.map((d) => d.iso));
+  const visibleIsos = weekDays.map((d) => d.iso);
   return shifts.filter((shift) => {
     for (const columnDateIso of visibleIsos) {
+      const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
+        objects,
+        columnDateIso,
+        monthlyOperationalOverrides,
+      );
       if (shiftBelongsToOperationalDayColumn(shift, columnDateIso, anchorByObjectId)) {
         return true;
       }
@@ -235,9 +242,15 @@ export function computeScheduleShortages(
   shifts: ReadonlyArray<Shift>,
   expectedShiftsByObjectDay: Record<string, Record<string, ExpectedShifts>>,
   weekDays: ReadonlyArray<WeekDayRef>,
+  /** Ключ `objectId|YYYY-MM` → HH:mm из object_monthly_settings. */
+  monthlyOperationalOverrides: ReadonlyMap<string, string> = new Map(),
 ): ScheduleObjectShortage[] {
-  const anchorByObjectId = buildOperationalDayAnchorByObjectId(objects);
-  const visibleShifts = filterShiftsToVisibleScheduleDays(shifts, weekDays, anchorByObjectId);
+  const visibleShifts = filterShiftsToVisibleScheduleDays(
+    shifts,
+    weekDays,
+    objects,
+    monthlyOperationalOverrides,
+  );
   const result: ScheduleObjectShortage[] = [];
 
   for (const object of objects) {
@@ -249,6 +262,11 @@ export function computeScheduleShortages(
     let totalShiftLeadShort = 0;
 
     for (const day of weekDays) {
+      const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
+        objects,
+        day.iso,
+        monthlyOperationalOverrides,
+      );
       const dayShifts = visibleShifts.filter(
         (s) =>
           s.objectId === object.id &&

@@ -71,8 +71,9 @@ export function buildGuardRegistryExportRow(guard: GuardListRow, index: number):
     formatOptionalDate(guard.medicalCommissionPassedOn),
     formatOptionalDate(guard.periodicCheckPassedOn),
     formatOptionalDate(guard.personalCardAssignedOn),
-    guard.isTrainee ? "да" : "нет",
-    guard.isTrainee ? formatOptionalDate(guard.traineeUntil) : "",
+    // Как на карточке: истёкшая дата стажировки → «нет» (флаг в БД может ещё быть true).
+    guard.isTrainee && !guard.traineeExpired ? "да" : "нет",
+    guard.isTrainee && !guard.traineeExpired ? formatOptionalDate(guard.traineeUntil) : "",
     guard.hasCar ? "да" : "нет",
     formatUniformSizeCell(guard),
     guard.uniformHeight != null ? guard.uniformHeight : "",

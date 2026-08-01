@@ -1,7 +1,7 @@
 import type { ObjectRateRuleRecord } from "../operations/object-rate-rules-repository";
 import type { Guard, RateUnit, Shift } from "../scheduling/types";
 import { DEFAULT_SHIFT_TIMEZONE } from "../scheduling/local-date-key";
-import { buildSegmentContext, findBestMatchingRule } from "./rate-matching";
+import { buildSegmentContext, dateInRuleRange, findBestMatchingRule } from "./rate-matching";
 
 export type GuardRateContribution = {
   guardRateCents: number;
@@ -30,10 +30,17 @@ function shiftDurationMinutes(shift: Shift): number {
 /** Окно, за которое начисляем оплату: при полном невыходе — null; при частичном — [start, workedUntil). */
 export function billableShiftWindow(shift: Shift): { start: Date; end: Date } | null {
   if (!shift.isNoShow) return { start: shift.startsAt, end: shift.endsAt };
-  if (!shift.incidentWorkedUntilAt) return null;
-  const w = shift.incidentWorkedUntilAt;
-  if (w.getTime() <= shift.startsAt.getTime() || w.getTime() > shift.endsAt.getTime()) return null;
-  return { start: shift.startsAt, end: w };
+  if (shift.incidentWorkedUntilAt) {
+    const w = shift.incidentWorkedUntilAt;
+    if (w.getTime() <= shift.startsAt.getTime() || w.getTime() > shift.endsAt.getTime()) return null;
+    return { start: shift.startsAt, end: w };
+  }
+  // «Ушёл с работы» без времени ухода (старые/битые записи): считаем отработанной всю смену,
+  // иначе 8–20 с меткой LeftWork давали 0 ч при живых заменах на хвосте.
+  if (shift.incidentCategory === "LeftWork") {
+    return { start: shift.startsAt, end: shift.endsAt };
+  }
+  return null;
 }
 
 export function billableShiftMinutes(shift: Shift): number {
@@ -106,12 +113,16 @@ function sideBreakdown(params: {
 
   if (shiftTotalMinutes === 0) return { amountCents: 0, unpricedMinutes: 0, rateContributions: [] };
 
+  const startCtx = buildSegmentContext(shift.startsAt, guard, shift, holidayDates, timeZone);
+  const shiftDateKey = startCtx.localDateKey;
+
   const pinnedRule =
     shift.selectedRateRuleId != null
       ? rules.find((rule) => rule.id === shift.selectedRateRuleId) ?? null
       : null;
 
-  if (pinnedRule) {
+  // Закрытая/просроченная pinned-ставка не фиксирует архивные cents на новых датах.
+  if (pinnedRule && dateInRuleRange(shiftDateKey, pinnedRule)) {
     const rateCents = side === "client" ? pinnedRule.clientRateCents : pinnedRule.guardRateCents;
     const amount = roundCents(perMinuteContribution(pinnedRule, side, shiftTotalMinutes) * shiftTotalMinutes);
     accumulateRateMinutes(rateAcc, rateCents, shiftTotalMinutes, amount);
@@ -120,7 +131,6 @@ function sideBreakdown(params: {
 
   // Ставка по дню ячейки графика: правило подбирается один раз в момент начала смены,
   // все минуты смены идут по этой ставке (без переноса часов через полночь).
-  const startCtx = buildSegmentContext(shift.startsAt, guard, shift, holidayDates, timeZone);
   const rule = findBestMatchingRule(rules, startCtx);
   if (!rule) {
     return {

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildOperationalDayAnchorByObjectId,
   computeDayPlanMetrics,
   computeDayScheduleShortage,
   computeScheduleShortages,
   filterShiftsToVisibleScheduleDays,
 } from "../../src/lib/scheduling/schedule-shortage";
+import { operationalDayMonthKey } from "../../src/lib/scheduling/operational-day-anchors";
 import type { Shift } from "../../src/lib/scheduling/types";
 
 const fullNorm = {
@@ -120,7 +120,7 @@ describe("schedule-shortage", () => {
     const filtered = filterShiftsToVisibleScheduleDays(
       shifts,
       weekDays,
-      buildOperationalDayAnchorByObjectId([{ id: "obj1", name: "Объект А" }]),
+      [{ id: "obj1", name: "Объект А" }],
     );
     expect(filtered.map((s) => s.id)).toEqual(["inside"]);
     const result = computeScheduleShortages(
@@ -356,5 +356,59 @@ describe("schedule-shortage", () => {
     );
     expect(metrics?.regularDayHours).toBe(24);
     expect(metrics?.hoursShort).toBe(0);
+  });
+
+  it("uses monthly operational-day override when assigning shifts to shortage days", () => {
+    // Хвост 08:00–09:00: при якоре 08:00 — сутки 22-го; при 09:00 — сутки 21-го.
+    const weekDays = [{ iso: "2026-07-22", label: "Ср, 22" }];
+    const objects = [
+      { id: "obj1", name: "КОМПЛЕКС", operationalDayStartTime: "08:00" },
+    ];
+    const shifts: Shift[] = [
+      {
+        id: "tail-1h",
+        guardId: "g1",
+        objectId: "obj1",
+        startsAt: new Date("2026-07-22T08:00:00+10:00"),
+        endsAt: new Date("2026-07-22T09:00:00+10:00"),
+        shiftKind: "Regular",
+        manualClientRateCents: null,
+        manualGuardRateCents: null,
+        manualRateUnit: null,
+        manualRateReason: "",
+        isNoShow: false,
+        incidentCategory: null,
+        incidentComment: "",
+        incidentWorkedUntilAt: null,
+        incidentRecordedAt: null,
+        replacedByShiftId: null,
+        selectedRateRuleId: null,
+        postId: null,
+      },
+    ];
+    const norms = {
+      obj1: {
+        "2026-07-22": {
+          regular: 1,
+          reinforcement: 0,
+          shiftHours: 1,
+          reinforcementShiftHours: 24,
+          rapidResponse: 0,
+          rapidResponseShiftHours: 24,
+          shiftLead: 0,
+          shiftLeadShiftHours: 24,
+        },
+      },
+    };
+
+    const withObjectDefault = computeScheduleShortages(objects, shifts, norms, weekDays);
+    // 1ч на сутки 22-го при якоре 08:00 → недобора нет (день не попадает в shortages).
+    expect(withObjectDefault).toEqual([]);
+
+    const monthly = new Map([[operationalDayMonthKey("obj1", "2026-07"), "09:00"]]);
+    const withMonthly = computeScheduleShortages(objects, shifts, norms, weekDays, monthly);
+    expect(withMonthly).toHaveLength(1);
+    expect(withMonthly[0]?.days[0]?.hoursShort).toBe(1);
+    expect(withMonthly[0]?.days[0]?.regularDayHours).toBe(0);
   });
 });

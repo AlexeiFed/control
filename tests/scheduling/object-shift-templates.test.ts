@@ -13,6 +13,8 @@ import {
   jsWeekdayToIso,
   resolveShiftKindForTemplate,
   shiftKindsInTemplate,
+  encodeTemplateTotalHours,
+  templatePartTotalHours,
 } from "../../src/lib/scheduling/object-shift-templates";
 
 describe("object shift templates", () => {
@@ -122,6 +124,36 @@ describe("object shift templates", () => {
       shiftLead: 0,
       shiftLeadShiftHours: 24,
     });
+  });
+
+  it("sums post templates for object-level week plan", () => {
+    const rows: ObjectShiftTemplateRow[] = [
+      {
+        objectId: "o1",
+        postId: "p1",
+        dayOfWeek: 1,
+        shiftsPerDay: 2,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 24,
+        effectiveFrom: "2026-07-13",
+        effectiveTo: null,
+      },
+      {
+        objectId: "o1",
+        postId: "p2",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 2,
+        shiftHours: 24,
+        reinforcementShiftHours: 24,
+        effectiveFrom: "2026-07-13",
+        effectiveTo: null,
+      },
+    ];
+    const map = buildExpectedShiftsByObjectAndDay(["o1"], ["2026-07-13"], rows);
+    expect(map.o1?.["2026-07-13"]?.regular).toBe(3);
+    expect(map.o1?.["2026-07-13"]?.reinforcement).toBe(2);
+    expect(map.o1?.["2026-07-13"]?.regular! * map.o1!["2026-07-13"]!.shiftHours).toBe(72);
   });
 
   it("builds expected map with default 2 shifts when no template row", () => {
@@ -283,5 +315,15 @@ describe("object shift templates", () => {
       "2026-05-05",
     );
     expect(count).toBe(1);
+  });
+
+  it("encodes total day hours into count × hours within DB limits", () => {
+    expect(templatePartTotalHours(2, 12)).toBe(24);
+    expect(encodeTemplateTotalHours(0)).toEqual({ count: 0, hours: 24 });
+    expect(encodeTemplateTotalHours(12)).toEqual({ count: 1, hours: 12 });
+    expect(encodeTemplateTotalHours(24)).toEqual({ count: 1, hours: 24 });
+    expect(encodeTemplateTotalHours(48)).toEqual({ count: 2, hours: 24 });
+    const roundTrip = encodeTemplateTotalHours(36);
+    expect(templatePartTotalHours(roundTrip.count, roundTrip.hours)).toBe(36);
   });
 });

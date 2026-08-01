@@ -6,20 +6,21 @@ import { Save } from "lucide-react";
 import { loadTemplateEditBaselineAction, saveShiftTemplatesAction } from "../../app/objects/actions";
 import { Button } from "../ui/button";
 import { formatDisplayDateFromIso } from "../../lib/format/display-date";
-import type { ActiveShiftsSequenceResult } from "../../lib/scheduling/object-shift-templates";
+import {
+  encodeTemplateTotalHours,
+  templatePartTotalHours,
+  type ActiveShiftsSequenceResult,
+} from "../../lib/scheduling/object-shift-templates";
 import { toast } from "../../store/toast-store";
 
 const weekdayShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const MAX_DAY_HOURS = 24 * 24;
 
 type TemplateDraftDay = {
-  regular: number;
-  shiftHours: number;
-  reinforcement: number;
-  reinforcementShiftHours: number;
-  rapidResponse: number;
-  rapidResponseShiftHours: number;
-  shiftLead: number;
-  shiftLeadShiftHours: number;
+  regularHours: number;
+  reinforcementHours: number;
+  rapidResponseHours: number;
+  shiftLeadHours: number;
 };
 
 type TemplateDraft = {
@@ -31,14 +32,19 @@ function buildTemplateDraft(sequence: ActiveShiftsSequenceResult, effectiveFrom:
   return {
     effectiveFrom,
     days: Array.from({ length: 7 }, (_, i) => ({
-      regular: sequence.regular[i] ?? 2,
-      shiftHours: sequence.shiftHours[i] ?? 24,
-      reinforcement: sequence.reinforcement[i] ?? 0,
-      reinforcementShiftHours: sequence.reinforcementShiftHours[i] ?? 24,
-      rapidResponse: sequence.rapidResponse[i] ?? 0,
-      rapidResponseShiftHours: sequence.rapidResponseShiftHours[i] ?? 24,
-      shiftLead: sequence.shiftLead[i] ?? 0,
-      shiftLeadShiftHours: sequence.shiftLeadShiftHours[i] ?? 24,
+      regularHours: templatePartTotalHours(sequence.regular[i] ?? 0, sequence.shiftHours[i] ?? 24),
+      reinforcementHours: templatePartTotalHours(
+        sequence.reinforcement[i] ?? 0,
+        sequence.reinforcementShiftHours[i] ?? 24,
+      ),
+      rapidResponseHours: templatePartTotalHours(
+        sequence.rapidResponse[i] ?? 0,
+        sequence.rapidResponseShiftHours[i] ?? 24,
+      ),
+      shiftLeadHours: templatePartTotalHours(
+        sequence.shiftLead[i] ?? 0,
+        sequence.shiftLeadShiftHours[i] ?? 24,
+      ),
     })),
   };
 }
@@ -46,6 +52,40 @@ function buildTemplateDraft(sequence: ActiveShiftsSequenceResult, effectiveFrom:
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function HoursField({
+  label,
+  labelClassName,
+  focusClassName,
+  value,
+  onChange,
+}: {
+  label: string;
+  labelClassName: string;
+  focusClassName: string;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <label className="grid gap-1">
+      <span className={`text-[10px] font-semibold uppercase ${labelClassName}`}>{label}</span>
+      <div className="relative">
+        <input
+          type="number"
+          min={0}
+          max={MAX_DAY_HOURS}
+          value={value}
+          onChange={(e) => onChange(clampInt(Number(e.target.value), 0, MAX_DAY_HOURS))}
+          className={`w-full rounded-button border border-app-border bg-app-bg px-2 py-1.5 pr-7 text-center text-sm outline-none ${focusClassName}`}
+          aria-label={`${label}, часов в сутки`}
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-app-muted">
+          ч
+        </span>
+      </div>
+    </label>
+  );
 }
 
 export type ObjectShiftTemplateSectionProps = {
@@ -112,9 +152,13 @@ export function ObjectShiftTemplateSection({
           {!templateDraft ? (
             <p className="mt-1 text-xs text-app-muted">
               Действует с {formatDisplayDateFromIso(templateEffectiveFrom)} · план в графике считается по этому
-              шаблону на каждый день
+              шаблону на каждый день (часы в сутки)
             </p>
-          ) : null}
+          ) : (
+            <p className="mt-1 text-xs text-app-muted">
+              Укажите общее число часов в сутки по типу смены. 0 — тип не нужен.
+            </p>
+          )}
         </div>
         {canEdit ? (
           <Button
@@ -141,14 +185,18 @@ export function ObjectShiftTemplateSection({
             if (postId) fd.set("postId", postId);
             templateDraft.days.forEach((day, i) => {
               const n = i + 1;
-              fd.set(`d${n}`, String(day.regular));
-              fd.set(`h${n}`, String(day.shiftHours));
-              fd.set(`r${n}`, String(day.reinforcement));
-              fd.set(`rh${n}`, String(day.reinforcementShiftHours));
-              fd.set(`mp${n}`, String(day.rapidResponse));
-              fd.set(`mph${n}`, String(day.rapidResponseShiftHours));
-              fd.set(`stm${n}`, String(day.shiftLead));
-              fd.set(`stmh${n}`, String(day.shiftLeadShiftHours));
+              const regular = encodeTemplateTotalHours(day.regularHours);
+              const reinforcement = encodeTemplateTotalHours(day.reinforcementHours);
+              const rapid = encodeTemplateTotalHours(day.rapidResponseHours);
+              const shiftLead = encodeTemplateTotalHours(day.shiftLeadHours);
+              fd.set(`d${n}`, String(regular.count));
+              fd.set(`h${n}`, String(regular.hours));
+              fd.set(`r${n}`, String(reinforcement.count));
+              fd.set(`rh${n}`, String(reinforcement.hours));
+              fd.set(`mp${n}`, String(rapid.count));
+              fd.set(`mph${n}`, String(rapid.hours));
+              fd.set(`stm${n}`, String(shiftLead.count));
+              fd.set(`stmh${n}`, String(shiftLead.hours));
             });
             fd.set("noRedirect", "true");
             setIsSavingTemplate(true);
@@ -199,118 +247,40 @@ export function ObjectShiftTemplateSection({
                   <span className="text-center text-xs font-bold uppercase tracking-wider text-app-muted">{day}</span>
                   <div className="space-y-3">
                     <div className="border-b border-app-border/40 pb-2">
-                      <label className="grid gap-1">
-                        <span className="text-[10px] font-semibold uppercase text-app-muted">Обычные</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={0}
-                            max={24}
-                            value={draftDay.regular}
-                            onChange={(e) =>
-                              patchTemplateDay(i, { regular: clampInt(Number(e.target.value), 0, 24) })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-primary"
-                          />
-                          <input
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={draftDay.shiftHours}
-                            onChange={(e) =>
-                              patchTemplateDay(i, { shiftHours: clampInt(Number(e.target.value), 1, 24) })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-primary"
-                          />
-                        </div>
-                      </label>
+                      <HoursField
+                        label="Обычные"
+                        labelClassName="text-app-muted"
+                        focusClassName="focus:border-accent-primary"
+                        value={draftDay.regularHours}
+                        onChange={(regularHours) => patchTemplateDay(i, { regularHours })}
+                      />
                     </div>
                     <div className="border-b border-app-border/40 pb-2">
-                      <label className="grid gap-1">
-                        <span className="text-[10px] font-semibold uppercase text-accent-warning">Усиление</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={0}
-                            max={24}
-                            value={draftDay.reinforcement}
-                            onChange={(e) =>
-                              patchTemplateDay(i, { reinforcement: clampInt(Number(e.target.value), 0, 24) })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-warning"
-                          />
-                          <input
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={draftDay.reinforcementShiftHours}
-                            onChange={(e) =>
-                              patchTemplateDay(i, {
-                                reinforcementShiftHours: clampInt(Number(e.target.value), 1, 24),
-                              })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-warning"
-                          />
-                        </div>
-                      </label>
+                      <HoursField
+                        label="Усиление"
+                        labelClassName="text-accent-warning"
+                        focusClassName="focus:border-accent-warning"
+                        value={draftDay.reinforcementHours}
+                        onChange={(reinforcementHours) => patchTemplateDay(i, { reinforcementHours })}
+                      />
                     </div>
                     <div className="border-b border-app-border/40 pb-2">
-                      <label className="grid gap-1">
-                        <span className="text-[10px] font-semibold uppercase text-accent-secondary">СтМ</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={0}
-                            max={24}
-                            value={draftDay.shiftLead}
-                            onChange={(e) =>
-                              patchTemplateDay(i, { shiftLead: clampInt(Number(e.target.value), 0, 24) })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-secondary"
-                          />
-                          <input
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={draftDay.shiftLeadShiftHours}
-                            onChange={(e) =>
-                              patchTemplateDay(i, {
-                                shiftLeadShiftHours: clampInt(Number(e.target.value), 1, 24),
-                              })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-secondary"
-                          />
-                        </div>
-                      </label>
+                      <HoursField
+                        label="СтМ"
+                        labelClassName="text-accent-secondary"
+                        focusClassName="focus:border-accent-secondary"
+                        value={draftDay.shiftLeadHours}
+                        onChange={(shiftLeadHours) => patchTemplateDay(i, { shiftLeadHours })}
+                      />
                     </div>
                     <div>
-                      <label className="grid gap-1">
-                        <span className="text-[10px] font-semibold uppercase text-accent-primary">МП</span>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={0}
-                            max={24}
-                            value={draftDay.rapidResponse}
-                            onChange={(e) =>
-                              patchTemplateDay(i, { rapidResponse: clampInt(Number(e.target.value), 0, 24) })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-primary"
-                          />
-                          <input
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={draftDay.rapidResponseShiftHours}
-                            onChange={(e) =>
-                              patchTemplateDay(i, {
-                                rapidResponseShiftHours: clampInt(Number(e.target.value), 1, 24),
-                              })
-                            }
-                            className="w-1/2 rounded-button border border-app-border bg-app-bg px-2 py-1 text-center text-sm outline-none focus:border-accent-primary"
-                          />
-                        </div>
-                      </label>
+                      <HoursField
+                        label="МП"
+                        labelClassName="text-accent-primary"
+                        focusClassName="focus:border-accent-primary"
+                        value={draftDay.rapidResponseHours}
+                        onChange={(rapidResponseHours) => patchTemplateDay(i, { rapidResponseHours })}
+                      />
                     </div>
                   </div>
                 </div>
@@ -326,64 +296,66 @@ export function ObjectShiftTemplateSection({
         </form>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {weekdayShort.map((day, i) => (
-            <div
-              key={day}
-              className="flex min-w-0 flex-col gap-1.5 rounded-button border border-app-border bg-app-elevated p-2 sm:gap-2 sm:p-3"
-            >
-              <span className="text-center text-[10px] font-bold uppercase tracking-wider text-app-muted sm:text-xs">
-                {day}
-              </span>
-              <div className="flex flex-col items-center">
-                <div className="text-lg font-bold sm:text-xl">{templateSequence.regular[i]}</div>
-                <span className="text-center text-[8px] uppercase leading-tight text-app-muted sm:text-[9px]">
-                  <span className="sm:hidden">осн.</span>
-                  <span className="hidden sm:inline">Обычные</span>
-                  {templateSequence.shiftHours?.[i] !== 24 ? ` (${templateSequence.shiftHours?.[i]}ч)` : ""}
+          {weekdayShort.map((day, i) => {
+            const regularHours = templatePartTotalHours(
+              templateSequence.regular[i] ?? 0,
+              templateSequence.shiftHours[i] ?? 24,
+            );
+            const reinforcementHours = templatePartTotalHours(
+              templateSequence.reinforcement[i] ?? 0,
+              templateSequence.reinforcementShiftHours[i] ?? 24,
+            );
+            const rapidHours = templatePartTotalHours(
+              templateSequence.rapidResponse[i] ?? 0,
+              templateSequence.rapidResponseShiftHours[i] ?? 24,
+            );
+            const shiftLeadHours = templatePartTotalHours(
+              templateSequence.shiftLead[i] ?? 0,
+              templateSequence.shiftLeadShiftHours[i] ?? 24,
+            );
+            return (
+              <div
+                key={day}
+                className="flex min-w-0 flex-col gap-1.5 rounded-button border border-app-border bg-app-elevated p-2 sm:gap-2 sm:p-3"
+              >
+                <span className="text-center text-[10px] font-bold uppercase tracking-wider text-app-muted sm:text-xs">
+                  {day}
                 </span>
+                <div className="flex flex-col items-center">
+                  <div className="text-lg font-bold sm:text-xl">{regularHours}</div>
+                  <span className="text-center text-[8px] uppercase leading-tight text-app-muted sm:text-[9px]">
+                    <span className="sm:hidden">осн. ч</span>
+                    <span className="hidden sm:inline">Обычные, ч</span>
+                  </span>
+                </div>
+                {reinforcementHours > 0 ? (
+                  <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
+                    <div className="text-base font-bold text-accent-warning sm:text-lg">{reinforcementHours}</div>
+                    <span className="text-center text-[8px] uppercase leading-tight text-accent-warning sm:text-[9px]">
+                      <span className="sm:hidden">ус. ч</span>
+                      <span className="hidden sm:inline">Усиление, ч</span>
+                    </span>
+                  </div>
+                ) : null}
+                {rapidHours > 0 ? (
+                  <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
+                    <div className="text-base font-bold text-accent-primary sm:text-lg">{rapidHours}</div>
+                    <span className="text-center text-[8px] uppercase leading-tight text-accent-primary sm:text-[9px]">
+                      МП, ч
+                    </span>
+                  </div>
+                ) : null}
+                {shiftLeadHours > 0 ? (
+                  <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
+                    <div className="text-base font-bold text-accent-secondary sm:text-lg">{shiftLeadHours}</div>
+                    <span className="text-center text-[8px] uppercase leading-tight text-accent-secondary sm:text-[9px]">
+                      СтМ, ч
+                    </span>
+                  </div>
+                ) : null}
               </div>
-              {templateSequence.reinforcement[i] > 0 && (
-                <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
-                  <div className="text-base font-bold text-accent-warning sm:text-lg">
-                    {templateSequence.reinforcement[i]}
-                  </div>
-                  <span className="text-center text-[8px] uppercase leading-tight text-accent-warning sm:text-[9px]">
-                    <span className="sm:hidden">ус.</span>
-                    <span className="hidden sm:inline">Усиление</span>
-                    {templateSequence.reinforcementShiftHours?.[i] !== 24
-                      ? ` (${templateSequence.reinforcementShiftHours?.[i]}ч)`
-                      : ""}
-                  </span>
-                </div>
-              )}
-              {templateSequence.rapidResponse?.[i] > 0 && (
-                <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
-                  <div className="text-base font-bold text-accent-primary sm:text-lg">
-                    {templateSequence.rapidResponse[i]}
-                  </div>
-                  <span className="text-center text-[8px] uppercase leading-tight text-accent-primary sm:text-[9px]">
-                    МП
-                    {templateSequence.rapidResponseShiftHours?.[i] !== 24
-                      ? ` (${templateSequence.rapidResponseShiftHours?.[i]}ч)`
-                      : ""}
-                  </span>
-                </div>
-              )}
-              {templateSequence.shiftLead?.[i] > 0 && (
-                <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
-                  <div className="text-base font-bold text-accent-secondary sm:text-lg">
-                    {templateSequence.shiftLead[i]}
-                  </div>
-                  <span className="text-center text-[8px] uppercase leading-tight text-accent-secondary sm:text-[9px]">
-                    СтМ
-                    {templateSequence.shiftLeadShiftHours?.[i] !== 24
-                      ? ` (${templateSequence.shiftLeadShiftHours?.[i]}ч)`
-                      : ""}
-                  </span>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

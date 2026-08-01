@@ -1,6 +1,10 @@
 import ExcelJS from "exceljs";
 import { pickDominantShiftKind, shiftExportFillArgb } from "./schedule-export-shift-style";
-import { formatScheduleExportCellText, type ScheduleExportTable } from "./schedule-export-table";
+import {
+  computeScheduleExportRowHeights,
+  formatScheduleExportCellText,
+  type ScheduleExportTable,
+} from "./schedule-export-table";
 
 function applyTableBorder(cell: ExcelJS.Cell) {
   cell.border = {
@@ -57,6 +61,8 @@ export async function buildScheduleExportWorkbook(table: ScheduleExportTable): P
 
   headerRow.height = 28;
 
+  const rowHeights = computeScheduleExportRowHeights(table);
+
   table.guards.forEach((guard, rowIndex) => {
     const row = ws.getRow(5 + rowIndex);
     const nameCell = row.getCell(1);
@@ -79,7 +85,7 @@ export async function buildScheduleExportWorkbook(table: ScheduleExportTable): P
       }
       applyTableBorder(cell);
     });
-    row.height = 42;
+    row.height = rowHeights[rowIndex] ?? 42;
   });
 
   ws.getColumn(1).width = 28;

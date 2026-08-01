@@ -1,5 +1,6 @@
 import { isUndefinedColumnOrTableError, tableColumnExists } from "../db/column-compat";
 import { getDbPool, query } from "../db/pool";
+import { resolveRateRuleSavePlan } from "../rates/rate-rule-versioning";
 import { prioritiesForDisplayOrder } from "./object-rate-rules-priority";
 import type { GuardEmploymentType, GuardLicenseType, GuardPosition, RateUnit, ShiftKind } from "../scheduling/types";
 import { normalizeShiftKindFromDb } from "../scheduling/types";
@@ -141,6 +142,42 @@ export async function listObjectRateRules(objectId: string): Promise<ObjectRateR
   } catch (error) {
     if (!isUndefinedColumnOrTableError(error)) throw error;
     return [];
+  }
+}
+
+export async function getObjectRateRule(ruleId: string): Promise<ObjectRateRuleRecord | null> {
+  try {
+    const daysSel = await getObjectRateRulesDaysSelect();
+    const rows = await query<DbRow>(
+      `
+        SELECT
+          id,
+          object_id,
+          name,
+          priority,
+          ${daysSel},
+          is_holiday,
+          shift_kind,
+          starts_at::text,
+          ends_at::text,
+          position,
+          license_type,
+          employment_type,
+          is_trainee,
+          client_rate_cents,
+          guard_rate_cents,
+          rate_unit,
+          effective_from::text,
+          effective_to::text
+        FROM object_rate_rules
+        WHERE id = $1::uuid
+      `,
+      [ruleId],
+    );
+    return rows[0] ? mapRow(rows[0]) : null;
+  } catch (error) {
+    if (!isUndefinedColumnOrTableError(error)) throw error;
+    return null;
   }
 }
 
@@ -455,6 +492,60 @@ export async function updateObjectRateRule(
       input.effectiveTo,
     ],
   );
+}
+
+export type SaveObjectRateRuleResult = {
+  mode: "update" | "supersede";
+  ruleId: string;
+  previousRuleId?: string;
+  backfillFrom: string;
+};
+
+/**
+ * Сохраняет правку ставки: либо in-place, либо закрывает старую версию и создаёт новую с `versionFrom`.
+ * Архивные месяцы до `versionFrom` не меняют cents у закрытой версии.
+ */
+export async function saveObjectRateRuleWithVersioning(
+  ruleId: string,
+  input: CreateObjectRateRuleInput,
+  versionFrom: string,
+): Promise<SaveObjectRateRuleResult> {
+  const existing = await getObjectRateRule(ruleId);
+  if (!existing) throw new Error("Правило ставки не найдено");
+  if (existing.objectId !== input.objectId) {
+    throw new Error("Правило принадлежит другому объекту");
+  }
+
+  const plan = resolveRateRuleSavePlan(existing, versionFrom, input);
+
+  if (plan.mode === "update") {
+    await updateObjectRateRule(ruleId, input);
+    return { mode: "update", ruleId, backfillFrom: plan.backfillFrom };
+  }
+
+  await query(`UPDATE object_rate_rules SET effective_to = $2::date WHERE id = $1::uuid`, [
+    ruleId,
+    plan.closeEffectiveTo,
+  ]);
+  try {
+    const newId = await createObjectRateRule({
+      ...input,
+      effectiveFrom: plan.newEffectiveFrom,
+      effectiveTo: plan.newEffectiveTo,
+    });
+    return {
+      mode: "supersede",
+      ruleId: newId,
+      previousRuleId: ruleId,
+      backfillFrom: plan.backfillFrom,
+    };
+  } catch (error) {
+    await query(`UPDATE object_rate_rules SET effective_to = $2::date WHERE id = $1::uuid`, [
+      ruleId,
+      existing.effectiveTo,
+    ]);
+    throw error;
+  }
 }
 
 export async function deleteObjectRateRule(ruleId: string): Promise<void> {

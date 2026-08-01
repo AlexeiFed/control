@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardRegistryExportRow, GUARD_REGISTRY_EXPORT_HEADERS } from "../../src/lib/guards/guard-registry-export";
+import { buildGuardRegistryWorkbook } from "../../src/lib/guards/guard-registry-xlsx";
 import type { GuardListRow } from "../../src/lib/operations/guards-repository";
 
 function row(partial: Partial<GuardListRow>): GuardListRow {
@@ -70,5 +71,42 @@ describe("guard-registry-export", () => {
     expect(exported[22]).toBe("15.01.2026");
     expect(exported[23]).toBe("новое");
     expect(exported[24]).toBe("комплект полный");
+  });
+
+  it("exports expired trainee as not trainee", () => {
+    const exported = buildGuardRegistryExportRow(
+      row({
+        isTrainee: true,
+        traineeUntil: "2020-01-01",
+        traineeExpired: true,
+      }),
+      0,
+    );
+    const traineeIdx = GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Стажёр");
+    const untilIdx = GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Стажировка до");
+    expect(exported[traineeIdx]).toBe("нет");
+    expect(exported[untilIdx]).toBe("");
+  });
+
+  it("includes form-issued headers and builds xlsx beyond column Z", async () => {
+    expect(GUARD_REGISTRY_EXPORT_HEADERS).toEqual(
+      expect.arrayContaining([
+        "Форма выдана",
+        "Дата выдачи формы",
+        "Состояние формы",
+        "Примечание к форме",
+      ]),
+    );
+    expect(GUARD_REGISTRY_EXPORT_HEADERS.length).toBeGreaterThan(26);
+
+    const buffer = await buildGuardRegistryWorkbook([
+      row({
+        uniformIssued: true,
+        uniformIssuedOn: "2026-01-15",
+        uniformCondition: "used",
+        uniformNote: "б/у куртка",
+      }),
+    ]);
+    expect(buffer.byteLength).toBeGreaterThan(1000);
   });
 });

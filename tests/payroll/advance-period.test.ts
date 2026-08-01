@@ -135,6 +135,36 @@ describe("buildObjectPayrollHalfSummaries", () => {
     expect(sklad?.totalMonthRub).toBe(300);
   });
 
+  it("склеивает смены одного objectId после переименования объекта", () => {
+    const rows = [
+      baseRow({
+        objectId: "o1",
+        objectName: "Старое имя",
+        startsAt: "2026-05-02T04:00:00.000Z",
+        guardAmountCents: 100_000,
+      }),
+      baseRow({
+        objectId: "o1",
+        objectName: "Новое имя",
+        startsAt: "2026-05-10T04:00:00.000Z",
+        guardAmountCents: 50_000,
+      }),
+      baseRow({
+        objectId: "o1",
+        objectName: "Новое имя",
+        startsAt: "2026-05-20T04:00:00.000Z",
+        guardAmountCents: 200_000,
+      }),
+    ];
+    const summaries = buildObjectPayrollHalfSummaries(rows, MAY_2026);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.objectId).toBe("o1");
+    expect(summaries[0]?.objectName).toBe("Новое имя");
+    expect(summaries[0]?.toPayFirstHalfRub).toBe(1_500);
+    expect(summaries[0]?.toPaySecondHalfRub).toBe(2_000);
+    expect(summaries[0]?.totalMonthRub).toBe(3_500);
+  });
+
   it("не включает смену 16.06 в первую половину", () => {
     const rows = [
       baseRow({

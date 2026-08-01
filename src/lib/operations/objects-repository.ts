@@ -1,4 +1,5 @@
 import { query } from "../db/pool";
+import { isUndefinedColumnOrTableError } from "../db/column-compat";
 import { getObjectMonthlySetting } from "./object-monthly-settings-repository";
 
 import { normalizeOperationalAnchorTime } from "../scheduling/operational-day-timeline";
@@ -69,6 +70,50 @@ function mapObjectRow(row: ObjectRow): Omit<ObjectListRow, "guardsCount" | "guar
     timesheetDirectorRole: row.timesheet_director_role ?? "",
     timesheetSiteManagerEnabled: row.timesheet_site_manager_enabled ?? false,
   };
+}
+
+/** Лёгкий список объектов для назначения охраннику (без агрегаций смен/охранников). */
+export async function listObjectsForAssignment(): Promise<ObjectListRow[]> {
+  const rows = await query<{
+    id: string;
+    name: string;
+    address: string;
+    description: string;
+    status: "Active" | "Inactive";
+    operational_day_start_time: string;
+    timesheet_director_name: string;
+    timesheet_director_role: string;
+    timesheet_site_manager_enabled: boolean;
+  }>(`
+    SELECT
+      id,
+      name,
+      address,
+      description,
+      status,
+      operational_day_start_time::text AS operational_day_start_time,
+      COALESCE(timesheet_director_name, '') AS timesheet_director_name,
+      COALESCE(timesheet_director_role, '') AS timesheet_director_role,
+      COALESCE(timesheet_site_manager_enabled, false) AS timesheet_site_manager_enabled
+    FROM security_objects
+    ORDER BY name
+  `);
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    address: row.address,
+    description: row.description,
+    status: row.status,
+    operationalDayStartTime: normalizeOperationalAnchorTime(row.operational_day_start_time),
+    timesheetDirectorName: row.timesheet_director_name ?? "",
+    timesheetDirectorRole: row.timesheet_director_role ?? "",
+    timesheetSiteManagerEnabled: row.timesheet_site_manager_enabled ?? false,
+    guardsCount: 0,
+    guardIds: [],
+    weekShiftCount: 0,
+    weekGuardCount: 0,
+  }));
 }
 
 export async function listObjects(): Promise<ObjectListRow[]> {
@@ -279,11 +324,28 @@ export async function updateObject(id: string, input: {
   description: string;
   status: "Active" | "Inactive";
 }): Promise<void> {
+  const name = input.name.trim();
   await query(`
     UPDATE security_objects
     SET name = $1, address = $2, description = $3, status = $4
     WHERE id = $5
-  `, [input.name.trim(), input.address.trim(), input.description.trim(), input.status, id]);
+  `, [name, input.address.trim(), input.description.trim(), input.status, id]);
+
+  // Табель хранит object_name снапшотом — без синка после rename одна сущность
+  // распадается на две строки в сводке/ведомости (старое имя + новое).
+  try {
+    await query(
+      `
+        UPDATE timesheet_shift_entries
+        SET object_name = $1
+        WHERE object_id = $2::uuid
+          AND object_name IS DISTINCT FROM $1
+      `,
+      [name, id],
+    );
+  } catch (error) {
+    if (!isUndefinedColumnOrTableError(error)) throw error;
+  }
 }
 
 export async function updateObjectOperationalDayStartTime(

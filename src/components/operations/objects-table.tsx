@@ -108,7 +108,7 @@ export function ObjectsTable({
   return (
     <section
       ref={sectionRef}
-      className="rounded-card border border-app-border bg-app-surface p-6 shadow-glow"
+      className="rounded-card border border-app-border bg-app-surface p-3 shadow-glow md:p-6"
       onClickCapture={(event) => {
         const target = event.target;
         if (target instanceof Element && !target.closest("[data-dropdown]")) {
@@ -124,7 +124,7 @@ export function ObjectsTable({
             Фильтры, inline-статус и массовое назначение охранников.
           </p>
         </div>
-        <ButtonLink href="/dashboard" variant="secondary">
+        <ButtonLink href="/dashboard" variant="secondary" className="w-full md:w-auto">
           Назад
         </ButtonLink>
       </div>
@@ -237,7 +237,272 @@ export function ObjectsTable({
         </Button>
       </form>
 
-      <div className="mt-6 overflow-visible rounded-card border border-app-border">
+      <div className="mt-6 grid gap-3 md:hidden">
+        {filteredObjects.map((object) => {
+          const selectedGuards = selectedByObject[object.id] ?? object.guardIds;
+          const guardsOpen = openMenu === `object-guards-${object.id}`;
+          const statusOpen = openMenu === `object-status-${object.id}`;
+          const templateOpen = canEditTemplates && openTemplateObjectId === object.id;
+          const ratesOpen = canManageRates && openRatesObjectId === object.id;
+
+          return (
+            <article
+              key={`mobile-${object.id}`}
+              className="rounded-card border border-app-border bg-app-surface p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <ButtonLink
+                    href={`/objects/${object.id}`}
+                    variant="ghost"
+                    className="h-auto justify-start px-0 py-0 text-left font-semibold hover:bg-transparent hover:text-accent-primary"
+                  >
+                    {object.name}
+                  </ButtonLink>
+                  <p className="mt-1 break-words text-sm text-app-muted">{object.address}</p>
+                </div>
+                <span className={`shrink-0 text-xs font-semibold ${statusClass[object.status]}`}>
+                  {objectStatusLabels[object.status]}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-button border border-app-border bg-app-elevated p-2">
+                  <span className="block text-app-muted">Охранники</span>
+                  <strong className="mt-0.5 block tabular-nums">{object.guardsCount}</strong>
+                </div>
+                <div className="rounded-button border border-app-border bg-app-elevated p-2">
+                  <span className="block text-app-muted">Текущая неделя</span>
+                  <strong className="mt-0.5 block tabular-nums">
+                    {object.weekShiftCount} смен / {object.weekGuardCount} охр.
+                  </strong>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <ButtonLink href={`/objects/${object.id}`} variant="secondary" className="min-h-11">
+                  Открыть
+                </ButtonLink>
+                <div className="relative" data-dropdown={`object-status-${object.id}`}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={`min-h-11 w-full ${statusClass[object.status]}`}
+                    onClick={() =>
+                      setOpenMenu((current) =>
+                        current === `object-status-${object.id}` ? null : `object-status-${object.id}`,
+                      )
+                    }
+                  >
+                    Статус
+                  </Button>
+                  {statusOpen ? (
+                    <div className="absolute right-0 z-20 mt-2 w-full min-w-44 rounded-button border border-app-border bg-app-surface p-2 shadow-glow">
+                      {objectStatusOptions.map((option) => (
+                        <form key={option.value} action={updateObjectStatusAction}>
+                          <input type="hidden" name="objectId" value={object.id} />
+                          <input type="hidden" name="status" value={option.value} />
+                          <Button
+                            type="submit"
+                            variant="menu"
+                            size="sm"
+                            className={`mb-1 justify-start ${statusClass[option.value]}`}
+                          >
+                            {option.label}
+                          </Button>
+                        </form>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant={guardsOpen ? "secondary" : "outline"}
+                  className="min-h-11 w-full"
+                  onClick={() => {
+                    setOpenMenu(guardsOpen ? null : `object-guards-${object.id}`);
+                    setGuardSearch("");
+                    setSelectedByObject((current) =>
+                      current[object.id] ? current : { ...current, [object.id]: object.guardIds },
+                    );
+                  }}
+                >
+                  Охранники
+                </Button>
+                {canEditTemplates ? (
+                  <Button
+                    type="button"
+                    variant={templateOpen ? "secondary" : "outline"}
+                    className="min-h-11 w-full"
+                    onClick={() =>
+                      setOpenTemplateObjectId((current) =>
+                        current === object.id ? null : object.id,
+                      )
+                    }
+                  >
+                    Сменность
+                  </Button>
+                ) : null}
+                {canManageRates ? (
+                  <Button
+                    type="button"
+                    variant={ratesOpen ? "secondary" : "outline"}
+                    className="min-h-11 w-full"
+                    onClick={() =>
+                      setOpenRatesObjectId((current) => (current === object.id ? null : object.id))
+                    }
+                  >
+                    Ставки
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="danger"
+                  className="min-h-11 w-full"
+                  onClick={() => setDeleteObjectTarget({ id: object.id, name: object.name })}
+                >
+                  <Trash2 className="size-4" aria-hidden />
+                  Удалить
+                </Button>
+              </div>
+
+              {guardsOpen ? (
+                <div
+                  className="mt-3 rounded-button border border-app-border bg-app-elevated p-3"
+                  data-dropdown={`object-guards-${object.id}`}
+                >
+                  <input
+                    value={guardSearch}
+                    onChange={(event) => setGuardSearch(event.target.value)}
+                    placeholder="Поиск охранника"
+                    className="mb-2 h-11 w-full rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"
+                  />
+                  <div className="max-h-64 overflow-auto">
+                    {filteredGuards.map((guard) => {
+                      const checked = selectedGuards.includes(guard.id);
+                      return (
+                        <label
+                          key={`mobile-${object.id}-${guard.id}`}
+                          className="mb-1 flex min-h-11 cursor-pointer items-start gap-2 rounded-button px-2 py-2 text-xs transition hover:bg-app-surface"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              setSelectedByObject((current) => {
+                                const before = current[object.id] ?? object.guardIds;
+                                const after = event.target.checked
+                                  ? [...before, guard.id]
+                                  : before.filter((id) => id !== guard.id);
+                                return { ...current, [object.id]: [...new Set(after)] };
+                              });
+                            }}
+                            className="mt-0.5 size-4"
+                          />
+                          <span>
+                            {guard.lastName} {guard.firstName}
+                            <span className={`ml-1 ${guardStatusClass[guard.status]}`}>
+                              ({guardStatusLabels[guard.status]})
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {filteredGuards.length === 0 ? (
+                      <p className="px-2 py-3 text-xs text-app-muted">Охранники не найдены.</p>
+                    ) : null}
+                  </div>
+                  <form action={setObjectGuardsAction} className="mt-2">
+                    <input type="hidden" name="objectId" value={object.id} />
+                    <input type="hidden" name="guardIds" value={selectedGuards.join(",")} />
+                    <Button type="submit" size="lg" className="w-full">
+                      Сохранить охранников
+                    </Button>
+                  </form>
+                </div>
+              ) : null}
+
+              {templateOpen ? (
+                <div className="mt-3 rounded-button border border-app-border bg-app-elevated p-3">
+                  <p className="mb-3 text-xs text-app-muted">
+                    План обычных смен и усилений по дням недели.
+                  </p>
+                  <form action={saveShiftTemplatesAction} className="grid gap-3">
+                    <input type="hidden" name="objectId" value={object.id} />
+                    <label className="grid gap-1 text-xs text-app-muted">
+                      Применять с даты
+                      <input
+                        type="date"
+                        name="effectiveFrom"
+                        defaultValue={templateEffectiveFrom}
+                        className="h-11 rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"
+                        required
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {weekdayShort.map((label, idx) => (
+                        <fieldset
+                          key={`mobile-template-${object.id}-${label}`}
+                          className="rounded-button border border-app-border bg-app-surface p-2"
+                        >
+                          <legend className="px-1 text-xs font-semibold">{label}</legend>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="grid gap-1 text-[10px] text-app-muted">
+                              Осн.
+                              <input
+                                type="number"
+                                name={`d${idx + 1}`}
+                                min={0}
+                                max={24}
+                                required
+                                defaultValue={templateDefaultsByObjectId[object.id]?.[idx] ?? 2}
+                                className="h-10 min-w-0 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary"
+                              />
+                            </label>
+                            <label className="grid gap-1 text-[10px] text-accent-warning">
+                              Усил.
+                              <input
+                                type="number"
+                                name={`r${idx + 1}`}
+                                min={0}
+                                max={24}
+                                required
+                                defaultValue={
+                                  templateReinforcementDefaultsByObjectId[object.id]?.[idx] ?? 0
+                                }
+                                className="h-10 min-w-0 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-warning"
+                              />
+                            </label>
+                          </div>
+                        </fieldset>
+                      ))}
+                    </div>
+                    <Button type="submit" size="lg" className="w-full">
+                      Сохранить сменность
+                    </Button>
+                  </form>
+                </div>
+              ) : null}
+
+              {ratesOpen ? (
+                <div className="mt-3 min-w-0 overflow-hidden rounded-button border border-app-border bg-app-elevated p-3">
+                  <ObjectRateRulesPanel
+                    objectId={object.id}
+                    rules={rateRulesByObjectId[object.id] ?? []}
+                  />
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+        {filteredObjects.length === 0 ? (
+          <div className="rounded-card border border-app-border bg-app-elevated p-4 text-sm text-app-muted">
+            Объекты не найдены.
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-6 hidden overflow-visible rounded-card border border-app-border md:block">
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-app-elevated text-app-muted">
             <tr>

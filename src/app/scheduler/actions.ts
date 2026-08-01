@@ -7,6 +7,7 @@ import { z } from "zod";
 import { assertPermission, ForbiddenError } from "../../lib/auth/rbac";
 import { requireSession } from "../../lib/auth/session";
 import { toDateTimeKhabarovsk } from "../../lib/format/display-date";
+import { normalizeFormScrollY } from "../../lib/scheduling/form-scroll-y";
 import { buildShiftIntervalFromHm } from "../../lib/scheduling/operational-day-timeline";
 import { getObjectOperationalDayStartTime, getObjectOperationalDayStartTimeForMonth } from "../../lib/operations/objects-repository";
 import {
@@ -25,12 +26,7 @@ import type { IncidentCategory, RateUnit, ShiftKind } from "../../lib/scheduling
 const scrollYOptionalSchema = z
   .union([z.string(), z.number()])
   .optional()
-  .transform((value) => {
-    if (value === undefined || value === null || value === "") return undefined;
-    const n = Math.round(Number(String(value)));
-    if (!Number.isFinite(n) || n < 0) return undefined;
-    return String(n);
-  });
+  .transform((value) => normalizeFormScrollY(value));
 
 const createShiftSchema = z.object({
   objectId: z.string().uuid(),
@@ -40,7 +36,7 @@ const createShiftSchema = z.object({
   endTime: z.string().regex(/^\d{2}:\d{2}$/),
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   replaceShiftId: z.string().uuid().optional(),
-  scrollY: z.string().regex(/^\d+$/).optional(),
+  scrollY: scrollYOptionalSchema,
   shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse", "ShiftLead"]).optional(),
   isNoShow: z.string().optional(),
   manualClientRubles: z.string().optional(),
@@ -142,8 +138,13 @@ const createShiftLogSchema = z.object({
   note: z.string().trim().min(3, "Введите осмысленную заметку"),
   incidentLevel: z.enum(["None", "Info", "Warning", "Critical"]),
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  scrollY: z.string().regex(/^\d+$/).optional(),
+  scrollY: scrollYOptionalSchema,
   objectIdFilter: z.string().optional(),
+  redirect: z
+    .string()
+    .optional()
+    .refine((s) => !s || (s.startsWith("/") && !s.startsWith("//")), "Некорректный redirect"),
+  noRedirect: z.string().optional(),
 });
 
 const incidentCategorySchema = z.enum(["FullNoShow", "LeftWork", "DrunkOnDuty", "Other"]);
@@ -445,7 +446,7 @@ export async function deleteShiftAction(formData: FormData) {
   redirect(`/scheduler?week=${input.weekStart ?? ""}&success=shift-deleted${scroll}${objectFilter}`);
 }
 
-export async function createShiftLogAction(formData: FormData) {
+export async function createShiftLogAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   assertPermission(session.user.role, "schedule:write");
 
@@ -460,6 +461,8 @@ export async function createShiftLogAction(formData: FormData) {
     weekStart: formData.get("weekStart") || undefined,
     scrollY: formData.get("scrollY") || undefined,
     objectIdFilter: formData.get("objectIdFilter") || undefined,
+    redirect: formData.get("redirect")?.toString() || undefined,
+    noRedirect: formData.get("noRedirect")?.toString() || undefined,
   });
 
   await createShiftLog({
@@ -472,6 +475,21 @@ export async function createShiftLogAction(formData: FormData) {
   revalidatePath("/scheduler");
   revalidatePath("/admin/curators");
   revalidateTag("timesheet", "max");
+  if (input.redirect?.startsWith("/objects/")) {
+    revalidatePath(input.redirect.split("?")[0]!);
+  }
+
+  if (input.noRedirect === "true") {
+    return;
+  }
+
+  if (input.redirect) {
+    const params = new URLSearchParams();
+    if (input.scrollY) params.set("scrollY", input.scrollY);
+    const sep = input.redirect.includes("?") ? "&" : "?";
+    redirect(params.size > 0 ? `${input.redirect}${sep}${params.toString()}` : input.redirect);
+  }
+
   const params = new URLSearchParams();
   if (input.weekStart) params.set("week", input.weekStart);
   if (input.scrollY) params.set("scrollY", input.scrollY);
@@ -586,11 +604,10 @@ export async function createShiftAction(formData: FormData) {
 
   revalidatePath("/scheduler");
   revalidatePath(`/objects/${input.objectId}`);
-  revalidatePath("/admin/curators");
   revalidatePath("/accounting/timesheet");
-  revalidatePath("/dashboard");
-  revalidatePath("/");
   revalidateTag("timesheet", "max");
+  revalidateTag("scheduler", "max");
+  revalidateTag("global-alerts", "max");
 
   if (input.noRedirect === "true") {
     return;
@@ -704,11 +721,10 @@ export async function updateShiftAction(formData: FormData) {
 
   revalidatePath("/scheduler");
   revalidatePath(`/objects/${input.objectId}`);
-  revalidatePath("/admin/curators");
   revalidatePath("/accounting/timesheet");
-  revalidatePath("/dashboard");
-  revalidatePath("/");
   revalidateTag("timesheet", "max");
+  revalidateTag("scheduler", "max");
+  revalidateTag("global-alerts", "max");
 
   if (input.noRedirect === "true") {
     return;
@@ -738,7 +754,7 @@ const cloneWeekShiftsSchema = z.object({
   sourceMonday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   targetMonday: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  scrollY: z.string().regex(/^\d+$/).optional(),
+  scrollY: scrollYOptionalSchema,
   objectIdFilter: z.string().optional(),
 });
 
@@ -805,7 +821,7 @@ const bulkCreateShiftItemSchema = z.object({
 const bulkCreateShiftsSchema = z.object({
   items: z.array(bulkCreateShiftItemSchema).min(1).max(100),
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  scrollY: z.string().regex(/^\d+$/).optional(),
+  scrollY: scrollYOptionalSchema,
   objectIdFilter: z.string().optional(),
   redirect: z.string().optional(),
   noRedirect: z.string().optional(),
@@ -818,7 +834,7 @@ const bulkCreateShiftsSchema = z.object({
  */
 export async function bulkCreateShiftsAction(formData: FormData) {
   const session = await requireSession();
-  assertPermission(session.user.role, "schedule:write");
+  assertScheduleWriteRole(session.user.role);
   if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
     throw new Error("Недостаточно прав для массового создания смен");
   }
@@ -831,41 +847,56 @@ export async function bulkCreateShiftsAction(formData: FormData) {
     throw new Error("Некорректный JSON-payload bulk-смен");
   }
 
-  const input = bulkCreateShiftsSchema.parse({
-    items: parsedItems,
-    weekStart: formData.get("weekStart")?.toString() || undefined,
-    scrollY: formData.get("scrollY")?.toString() || undefined,
-    objectIdFilter: formData.get("objectIdFilter")?.toString() || undefined,
-    redirect: formData.get("redirect")?.toString() || undefined,
-    noRedirect: formData.get("noRedirect")?.toString().trim() || undefined,
-  });
+  let input: z.infer<typeof bulkCreateShiftsSchema>;
+  try {
+    input = bulkCreateShiftsSchema.parse({
+      items: parsedItems,
+      weekStart: formData.get("weekStart")?.toString() || undefined,
+      scrollY: formData.get("scrollY")?.toString() || undefined,
+      objectIdFilter: formData.get("objectIdFilter")?.toString() || undefined,
+      redirect: formData.get("redirect")?.toString() || undefined,
+      noRedirect: formData.get("noRedirect")?.toString().trim() || undefined,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new Error(formatZodError(error));
+    }
+    throw error;
+  }
 
   const anchorCache = new Map<string, string>();
-  const specs = await Promise.all(
-    input.items.map(async (it) => {
-      const monthKey = it.shiftDate.slice(0, 7);
-      const anchorCacheKey = `${it.objectId}:${monthKey}`;
-      let anchorTime = anchorCache.get(anchorCacheKey);
-      if (!anchorTime) {
-        anchorTime = await getObjectOperationalDayStartTimeForMonth(it.objectId, monthKey);
-        anchorCache.set(anchorCacheKey, anchorTime);
-      }
-      const { startsAt, endsAt } = buildShiftIntervalFromHm(
+  const specs = [];
+  for (const it of input.items) {
+    const monthKey = it.shiftDate.slice(0, 7);
+    const anchorCacheKey = `${it.objectId}:${monthKey}`;
+    let anchorTime = anchorCache.get(anchorCacheKey);
+    if (!anchorTime) {
+      anchorTime = await getObjectOperationalDayStartTimeForMonth(it.objectId, monthKey);
+      anchorCache.set(anchorCacheKey, anchorTime);
+    }
+    let startsAt: Date;
+    let endsAt: Date;
+    try {
+      ({ startsAt, endsAt } = buildShiftIntervalFromHm(
         it.shiftDate,
         it.startTime,
         it.endTime,
         anchorTime,
+      ));
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : "Некорректный интервал смены",
       );
-      return {
-        guardId: it.guardId,
-        objectId: it.objectId,
-        postId: it.postId ?? null,
-        startsAt,
-        endsAt,
-        shiftKind: it.shiftKind as ShiftKind,
-      };
-    }),
-  );
+    }
+    specs.push({
+      guardId: it.guardId,
+      objectId: it.objectId,
+      postId: it.postId ?? null,
+      startsAt,
+      endsAt,
+      shiftKind: it.shiftKind as ShiftKind,
+    });
+  }
 
   const result = await bulkCreateShifts(specs);
   const total = result.created + result.skipped.length;
@@ -873,15 +904,11 @@ export async function bulkCreateShiftsAction(formData: FormData) {
     ? `bulk-create:${result.created}/${total}`
     : `bulk-create:${result.created}`;
 
-  revalidatePath("/scheduler");
-  revalidatePath("/admin/curators");
-  revalidatePath("/accounting/timesheet");
-  revalidatePath("/dashboard");
-  revalidatePath("/");
-  for (const obj of new Set(specs.map((s) => s.objectId))) {
-    revalidatePath(`/objects/${obj}`);
-  }
-  revalidateTag("timesheet", "max");
+  revalidateAfterShiftMutation([
+    "/scheduler",
+    "/accounting/timesheet",
+    ...new Set(specs.map((s) => `/objects/${s.objectId}`)),
+  ]);
 
   if (input.noRedirect === "true") {
     return result;

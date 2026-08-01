@@ -1,6 +1,7 @@
 import type { ObjectRateRuleRecord } from "../operations/object-rate-rules-repository";
 import { listObjectRateRulesForObjects } from "../operations/object-rate-rules-repository";
 import { getGuardsHasCarSelect, getGuardsPhoneSelect } from "../operations/guards-repository";
+import { buildGuardProfileResolver } from "../operations/guard-profile-periods-repository";
 import { getKhabarovskComponents, toDateIsoKhabarovsk } from "../format/display-date";
 import { mapGuardLicenseFromDb } from "../scheduling/guard-profile";
 import type { Guard, GuardStatus, ShiftKind, Shift } from "../scheduling/types";
@@ -69,9 +70,18 @@ async function loadGuardForRates(guardId: string): Promise<Guard | null> {
   };
 }
 
+/** Текущая карточка + периоды профиля на дату смены (ЛК/ТУ). */
+async function loadGuardResolvedAtShiftDate(guardId: string, shiftDateIso: string): Promise<Guard | null> {
+  const base = await loadGuardForRates(guardId);
+  if (!base) return null;
+  const resolver = await buildGuardProfileResolver([guardId]);
+  return resolver.resolveGuardAt(base, shiftDateIso);
+}
+
 export type ResolveShiftRateRuleInput = {
   objectId: string;
   guardId: string;
+  /** Если передан — должен уже быть resolveGuardAt(date), иначе подтянем сами. */
   guard?: Guard;
   shiftKind: ShiftKind;
   startsAt: Date;
@@ -88,14 +98,17 @@ export async function resolveShiftSelectedRateRuleId(
     return null;
   }
 
-  const guard = input.guard ?? (await loadGuardForRates(input.guardId));
+  const shiftDateIso = toDateIsoKhabarovsk(input.startsAt);
+  // Нельзя брать «текущий» профиль: иначе ТУ+ЛК сегодня матчит ставку, а табель
+  // на дату смены (ещё без ЛК) даёт unpriced 0 ₽.
+  const guard =
+    input.guard ?? (await loadGuardResolvedAtShiftDate(input.guardId, shiftDateIso));
   if (!guard) throw new Error("Охранник не найден");
 
   const rules = await listObjectRateRulesForObjects([input.objectId]);
   if (rules.length === 0) return null;
 
   const holidayDates = await loadHolidayDateSetForLocalRange(input.startsAt, input.endsAt);
-  const shiftDateIso = toDateIsoKhabarovsk(input.startsAt);
   const startHm = formatHmKhabarovsk(input.startsAt);
   const endHm = formatHmKhabarovsk(input.endsAt);
 

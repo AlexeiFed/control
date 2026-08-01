@@ -69,6 +69,7 @@ export function payrollHalfSummaryByGuardName(
 }
 
 export type ObjectPayrollHalfSummary = {
+  objectId?: string;
   objectName: string;
   toPayFirstHalfRub: number;
   toPaySecondHalfRub: number;
@@ -80,21 +81,30 @@ export function buildObjectPayrollHalfSummaries(
   rows: TimesheetRow[],
   month: PayrollMonthContext,
 ): ObjectPayrollHalfSummary[] {
-  const earned = new Map<string, { first: number; second: number }>();
+  const earned = new Map<string, { objectId?: string; objectName: string; first: number; second: number }>();
 
   for (const row of rows) {
-    const current = earned.get(row.objectName) ?? { first: 0, second: 0 };
+    const key = row.objectId ?? `name:${row.objectName}`;
+    const current = earned.get(key) ?? {
+      objectId: row.objectId,
+      objectName: row.objectName,
+      first: 0,
+      second: 0,
+    };
+    // Актуальное имя побеждает (после rename снапшоты могут отличаться).
+    if (row.objectName) current.objectName = row.objectName;
     if (shiftBelongsToHalf(row.startsAt, "first", month)) {
       current.first += row.guardAmountCents;
     } else if (shiftBelongsToHalf(row.startsAt, "second", month)) {
       current.second += row.guardAmountCents;
     }
-    earned.set(row.objectName, current);
+    earned.set(key, current);
   }
 
-  return Array.from(earned.entries())
-    .map(([objectName, totals]) => ({
-      objectName,
+  return Array.from(earned.values())
+    .map((totals) => ({
+      objectId: totals.objectId,
+      objectName: totals.objectName,
       toPayFirstHalfRub: Math.round((totals.first / 100) * 100) / 100,
       toPaySecondHalfRub: Math.round((totals.second / 100) * 100) / 100,
       totalMonthRub: Math.round(((totals.first + totals.second) / 100) * 100) / 100,

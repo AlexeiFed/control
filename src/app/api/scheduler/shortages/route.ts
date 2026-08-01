@@ -8,7 +8,7 @@ import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
-import { filterShortagesByStoredDismissals } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
+import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDays } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../../../../lib/scheduling/schedule-shortage";
 import { getMondayWeekStartKhabarovsk, toDateIsoKhabarovsk, formatWeekdayDayLabel } from "../../../../lib/format/display-date";
@@ -50,12 +50,17 @@ export async function GET() {
       : [];
 
     const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
+    const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+      objectIds,
+      weekDayIsos,
+    );
 
     const rawShortages = computeScheduleShortages(
       snapshot.objects,
       snapshot.shifts,
       expectedShiftsByObjectDay,
-      weekDays
+      weekDays,
+      monthlyOperationalOverrides,
     );
 
     const shortages = await filterShortagesByStoredDismissals({
@@ -65,6 +70,7 @@ export async function GET() {
       shifts: snapshot.shifts,
       expectedByObjectDay: expectedShiftsByObjectDay,
       rawShortages,
+      monthlyOperationalOverrides,
     });
 
     const weekStartIso = toDateIsoKhabarovsk(weekStart);

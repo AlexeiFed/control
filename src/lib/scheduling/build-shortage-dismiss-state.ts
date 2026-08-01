@@ -1,6 +1,7 @@
 import { shiftBelongsToOperationalDayColumn } from "./operational-day-timeline";
+import { buildOperationalDayAnchorByObjectIdForDate } from "./operational-day-anchors";
 import type { ExpectedShifts } from "./object-shift-templates";
-import { buildOperationalDayAnchorByObjectId, type ScheduleObjectRef } from "./schedule-shortage";
+import type { ScheduleObjectRef } from "./schedule-shortage";
 import {
   buildShortageDayFingerprint,
   isShortageDismissValid,
@@ -71,6 +72,8 @@ export type BuildValidShortageDismissKeySetArgs = {
    * Если не передан, вычисляется из тех же shifts (incidentRecordedAt задан и replacedByShiftId пуст).
    */
   pendingIncidentKeys?: ReadonlySet<string>;
+  /** Ключ `objectId|YYYY-MM` → HH:mm из object_monthly_settings. */
+  monthlyOperationalOverrides?: ReadonlyMap<string, string>;
 };
 
 /**
@@ -81,7 +84,7 @@ export type BuildValidShortageDismissKeySetArgs = {
 export function buildValidShortageDismissKeySet(
   args: BuildValidShortageDismissKeySetArgs,
 ): Set<string> {
-  const anchorByObjectId = buildOperationalDayAnchorByObjectId(args.objects);
+  const monthlyOverrides = args.monthlyOperationalOverrides ?? new Map();
   const result = new Set<string>();
 
   for (const object of args.objects) {
@@ -92,6 +95,11 @@ export function buildValidShortageDismissKeySet(
       const storedFingerprint = args.storedDismissals.get(key);
       if (!storedFingerprint) continue;
 
+      const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
+        args.objects,
+        dateIso,
+        monthlyOverrides,
+      );
       const dayShifts = args.shifts.filter(
         (s) =>
           s.objectId === object.id &&

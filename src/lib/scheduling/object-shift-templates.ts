@@ -38,6 +38,30 @@ export function defaultExpectedShiftsForDay(): ExpectedShifts {
   };
 }
 
+/** Суммарные часы плана на сутки: count × hoursPerShift. */
+export function templatePartTotalHours(count: number, hoursPerShift: number): number {
+  if (count <= 0) return 0;
+  return count * Math.max(0, hoursPerShift);
+}
+
+/**
+ * Раскладка «часов в сутки» в count + hours (ограничения БД: count 0…24, hours 1…24).
+ * Нужно, чтобы UI хранил одно число, а схема — пару полей.
+ */
+export function encodeTemplateTotalHours(totalHours: number): { count: number; hours: number } {
+  const total = Math.max(0, Math.min(24 * 24, Math.trunc(totalHours)));
+  if (total <= 0) return { count: 0, hours: DEFAULT_SHIFT_HOURS };
+  if (total <= 24) return { count: 1, hours: total };
+  for (let hours = 24; hours >= 1; hours -= 1) {
+    if (total % hours !== 0) continue;
+    const count = total / hours;
+    if (count >= 1 && count <= 24) return { count, hours };
+  }
+  const count = Math.min(24, Math.ceil(total / 24));
+  const hours = Math.min(24, Math.max(1, Math.round(total / count)));
+  return { count, hours };
+}
+
 /** Типы смен, которые реально заложены в шаблоне объекта на день. */
 export function shiftKindsInTemplate(expected: ExpectedShifts): ShiftKind[] {
   const kinds: ShiftKind[] = [];
@@ -287,12 +311,78 @@ export function buildExpectedShiftsByObjectAndDay(
   for (const oid of objectIds) {
     const byDay: Record<string, ExpectedShifts> = {};
     for (const iso of weekDayIsos) {
-      const v = expectedShiftsForDate(rows, oid, iso);
-      byDay[iso] = v ?? defaultExpectedShiftsForDay();
+      byDay[iso] = expectedShiftsForObjectDay(rows, oid, iso);
     }
     out[oid] = byDay;
   }
   return out;
+}
+
+/**
+ * План объекта на день для недельного графика:
+ * если есть шаблоны постов — сумма по постам, иначе шаблон объекта (post_id IS NULL).
+ */
+export function expectedShiftsForObjectDay(
+  rows: ReadonlyArray<ObjectShiftTemplateRow>,
+  objectId: string,
+  civilDateIso: string,
+): ExpectedShifts {
+  const postIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.objectId === objectId && row.postId)
+        .map((row) => row.postId as string),
+    ),
+  ];
+  if (postIds.length === 0) {
+    return expectedShiftsForDate(rows, objectId, civilDateIso, null) ?? defaultExpectedShiftsForDay();
+  }
+  const parts = postIds.map(
+    (postId) => expectedShiftsForDate(rows, objectId, civilDateIso, postId) ?? defaultExpectedShiftsForDay(),
+  );
+  return aggregateExpectedShiftParts(parts);
+}
+
+/** Суммирует планы постов, сохраняя часы (regular×shiftHours). */
+export function aggregateExpectedShiftParts(parts: ReadonlyArray<ExpectedShifts>): ExpectedShifts {
+  if (parts.length === 0) return defaultExpectedShiftsForDay();
+  if (parts.length === 1) return parts[0]!;
+
+  const regularHours = parts.reduce((sum, part) => sum + part.regular * part.shiftHours, 0);
+  const reinforcementHours = parts.reduce(
+    (sum, part) => sum + part.reinforcement * part.reinforcementShiftHours,
+    0,
+  );
+  const rapidResponseHours = parts.reduce(
+    (sum, part) => sum + part.rapidResponse * part.rapidResponseShiftHours,
+    0,
+  );
+  const shiftLeadHours = parts.reduce(
+    (sum, part) => sum + part.shiftLead * part.shiftLeadShiftHours,
+    0,
+  );
+  const regular = parts.reduce((sum, part) => sum + part.regular, 0);
+  const reinforcement = parts.reduce((sum, part) => sum + part.reinforcement, 0);
+  const rapidResponse = parts.reduce((sum, part) => sum + part.rapidResponse, 0);
+  const shiftLead = parts.reduce((sum, part) => sum + part.shiftLead, 0);
+
+  return {
+    regular,
+    shiftHours: regular > 0 ? Math.max(1, Math.round(regularHours / regular)) : DEFAULT_SHIFT_HOURS,
+    reinforcement,
+    reinforcementShiftHours:
+      reinforcement > 0
+        ? Math.max(1, Math.round(reinforcementHours / reinforcement))
+        : DEFAULT_REINFORCEMENT_SHIFT_HOURS,
+    rapidResponse,
+    rapidResponseShiftHours:
+      rapidResponse > 0
+        ? Math.max(1, Math.round(rapidResponseHours / rapidResponse))
+        : DEFAULT_RAPID_RESPONSE_SHIFT_HOURS,
+    shiftLead,
+    shiftLeadShiftHours:
+      shiftLead > 0 ? Math.max(1, Math.round(shiftLeadHours / shiftLead)) : DEFAULT_SHIFT_LEAD_SHIFT_HOURS,
+  };
 }
 
 /** Значения шаблона по дням Пн…Вс (индекс 0 = Пн) на дату-ориентир. */

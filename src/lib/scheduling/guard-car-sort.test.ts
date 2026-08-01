@@ -25,9 +25,10 @@ describe("sortGuardsForShiftAssignment", () => {
 });
 
 describe("formatGuardAssignmentLabel", () => {
-  it("добавляет пометку только для МП с авто", () => {
+  it("добавляет пометку авто при наличии машины для любого типа смены", () => {
     expect(formatGuardAssignmentLabel("Иванов", true, "RapidResponse")).toBe("Иванов · авто");
-    expect(formatGuardAssignmentLabel("Иванов", true, "Regular")).toBe("Иванов");
+    expect(formatGuardAssignmentLabel("Иванов", true, "Regular")).toBe("Иванов · авто");
+    expect(formatGuardAssignmentLabel("Иванов", true, "Reinforcement")).toBe("Иванов · авто");
     expect(formatGuardAssignmentLabel("Иванов", false, "RapidResponse")).toBe("Иванов");
   });
 });

@@ -26,6 +26,7 @@ type TimesheetViewProps = {
     month?: string;
     week?: string;
     q?: string;
+    unpriced?: string;
   };
   payrollHalfByGuardName?: Map<string, GuardPayrollHalfSummary>;
   payrollHalfMonth?: { year: number; monthIndex0: number };
@@ -60,6 +61,22 @@ export function TimesheetView({
   const toPaySecondLabel = payrollHalfMonth
     ? `К выдаче ${halfPeriodShortRu("second", payrollHalfMonth.year, payrollHalfMonth.monthIndex0)}`
     : "К выдаче 16–31";
+
+  const objectPayrollRows = objectPayrollHalves ?? [];
+  const objectPayrollTotalsRaw = objectPayrollRows.reduce(
+    (acc, row) => {
+      acc.toPayFirstHalfRub += row.toPayFirstHalfRub;
+      acc.toPaySecondHalfRub += row.toPaySecondHalfRub;
+      acc.totalMonthRub += row.totalMonthRub;
+      return acc;
+    },
+    { toPayFirstHalfRub: 0, toPaySecondHalfRub: 0, totalMonthRub: 0 },
+  );
+  const objectPayrollTotals = {
+    toPayFirstHalfRub: Math.round(objectPayrollTotalsRaw.toPayFirstHalfRub * 100) / 100,
+    toPaySecondHalfRub: Math.round(objectPayrollTotalsRaw.toPaySecondHalfRub * 100) / 100,
+    totalMonthRub: Math.round(objectPayrollTotalsRaw.totalMonthRub * 100) / 100,
+  };
 
   const objectFilterActive = Boolean(filters.objectId?.trim());
   const guardObjectSummary = buildGuardObjectSummary(rows);
@@ -152,8 +169,8 @@ export function TimesheetView({
                 </tr>
               </thead>
               <tbody>
-                {(objectPayrollHalves ?? []).map((row) => (
-                  <tr key={row.objectName} className="border-t border-app-border">
+                {objectPayrollRows.map((row) => (
+                  <tr key={row.objectId ?? row.objectName} className="border-t border-app-border">
                     <td className="px-4 py-3 font-medium">{row.objectName}</td>
                     <td className="px-4 py-3 text-center tabular-nums">{formatRubWhole(row.toPayFirstHalfRub)}</td>
                     <td className="px-4 py-3 text-center tabular-nums">{formatRubWhole(row.toPaySecondHalfRub)}</td>
@@ -162,7 +179,7 @@ export function TimesheetView({
                     </td>
                   </tr>
                 ))}
-                {(objectPayrollHalves ?? []).length === 0 ? (
+                {objectPayrollRows.length === 0 ? (
                   <tr className="border-t border-app-border">
                     <td className="px-4 py-8 text-app-muted" colSpan={4}>
                       Смены не найдены.
@@ -170,11 +187,27 @@ export function TimesheetView({
                   </tr>
                 ) : null}
               </tbody>
+              {objectPayrollRows.length > 0 ? (
+                <tfoot>
+                  <tr className="border-t-2 border-app-border bg-app-elevated">
+                    <td className="px-4 py-3 font-semibold">Итого</td>
+                    <td className="px-4 py-3 text-center tabular-nums font-semibold">
+                      {formatRubWhole(objectPayrollTotals.toPayFirstHalfRub)}
+                    </td>
+                    <td className="px-4 py-3 text-center tabular-nums font-semibold">
+                      {formatRubWhole(objectPayrollTotals.toPaySecondHalfRub)}
+                    </td>
+                    <td className="px-4 py-3 text-center tabular-nums font-semibold">
+                      {formatRubWhole(objectPayrollTotals.totalMonthRub)}
+                    </td>
+                  </tr>
+                </tfoot>
+              ) : null}
             </table>
           </div>
           <div className="space-y-2 p-3 md:hidden">
-            {(objectPayrollHalves ?? []).map((row) => (
-              <article key={row.objectName} className="rounded-card border border-app-border bg-app-bg p-3 text-xs">
+            {objectPayrollRows.map((row) => (
+              <article key={row.objectId ?? row.objectName} className="rounded-card border border-app-border bg-app-bg p-3 text-xs">
                 <p className="font-semibold text-app-text">{row.objectName}</p>
                 <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
                   <div>
@@ -192,9 +225,33 @@ export function TimesheetView({
                 </dl>
               </article>
             ))}
-            {(objectPayrollHalves ?? []).length === 0 ? (
+            {objectPayrollRows.length > 0 ? (
+              <article className="rounded-card border border-app-border bg-app-elevated p-3 text-xs">
+                <p className="font-semibold text-app-text">Итого</p>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
+                  <div>
+                    <dt className="text-[10px] uppercase text-app-muted">{toPayFirstLabel}</dt>
+                    <dd className="font-semibold tabular-nums">
+                      {formatRubWhole(objectPayrollTotals.toPayFirstHalfRub)} ₽
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] uppercase text-app-muted">{toPaySecondLabel}</dt>
+                    <dd className="font-semibold tabular-nums">
+                      {formatRubWhole(objectPayrollTotals.toPaySecondHalfRub)} ₽
+                    </dd>
+                  </div>
+                  <div className="col-span-2 border-t border-app-border pt-2">
+                    <dt className="text-[10px] uppercase text-app-muted">Общая за месяц</dt>
+                    <dd className="text-sm font-semibold tabular-nums">
+                      {formatRubWhole(objectPayrollTotals.totalMonthRub)} ₽
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            ) : (
               <p className="px-1 py-6 text-center text-xs text-app-muted">Смены не найдены.</p>
-            ) : null}
+            )}
           </div>
         </div>
       ) : null}
@@ -424,6 +481,7 @@ function buildExportHref(filters: TimesheetViewProps["filters"], kind: "client" 
   if (filters.month) params.set("month", filters.month);
   if (filters.week) params.set("week", filters.week);
   if (filters.q) params.set("q", filters.q);
+  if (filters.unpriced === "1") params.set("unpriced", "1");
   const query = params.toString();
   const base = kind === "client" ? "/api/accounting/export/client" : "/api/accounting/export/payroll";
   return query ? `${base}?${query}` : base;
@@ -450,7 +508,8 @@ type GuardObjectSummaryRow = {
 function buildGuardObjectSummary(rows: TimesheetRow[]): GuardObjectSummaryRow[] {
   const map = new Map<string, GuardObjectSummaryRow>();
   for (const row of rows) {
-    const key = `${row.guardName}||${row.objectName}`;
+    const objectKey = row.objectId ?? `name:${row.objectName}`;
+    const key = `${row.guardName}||${objectKey}`;
     const current = map.get(key) ?? {
       guardName: row.guardName,
       objectName: row.objectName,
@@ -468,6 +527,7 @@ function buildGuardObjectSummary(rows: TimesheetRow[]): GuardObjectSummaryRow[] 
       marginCents: 0,
       unpricedShifts: 0,
     };
+    if (row.objectName) current.objectName = row.objectName;
     current.shiftsCount += 1;
     current.totalHours = round2(current.totalHours + row.totalHours);
     current.unworkedHoursTotal = round2(current.unworkedHoursTotal + row.unworkedHours);

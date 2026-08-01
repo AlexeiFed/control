@@ -83,7 +83,9 @@ export function buildPayrollStatementSheets(input: {
     >();
 
     for (const row of input.rows) {
-      if (row.objectName !== object.name) continue;
+      const sameObject =
+        row.objectId != null ? row.objectId === object.id : row.objectName === object.name;
+      if (!sameObject) continue;
       if (!shiftBelongsToHalf(row.startsAt, input.half, {
         year: input.year,
         monthIndex0: input.monthIndex0,

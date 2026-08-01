@@ -7,12 +7,20 @@ import {
   createObjectRateRuleAction,
   deleteObjectRateRuleAction,
   reorderObjectRateRulesAction,
+  supersedeObjectRateRuleGuardRateAction,
   updateObjectRateRuleAction,
   type ObjectRateRuleActionResult,
 } from "../../app/objects/actions";
 import { Button } from "../ui/button";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import { prioritiesForDisplayOrder, defaultRateRuleEffectiveFrom } from "../../lib/operations/object-rate-rules-priority";
+import {
+  buildRateRuleVersionChains,
+  flattenVersionChainsForReorder,
+  type RateRuleVersionChain,
+} from "../../lib/rates/rate-rule-version-chains";
+import { defaultRateRuleVersionFrom } from "../../lib/rates/rate-rule-versioning";
+import { getNextCivilDate } from "../../lib/scheduling/shift-template-history";
 import {
   guardEmploymentLabels,
   guardLicenseLabels,
@@ -246,12 +254,15 @@ function RateRuleFields({ rule, isCreate, defaultEffectiveFrom }: FieldsProps) {
             </select>
           </label>
           <label className={labelClass}>
-            Удостоверение
+            Удостоверение / ЛК
             <select name="licenseType" defaultValue={r?.licenseType ?? ""} className={inputClass}>
               <option value="">Любое</option>
-              <option value="None">{guardLicenseLabels.None}</option>
-              <option value="Licensed">{guardLicenseLabels.Licensed}</option>
+              <option value="None">{guardLicenseLabels.None} (без ЛК)</option>
+              <option value="Licensed">{guardLicenseLabels.Licensed} (с даты ЛК)</option>
             </select>
+            <span className={sectionHintClass}>
+              «У» — удостоверение и оформленная ЛК; ставка с даты столбца «ЛК».
+            </span>
           </label>
           <label className={labelClass}>
             Трудоустройство
@@ -287,55 +298,59 @@ export type ObjectRateRulesPanelProps = {
   defaultEffectiveFrom?: string;
 };
 
-type RuleGroup = {
-  key: string;
-  name: string;
-  rules: ObjectRateRuleRecord[];
-};
-
-function groupConsecutiveRulesByName(rules: ObjectRateRuleRecord[]): RuleGroup[] {
-  const groups: RuleGroup[] = [];
-  for (const rule of rules) {
-    const last = groups[groups.length - 1];
-    if (last && last.name === rule.name) {
-      last.rules.push(rule);
-    } else {
-      groups.push({ key: rule.id, name: rule.name, rules: [rule] });
-    }
-  }
-  return groups;
-}
-
-function reorderRuleList(
-  rules: ObjectRateRuleRecord[],
-  sourceId: string,
-  targetId: string,
+function reorderVersionChains(
+  chains: RateRuleVersionChain[],
+  sourceCurrentId: string,
+  targetCurrentId: string,
 ): ObjectRateRuleRecord[] | null {
-  if (sourceId === targetId) return null;
-  const from = rules.findIndex((rule) => rule.id === sourceId);
-  const to = rules.findIndex((rule) => rule.id === targetId);
+  if (sourceCurrentId === targetCurrentId) return null;
+  const from = chains.findIndex((chain) => chain.current.id === sourceCurrentId);
+  const to = chains.findIndex((chain) => chain.current.id === targetCurrentId);
   if (from < 0 || to < 0) return null;
 
-  const next = [...rules];
-  const [moved] = next.splice(from, 1);
-  next.splice(to, 0, moved!);
-  const priorities = prioritiesForDisplayOrder(next.length);
-  return next.map((rule, index) => ({ ...rule, priority: priorities[index]! }));
+  const nextChains = [...chains];
+  const [moved] = nextChains.splice(from, 1);
+  nextChains.splice(to, 0, moved!);
+  const orderedIds = flattenVersionChainsForReorder(nextChains);
+  const byId = new Map(chains.flatMap((c) => [c.current, ...c.history]).map((r) => [r.id, r]));
+  const priorities = prioritiesForDisplayOrder(orderedIds.length);
+  return orderedIds.map((id, index) => {
+    const rule = byId.get(id)!;
+    return { ...rule, priority: priorities[index]! };
+  });
+}
+
+function formatRulePeriod(rule: ObjectRateRuleRecord): string {
+  const from = formatDisplayDateFromIso(rule.effectiveFrom);
+  return rule.effectiveTo ? `${from} — ${formatDisplayDateFromIso(rule.effectiveTo)}` : `${from} — …`;
+}
+
+function defaultVersionFromForRule(rule: ObjectRateRuleRecord): string {
+  const monthStart = defaultRateRuleVersionFrom();
+  const earliest = getNextCivilDate(rule.effectiveFrom);
+  const candidate = monthStart > earliest ? monthStart : earliest;
+  if (rule.effectiveTo && candidate > rule.effectiveTo) return earliest;
+  return candidate;
 }
 
 function RuleRowActions({
   rule,
   onEdit,
+  onChangeFromDate,
   onDelete,
 }: {
   rule: ObjectRateRuleRecord;
   onEdit: (id: string) => void;
+  onChangeFromDate: (rule: ObjectRateRuleRecord) => void;
   onDelete: (rule: ObjectRateRuleRecord) => void;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant="secondary" size="sm" onClick={() => onEdit(rule.id)}>
         Изменить
+      </Button>
+      <Button type="button" variant="secondary" size="sm" onClick={() => onChangeFromDate(rule)}>
+        Изменить с даты
       </Button>
       <Button type="button" variant="danger" size="sm" onClick={() => onDelete(rule)}>
         Удалить
@@ -345,14 +360,21 @@ function RuleRowActions({
 }
 
 function RateRuleMobileCard({
-  rule,
+  chain,
+  historyExpanded,
+  onToggleHistory,
   onEdit,
+  onChangeFromDate,
   onDelete,
 }: {
-  rule: ObjectRateRuleRecord;
+  chain: RateRuleVersionChain;
+  historyExpanded: boolean;
+  onToggleHistory: () => void;
   onEdit: (id: string) => void;
+  onChangeFromDate: (rule: ObjectRateRuleRecord) => void;
   onDelete: (rule: ObjectRateRuleRecord) => void;
 }) {
+  const rule = chain.current;
   return (
     <article className="rounded-card border border-app-border bg-app-bg p-3 text-xs">
       <div className="flex items-start justify-between gap-2">
@@ -374,13 +396,47 @@ function RateRuleMobileCard({
           <dd className="font-medium tabular-nums">{centsToRublesInput(rule.guardRateCents)} ₽</dd>
         </div>
       </dl>
-      <p className="mt-2 text-[11px] text-app-muted">
-        {formatDisplayDateFromIso(rule.effectiveFrom)}
-        {rule.effectiveTo ? ` — ${formatDisplayDateFromIso(rule.effectiveTo)}` : " — …"}
-      </p>
+      <p className="mt-2 text-[11px] text-app-muted">{formatRulePeriod(rule)}</p>
       <p className="mt-1 text-[11px] leading-snug text-app-muted">{summarizeRule(rule)}</p>
+      {chain.history.length > 0 ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={onToggleHistory}
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-accent-primary hover:underline"
+            aria-expanded={historyExpanded}
+          >
+            {historyExpanded ? (
+              <ChevronDown className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronRight className="size-3.5 shrink-0" />
+            )}
+            История ставки сотрудника ({chain.history.length})
+          </button>
+          {historyExpanded ? (
+            <ul className="mt-1.5 space-y-1 rounded-button border border-app-border bg-app-elevated/50 px-2 py-1.5">
+              {chain.history.map((archived) => (
+                <li
+                  key={archived.id}
+                  className="flex flex-wrap items-baseline justify-between gap-2 text-[11px] text-app-muted"
+                >
+                  <span>{formatRulePeriod(archived)}</span>
+                  <span className="font-medium tabular-nums text-app-text">
+                    {centsToRublesInput(archived.guardRateCents)} ₽
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mt-3">
-        <RuleRowActions rule={rule} onEdit={onEdit} onDelete={onDelete} />
+        <RuleRowActions
+          rule={rule}
+          onEdit={onEdit}
+          onChangeFromDate={onChangeFromDate}
+          onDelete={onDelete}
+        />
       </div>
     </article>
   );
@@ -393,6 +449,7 @@ export function ObjectRateRulesPanel({
 }: ObjectRateRulesPanelProps) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [versionRuleTarget, setVersionRuleTarget] = useState<ObjectRateRuleRecord | null>(null);
   const [deleteRuleTarget, setDeleteRuleTarget] = useState<ObjectRateRuleRecord | null>(null);
   const [orderedRules, setOrderedRules] = useState(rules);
   const [createFormKey, setCreateFormKey] = useState(0);
@@ -400,12 +457,26 @@ export function ObjectRateRulesPanel({
   const [dragRuleId, setDragRuleId] = useState<string | null>(null);
   const [dragOverRuleId, setDragOverRuleId] = useState<string | null>(null);
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<string>>(() => new Set());
   const [isReordering, startReorder] = useTransition();
   const [isSavingEdit, startSaveEdit] = useTransition();
   const [isSavingCreate, startSaveCreate] = useTransition();
+  const [isSavingVersion, startSaveVersion] = useTransition();
   const [isDeleting, startDelete] = useTransition();
   const editingRule = editingId ? (rules.find((r) => r.id === editingId) ?? null) : null;
-  const ruleGroups = useMemo(() => groupConsecutiveRulesByName(orderedRules), [orderedRules]);
+  const versionChains = useMemo(() => buildRateRuleVersionChains(orderedRules), [orderedRules]);
+  const ruleGroups = useMemo(() => {
+    const groups: Array<{ key: string; name: string; chains: RateRuleVersionChain[] }> = [];
+    for (const chain of versionChains) {
+      const last = groups[groups.length - 1];
+      if (last && last.name === chain.current.name) {
+        last.chains.push(chain);
+      } else {
+        groups.push({ key: chain.current.id, name: chain.current.name, chains: [chain] });
+      }
+    }
+    return groups;
+  }, [versionChains]);
 
   const handleRateRuleResult = useCallback(
     (
@@ -443,13 +514,22 @@ export function ObjectRateRulesPanel({
     });
   }, []);
 
+  const toggleHistory = useCallback((currentId: string) => {
+    setExpandedHistoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(currentId)) next.delete(currentId);
+      else next.add(currentId);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     setOrderedRules(rules);
   }, [rules]);
 
   const handleReorder = useCallback(
-    (sourceId: string, targetId: string) => {
-      const next = reorderRuleList(orderedRules, sourceId, targetId);
+    (sourceCurrentId: string, targetCurrentId: string) => {
+      const next = reorderVersionChains(versionChains, sourceCurrentId, targetCurrentId);
       if (!next) return;
 
       setOrderedRules(next);
@@ -469,7 +549,7 @@ export function ObjectRateRulesPanel({
         }
       });
     },
-    [objectId, orderedRules, rules, startReorder],
+    [objectId, versionChains, rules, startReorder],
   );
 
   useEffect(() => {
@@ -479,13 +559,26 @@ export function ObjectRateRulesPanel({
   }, [editingId, rules]);
 
   useEffect(() => {
+    if (versionRuleTarget && !rules.some((r) => r.id === versionRuleTarget.id)) {
+      setVersionRuleTarget(null);
+    }
+  }, [versionRuleTarget, rules]);
+
+  useEffect(() => {
     if (!editingId) return;
     editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [editingId]);
 
   const handleEdit = useCallback((ruleId: string) => {
     setDeleteRuleTarget(null);
+    setVersionRuleTarget(null);
     setEditingId(ruleId);
+  }, []);
+
+  const handleChangeFromDate = useCallback((rule: ObjectRateRuleRecord) => {
+    setDeleteRuleTarget(null);
+    setEditingId(null);
+    setVersionRuleTarget(rule);
   }, []);
 
   return (
@@ -493,7 +586,8 @@ export function ObjectRateRulesPanel({
       <p className="text-xs text-app-muted">
         Правила ставок для клиента и сотрудника. Пустые фильтры — «любое значение». Сначала отбираются все
         подходящие по условиям (день, должность, удостоверение, трудоустройство, стажёр…), затем выбирается
-        правило с наивысшим приоритетом. Перетаскивайте строки — выше в списке = выше приоритет.
+        правило с наивысшим приоритетом. Перетаскивайте строки — выше в списке = выше приоритет. «Изменить с
+        даты» меняет ставку сотрудника с выбранного дня; архивные периоды смотрите в раскрытии «История».
       </p>
 
       {editingRule ? (
@@ -541,7 +635,9 @@ export function ObjectRateRulesPanel({
           <thead className="bg-app-elevated text-app-muted">
             <tr>
               <th className="w-8 border-b border-app-border px-1 py-2 font-medium" aria-label="Порядок" />
-              <th className="border-b border-app-border px-2 py-2 font-medium">Название</th>
+              <th className="border-b border-app-border px-2 py-2 font-medium" title="История ставок сотрудника">
+                Ист.
+              </th>
               <th className="border-b border-app-border px-2 py-2 font-medium">Пр.</th>
               <th className="border-b border-app-border px-2 py-2 font-medium">Клиент</th>
               <th className="border-b border-app-border px-2 py-2 font-medium">Сотрудник</th>
@@ -553,7 +649,7 @@ export function ObjectRateRulesPanel({
           </thead>
           <tbody>
             {ruleGroups.map((group, groupIndex) => {
-              const isCollapsible = group.rules.length > 3;
+              const isCollapsible = group.chains.length > 3;
               const isCollapsed = isCollapsible && collapsedGroupKeys.has(group.key);
               const groupRowBg = groupIndex % 2 === 0 ? "bg-app-bg" : "bg-app-elevated/40";
               const groupSeparator = groupIndex > 0 ? "border-t-2 border-app-border" : "";
@@ -576,85 +672,142 @@ export function ObjectRateRulesPanel({
                           )}
                           <span>
                             {group.name}{" "}
-                            <span className="font-normal text-app-muted">({group.rules.length})</span>
+                            <span className="font-normal text-app-muted">({group.chains.length})</span>
                           </span>
                         </button>
                       ) : (
                         <span className="font-medium text-app-text">
                           {group.name}{" "}
-                          <span className="font-normal text-app-muted">({group.rules.length})</span>
+                          <span className="font-normal text-app-muted">({group.chains.length})</span>
                         </span>
                       )}
                     </td>
                   </tr>
                   {!isCollapsed
-                    ? group.rules.map((r, ruleIndex) => {
+                    ? group.chains.map((chain, chainIndex) => {
+                        const r = chain.current;
+                        const historyOpen = expandedHistoryIds.has(r.id);
                         const isDragging = dragRuleId === r.id;
                         const isDragOver = dragOverRuleId === r.id && dragRuleId !== r.id;
-                        const isLastInGroup = ruleIndex === group.rules.length - 1;
+                        const isLastInGroup = chainIndex === group.chains.length - 1;
                         return (
-                          <tr
-                            key={r.id}
-                            className={`${groupRowBg} border-b border-app-border/60 ${isLastInGroup ? "border-b-app-border" : ""} ${isDragging ? "opacity-40" : ""} ${isDragOver ? "bg-accent-primary/10" : ""}`}
-                            onDragOver={(event) => {
-                              if (!dragRuleId || dragRuleId === r.id) return;
-                              event.preventDefault();
-                              event.dataTransfer.dropEffect = "move";
-                              setDragOverRuleId(r.id);
-                            }}
-                            onDragLeave={() => {
-                              if (dragOverRuleId === r.id) setDragOverRuleId(null);
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              if (!dragRuleId) return;
-                              handleReorder(dragRuleId, r.id);
-                              setDragRuleId(null);
-                              setDragOverRuleId(null);
-                            }}
-                          >
-                            <td className="px-1 py-2 text-app-muted">
-                              <span
-                                draggable={!editingId && !isReordering}
-                                onDragStart={(event) => {
-                                  setDragRuleId(r.id);
-                                  event.dataTransfer.effectAllowed = "move";
-                                  event.dataTransfer.setData("text/plain", r.id);
-                                }}
-                                onDragEnd={() => {
-                                  setDragRuleId(null);
-                                  setDragOverRuleId(null);
-                                }}
-                                className="inline-flex cursor-grab items-center rounded p-0.5 active:cursor-grabbing hover:bg-app-elevated"
-                                aria-label={`Перетащить правило «${r.name}»`}
-                                title="Перетащите для изменения приоритета"
-                              >
-                                <GripVertical className="size-4" />
-                              </span>
-                            </td>
-                            <td className="px-2 py-2" aria-hidden="true" />
-                            <td className="px-2 py-2 text-app-muted">{r.priority}</td>
-                            <td className="px-2 py-2">{centsToRublesInput(r.clientRateCents)}</td>
-                            <td className="px-2 py-2">{centsToRublesInput(r.guardRateCents)}</td>
-                            <td className="px-2 py-2 text-app-muted">{rateUnitLabels[r.rateUnit]}</td>
-                            <td className="px-2 py-2 text-app-muted">
-                              {formatDisplayDateFromIso(r.effectiveFrom)}
-                              {r.effectiveTo
-                                ? ` — ${formatDisplayDateFromIso(r.effectiveTo)}`
-                                : " — …"}
-                            </td>
-                            <td className="max-w-[280px] px-2 py-2 text-app-muted">{summarizeRule(r)}</td>
-                            <td className="px-2 py-2">
-                              <RuleRowActions rule={r} onEdit={handleEdit} onDelete={setDeleteRuleTarget} />
-                            </td>
-                          </tr>
+                          <Fragment key={r.id}>
+                            <tr
+                              className={`${groupRowBg} border-b border-app-border/60 ${isLastInGroup && chain.history.length === 0 ? "border-b-app-border" : ""} ${isDragging ? "opacity-40" : ""} ${isDragOver ? "bg-accent-primary/10" : ""}`}
+                              onDragOver={(event) => {
+                                if (!dragRuleId || dragRuleId === r.id) return;
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = "move";
+                                setDragOverRuleId(r.id);
+                              }}
+                              onDragLeave={() => {
+                                if (dragOverRuleId === r.id) setDragOverRuleId(null);
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                if (!dragRuleId) return;
+                                handleReorder(dragRuleId, r.id);
+                                setDragRuleId(null);
+                                setDragOverRuleId(null);
+                              }}
+                            >
+                              <td className="px-1 py-2 text-app-muted">
+                                <span
+                                  draggable={!editingId && !isReordering}
+                                  onDragStart={(event) => {
+                                    setDragRuleId(r.id);
+                                    event.dataTransfer.effectAllowed = "move";
+                                    event.dataTransfer.setData("text/plain", r.id);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDragRuleId(null);
+                                    setDragOverRuleId(null);
+                                  }}
+                                  className="inline-flex cursor-grab items-center rounded p-0.5 active:cursor-grabbing hover:bg-app-elevated"
+                                  aria-label={`Перетащить правило «${r.name}»`}
+                                  title="Перетащите для изменения приоритета"
+                                >
+                                  <GripVertical className="size-4" />
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                {chain.history.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleHistory(r.id)}
+                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-accent-primary hover:underline"
+                                    aria-expanded={historyOpen}
+                                    title="Показать архивные ставки сотрудника"
+                                  >
+                                    {historyOpen ? (
+                                      <ChevronDown className="size-3.5 shrink-0" />
+                                    ) : (
+                                      <ChevronRight className="size-3.5 shrink-0" />
+                                    )}
+                                    {chain.history.length}
+                                  </button>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-2 text-app-muted">{r.priority}</td>
+                              <td className="px-2 py-2">{centsToRublesInput(r.clientRateCents)}</td>
+                              <td className="px-2 py-2">{centsToRublesInput(r.guardRateCents)}</td>
+                              <td className="px-2 py-2 text-app-muted">{rateUnitLabels[r.rateUnit]}</td>
+                              <td className="px-2 py-2 text-app-muted">{formatRulePeriod(r)}</td>
+                              <td className="max-w-[280px] px-2 py-2 text-app-muted">{summarizeRule(r)}</td>
+                              <td className="px-2 py-2">
+                                <RuleRowActions
+                                  rule={r}
+                                  onEdit={handleEdit}
+                                  onChangeFromDate={handleChangeFromDate}
+                                  onDelete={setDeleteRuleTarget}
+                                />
+                              </td>
+                            </tr>
+                            {historyOpen
+                              ? chain.history.map((archived, archiveIndex) => (
+                                  <tr
+                                    key={archived.id}
+                                    className={`${groupRowBg} border-b border-app-border/40 ${isLastInGroup && archiveIndex === chain.history.length - 1 ? "border-b-app-border" : ""}`}
+                                  >
+                                    <td className="px-1 py-1.5" />
+                                    <td className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-app-muted">
+                                      архив
+                                    </td>
+                                    <td className="px-2 py-1.5 text-app-muted/70">{archived.priority}</td>
+                                    <td className="px-2 py-1.5 text-app-muted/70">
+                                      {centsToRublesInput(archived.clientRateCents)}
+                                    </td>
+                                    <td className="px-2 py-1.5 font-medium tabular-nums text-app-text">
+                                      {centsToRublesInput(archived.guardRateCents)}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-app-muted/70">
+                                      {rateUnitLabels[archived.rateUnit]}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-app-muted">
+                                      {formatRulePeriod(archived)}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-app-muted/70">—</td>
+                                    <td className="px-2 py-1.5">
+                                      <Button
+                                        type="button"
+                                        variant="danger"
+                                        size="sm"
+                                        onClick={() => setDeleteRuleTarget(archived)}
+                                      >
+                                        Удалить
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                ))
+                              : null}
+                          </Fragment>
                         );
                       })
                     : null}
                 </Fragment>
               );
             })}
-            {orderedRules.length === 0 ? (
+            {versionChains.length === 0 ? (
               <tr>
                 <td className="px-2 py-4 text-app-muted" colSpan={9}>
                   Правил пока нет — добавьте ниже.
@@ -670,14 +823,22 @@ export function ObjectRateRulesPanel({
           <div key={group.key} className="space-y-2">
             <p className="text-xs font-semibold text-app-text">
               {group.name}{" "}
-              <span className="font-normal text-app-muted">({group.rules.length})</span>
+              <span className="font-normal text-app-muted">({group.chains.length})</span>
             </p>
-            {group.rules.map((r) => (
-              <RateRuleMobileCard key={r.id} rule={r} onEdit={handleEdit} onDelete={setDeleteRuleTarget} />
+            {group.chains.map((chain) => (
+              <RateRuleMobileCard
+                key={chain.current.id}
+                chain={chain}
+                historyExpanded={expandedHistoryIds.has(chain.current.id)}
+                onToggleHistory={() => toggleHistory(chain.current.id)}
+                onEdit={handleEdit}
+                onChangeFromDate={handleChangeFromDate}
+                onDelete={setDeleteRuleTarget}
+              />
             ))}
           </div>
         ))}
-        {orderedRules.length === 0 ? (
+        {versionChains.length === 0 ? (
           <p className="rounded-card border border-app-border bg-app-bg px-3 py-4 text-xs text-app-muted">
             Правил пока нет — добавьте ниже.
           </p>
@@ -708,6 +869,88 @@ export function ObjectRateRulesPanel({
             {isSavingCreate ? "Добавление…" : "Добавить"}
           </Button>
         </form>
+      ) : null}
+
+      {versionRuleTarget ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal
+          aria-labelledby="rate-rule-version-title"
+        >
+          <form
+            key={`version-${versionRuleTarget.id}-${versionRuleTarget.guardRateCents}`}
+            className="w-full max-w-md rounded-card border border-app-border bg-app-surface p-6 shadow-glow"
+            style={{ boxShadow: designTokens.shadow.glow }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const formData = new FormData(event.currentTarget);
+              const versionFrom = String(formData.get("versionFrom") ?? "");
+              startSaveVersion(async () => {
+                const result = await supersedeObjectRateRuleGuardRateAction(formData);
+                handleRateRuleResult(
+                  result,
+                  {
+                    title: "Ставка с даты обновлена",
+                    message: `Архив до дня перед ${versionFrom} сохранён; табель с ${versionFrom} пересчитан`,
+                  },
+                  () => setVersionRuleTarget(null),
+                );
+              });
+            }}
+          >
+            <input type="hidden" name="ruleId" value={versionRuleTarget.id} />
+            <input type="hidden" name="objectId" value={objectId} />
+            <h2 id="rate-rule-version-title" className="text-lg font-semibold text-app-text">
+              Изменить с даты
+            </h2>
+            <p className="mt-2 text-sm text-app-muted">
+              «{versionRuleTarget.name}» — текущая ставка сотрудника{" "}
+              {centsToRublesInput(versionRuleTarget.guardRateCents)} ₽ (
+              {rateUnitLabels[versionRuleTarget.rateUnit]}). Старая версия закроется днём раньше
+              выбранной даты.
+            </p>
+            <div className="mt-4 grid gap-3">
+              <label className={labelClass}>
+                С какой даты
+                <input
+                  required
+                  name="versionFrom"
+                  type="date"
+                  defaultValue={defaultVersionFromForRule(versionRuleTarget)}
+                  min={getNextCivilDate(versionRuleTarget.effectiveFrom)}
+                  max={versionRuleTarget.effectiveTo ?? undefined}
+                  className={inputClass}
+                />
+              </label>
+              <label className={labelClass}>
+                Сотрудник, ₽
+                <input
+                  required
+                  name="guardRubles"
+                  type="text"
+                  inputMode="decimal"
+                  defaultValue={centsToRublesInput(versionRuleTarget.guardRateCents)}
+                  className={inputClass}
+                  placeholder="0.00"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setVersionRuleTarget(null)}
+                disabled={isSavingVersion}
+              >
+                Отмена
+              </Button>
+              <Button type="submit" disabled={isSavingVersion}>
+                {isSavingVersion ? "Сохранение…" : "Применить"}
+              </Button>
+            </div>
+          </form>
+        </div>
       ) : null}
 
       {deleteRuleTarget ? (

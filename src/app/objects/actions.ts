@@ -19,10 +19,13 @@ import {
   updateObjectTimesheetApproval,
 } from "../../lib/operations/objects-repository";
 import type { CreateObjectRateRuleInput } from "../../lib/operations/object-rate-rules-repository";
+import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import {
   createObjectRateRule,
   deleteObjectRateRule,
+  getObjectRateRule,
   reorderObjectRateRules,
+  saveObjectRateRuleWithVersioning,
   updateObjectRateRule,
 } from "../../lib/operations/object-rate-rules-repository";
 import {
@@ -72,6 +75,7 @@ export async function updateObjectAction(formData: FormData) {
 
   revalidatePath("/objects");
   revalidatePath(`/objects/${id}`);
+  revalidatePath("/accounting/timesheet");
   revalidateTag("timesheet", undefined as any);
   redirect(`/objects/${id}`);
 }
@@ -452,15 +456,29 @@ export async function saveShiftTemplatesAction(formData: FormData) {
   }
   redirect(formData.get("redirect")?.toString() || "/objects");
   } catch (error) {
-    const message =
-      error instanceof Error && error.message.includes("shifts_per_day")
-        ? "Нельзя сохранить шаблон: для объекта без обычных смен нужна миграция БД (shifts_per_day >= 0). Обратитесь к администратору."
-        : error instanceof Error
-          ? error.message
-          : "Не удалось сохранить шаблон сменности";
+    const message = formatShiftTemplateSaveError(error);
     if (noRedirect) throw new Error(message);
     redirect(`/objects/${input.objectId}?error=${encodeURIComponent(message)}`);
   }
+}
+
+function formatShiftTemplateSaveError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("duplicate key") ||
+    lower.includes("object_shift_templates_object_id_day_of_week_effective_from_key") ||
+    lower.includes("object_shift_templates_object_post_dow_from_uidx")
+  ) {
+    return "На эту дату уже есть версия шаблона сменности (возможно, для другого поста). Выберите другую дату в поле «Применять сменность с даты» или сначала измените существующую версию.";
+  }
+  if (lower.includes("shifts_per_day")) {
+    return "Нельзя сохранить шаблон: для объекта без обычных смен нужна миграция БД. Обратитесь к администратору.";
+  }
+  if (raw && !lower.includes("violates") && !lower.includes("constraint") && raw.length < 180) {
+    return raw;
+  }
+  return "Не удалось сохранить шаблон сменности. Проверьте дату и значения по дням недели и попробуйте снова.";
 }
 
 function emptyToNull(s: FormDataEntryValue | null): string | null {
@@ -589,10 +607,10 @@ export async function createObjectRateRuleAction(formData: FormData): Promise<Ob
     const objectId = z.string().uuid().parse(formData.get("objectId"));
     const input = buildRateRuleInput(formData, objectId);
     await createObjectRateRule(input);
-    const { backfillTimesheetEntriesForObjectSafe } = await import(
+    const { backfillTimesheetEntriesForObjectFromDateSafe } = await import(
       "../../lib/accounting/sync-timesheet-entry"
     );
-    await backfillTimesheetEntriesForObjectSafe(objectId);
+    await backfillTimesheetEntriesForObjectFromDateSafe(objectId, input.effectiveFrom);
     revalidatePath("/objects");
     revalidatePath(`/objects/${objectId}`);
     revalidateTag("timesheet", undefined as any);
@@ -602,6 +620,29 @@ export async function createObjectRateRuleAction(formData: FormData): Promise<Ob
   }
 }
 
+function rateRuleRecordToInput(rule: ObjectRateRuleRecord): CreateObjectRateRuleInput {
+  return {
+    objectId: rule.objectId,
+    name: rule.name,
+    priority: rule.priority,
+    daysOfWeek: rule.daysOfWeek,
+    isHoliday: rule.isHoliday,
+    shiftKind: rule.shiftKind,
+    startsAt: rule.startsAt,
+    endsAt: rule.endsAt,
+    position: rule.position,
+    licenseType: rule.licenseType,
+    employmentType: rule.employmentType,
+    isTrainee: rule.isTrainee,
+    clientRateCents: rule.clientRateCents,
+    guardRateCents: rule.guardRateCents,
+    rateUnit: rule.rateUnit,
+    effectiveFrom: rule.effectiveFrom,
+    effectiveTo: rule.effectiveTo,
+  };
+}
+
+/** Полное редактирование текущей версии правила (условия, клиент, период…). */
 export async function updateObjectRateRuleAction(formData: FormData): Promise<ObjectRateRuleActionResult> {
   try {
     const session = await requireSession();
@@ -610,17 +651,64 @@ export async function updateObjectRateRuleAction(formData: FormData): Promise<Ob
     const ruleId = z.string().uuid().parse(formData.get("ruleId"));
     const objectId = z.string().uuid().parse(formData.get("objectId"));
     const input = buildRateRuleInput(formData, objectId);
+    const existing = await getObjectRateRule(ruleId);
     await updateObjectRateRule(ruleId, input);
-    const { backfillTimesheetEntriesForObjectSafe } = await import(
+    const backfillFrom =
+      existing && existing.effectiveFrom < input.effectiveFrom
+        ? existing.effectiveFrom
+        : input.effectiveFrom;
+    const { backfillTimesheetEntriesForObjectFromDateSafe } = await import(
       "../../lib/accounting/sync-timesheet-entry"
     );
-    await backfillTimesheetEntriesForObjectSafe(objectId);
+    await backfillTimesheetEntriesForObjectFromDateSafe(objectId, backfillFrom);
     revalidatePath("/objects");
     revalidatePath(`/objects/${objectId}`);
     revalidateTag("timesheet", undefined as any);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: formatRateRuleActionError(error, "Не удалось сохранить правило") };
+  }
+}
+
+/**
+ * Новая версия ставки сотрудника с выбранной даты: архивный период сохраняет старые ₽,
+ * табель пересчитывается только с `versionFrom`.
+ */
+export async function supersedeObjectRateRuleGuardRateAction(
+  formData: FormData,
+): Promise<ObjectRateRuleActionResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "rates:manage");
+
+    const ruleId = z.string().uuid().parse(formData.get("ruleId"));
+    const objectId = z.string().uuid().parse(formData.get("objectId"));
+    const versionFrom = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).parse(formData.get("versionFrom"));
+    const guardRateCents = rublesToCents(formData.get("guardRubles"));
+
+    const existing = await getObjectRateRule(ruleId);
+    if (!existing) throw new Error("Правило ставки не найдено");
+    if (existing.objectId !== objectId) throw new Error("Правило принадлежит другому объекту");
+    if (versionFrom <= existing.effectiveFrom) {
+      throw new Error("Дата должна быть позже начала текущей версии — иначе используйте «Изменить»");
+    }
+
+    const input = rateRuleRecordToInput(existing);
+    input.guardRateCents = guardRateCents;
+    const saved = await saveObjectRateRuleWithVersioning(ruleId, input, versionFrom);
+    const { backfillTimesheetEntriesForObjectFromDateSafe } = await import(
+      "../../lib/accounting/sync-timesheet-entry"
+    );
+    await backfillTimesheetEntriesForObjectFromDateSafe(objectId, saved.backfillFrom);
+    revalidatePath("/objects");
+    revalidatePath(`/objects/${objectId}`);
+    revalidateTag("timesheet", undefined as any);
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: formatRateRuleActionError(error, "Не удалось изменить ставку с даты"),
+    };
   }
 }
 
@@ -656,11 +744,16 @@ export async function deleteObjectRateRuleAction(formData: FormData): Promise<Ob
 
     const ruleId = z.string().uuid().parse(formData.get("ruleId"));
     const objectId = z.string().uuid().parse(formData.get("objectId"));
+    const existing = await getObjectRateRule(ruleId);
+    const backfillFrom = existing?.effectiveFrom ?? null;
     await deleteObjectRateRule(ruleId);
-    const { backfillTimesheetEntriesForObjectSafe } = await import(
-      "../../lib/accounting/sync-timesheet-entry"
-    );
-    await backfillTimesheetEntriesForObjectSafe(objectId);
+    const { backfillTimesheetEntriesForObjectFromDateSafe, backfillTimesheetEntriesForObjectSafe } =
+      await import("../../lib/accounting/sync-timesheet-entry");
+    if (backfillFrom) {
+      await backfillTimesheetEntriesForObjectFromDateSafe(objectId, backfillFrom);
+    } else {
+      await backfillTimesheetEntriesForObjectSafe(objectId);
+    }
     revalidatePath("/objects");
     revalidatePath(`/objects/${objectId}`);
     revalidateTag("timesheet", undefined as any);

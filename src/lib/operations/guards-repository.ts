@@ -1670,15 +1670,29 @@ export type GuardDetails = {
 };
 
 export async function getGuardDetails(guardId: string): Promise<GuardDetails | null> {
-  const phoneSel = await getGuardsPhoneSelect("aliased");
-  const contactPhoneSel = await getGuardsContactPhoneSelect("aliased");
-  const uniformSizeSel = await getGuardsUniformSizeSelect("aliased");
-  const uniformHeightSel = await getGuardsUniformHeightSelect("aliased");
-  const uniformIssuedSel = await getGuardsUniformIssuedSelect("aliased");
-  const birthDateSel = await getGuardsBirthDateSelect("aliased");
-  const middleNameSel = await getGuardsMiddleNameSelect("aliased");
-  const hasCarSel = await getGuardsHasCarSelect("aliased");
-  const hasCompliance = await resolveGuardsOptionalColumn("periodic_check_passed_on");
+  const [
+    phoneSel,
+    contactPhoneSel,
+    uniformSizeSel,
+    uniformHeightSel,
+    uniformIssuedSel,
+    birthDateSel,
+    middleNameSel,
+    hasCarSel,
+    hasCompliance,
+    hasDismissedOn,
+  ] = await Promise.all([
+    getGuardsPhoneSelect("aliased"),
+    getGuardsContactPhoneSelect("aliased"),
+    getGuardsUniformSizeSelect("aliased"),
+    getGuardsUniformHeightSelect("aliased"),
+    getGuardsUniformIssuedSelect("aliased"),
+    getGuardsBirthDateSelect("aliased"),
+    getGuardsMiddleNameSelect("aliased"),
+    getGuardsHasCarSelect("aliased"),
+    resolveGuardsOptionalColumn("periodic_check_passed_on"),
+    resolveGuardsOptionalColumn("dismissed_on"),
+  ]);
   const medicalCommissionSel = hasCompliance
     ? "g.medical_commission_passed_on::text AS medical_commission_passed_on"
     : "NULL::text AS medical_commission_passed_on";
@@ -1697,7 +1711,6 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
   const licenseValidSel = hasCompliance
     ? "g.license_valid_until::text AS license_valid_until"
     : "NULL::text AS license_valid_until";
-  const hasDismissedOn = await resolveGuardsOptionalColumn("dismissed_on");
   const dismissedOnSel = hasDismissedOn
     ? "g.dismissed_on::text AS dismissed_on"
     : "NULL::text AS dismissed_on";

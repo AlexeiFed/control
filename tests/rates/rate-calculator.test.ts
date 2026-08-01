@@ -222,4 +222,47 @@ describe("rate-calculator", () => {
     expect(out.clientAmountCents).toBe(99_000);
     expect(out.unpricedMinutes).toBe(120);
   });
+
+  it("ignores pinned rule outside effective range and rematches", () => {
+    const guard = createSchedulerGuard({ id: "g", name: "G", status: "Active" });
+    guard.licenseType = "None";
+    guard.position = "Guard";
+    const shift = createSchedulerShift({
+      id: "s",
+      guardId: "g",
+      objectId: "o1",
+      startsAt: new Date("2026-07-02T08:00:00+10:00"),
+      endsAt: new Date("2026-07-02T09:00:00+10:00"),
+    });
+    shift.selectedRateRuleId = "old";
+    const rules = [
+      R({
+        id: "old",
+        name: "Архив",
+        priority: 100,
+        position: "Guard",
+        licenseType: "None",
+        clientRateCents: 10_000,
+        guardRateCents: 5_000,
+        rateUnit: "Hour",
+        effectiveFrom: "2026-01-01",
+        effectiveTo: "2026-06-30",
+      }),
+      R({
+        id: "new",
+        name: "Текущая",
+        priority: 100,
+        position: "Guard",
+        licenseType: "None",
+        clientRateCents: 60_000,
+        guardRateCents: 30_000,
+        rateUnit: "Hour",
+        effectiveFrom: "2026-07-01",
+        effectiveTo: null,
+      }),
+    ];
+    const out = computeShiftRateBreakdown(shift, guard, rules, new Set(), TZ);
+    expect(out.guardAmountCents).toBe(30_000);
+    expect(out.clientAmountCents).toBe(60_000);
+  });
 });

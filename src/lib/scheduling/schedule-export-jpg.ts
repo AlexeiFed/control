@@ -1,11 +1,16 @@
 import { designTokens } from "../design-tokens";
 import { resolveShiftExportColors } from "./schedule-export-shift-style";
-import type { ScheduleExportCellEntry, ScheduleExportTable } from "./schedule-export-table";
+import {
+  computeScheduleExportRowHeights,
+  formatScheduleExportEntryDisplayText,
+  type ScheduleExportCellEntry,
+  type ScheduleExportTable,
+} from "./schedule-export-table";
 
 const PADDING = 24;
 const TITLE_HEIGHT = 52;
 const HEADER_HEIGHT = 44;
-const ROW_HEIGHT = 52;
+const ROW_HEIGHT = 52; // fallback; per-row heights from computeScheduleExportRowHeights
 const NAME_COL_WIDTH = 180;
 const DAY_COL_WIDTH = 72;
 const FONT = "13px system-ui, -apple-system, Segoe UI, sans-serif";
@@ -39,6 +44,7 @@ function drawShiftBlock(
   height: number,
   entry: ScheduleExportCellEntry,
   strokeOuter: boolean,
+  displayText?: string,
 ) {
   const colors = resolveShiftExportColors(entry.shiftKind, entry.isNoShow);
 
@@ -61,10 +67,11 @@ function drawShiftBlock(
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
 
-  const lines = entry.text.split("\n").slice(0, 6);
-  const lineHeight = 14;
+  const text = displayText ?? entry.text;
+  const lines = text.split("\n").slice(0, 6);
+  const lineHeight = lines.length > 1 ? 14 : 13;
   const blockHeight = lines.length * lineHeight;
-  const textTop = y + Math.max(4, (height - blockHeight) / 2);
+  const textTop = y + Math.max(2, (height - blockHeight) / 2);
 
   for (const [index, line] of lines.entries()) {
     const ty = textTop + index * lineHeight;
@@ -86,33 +93,46 @@ function drawDayCell(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
+  rowHeight: number,
   entries: ScheduleExportCellEntry[],
 ) {
   if (entries.length === 0) {
     ctx.fillStyle = designTokens.color.surface;
-    ctx.fillRect(x, y, DAY_COL_WIDTH, ROW_HEIGHT);
+    ctx.fillRect(x, y, DAY_COL_WIDTH, rowHeight);
     ctx.strokeStyle = designTokens.color.border;
     ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, DAY_COL_WIDTH - 1, ROW_HEIGHT - 1);
+    ctx.strokeRect(x + 0.5, y + 0.5, DAY_COL_WIDTH - 1, rowHeight - 1);
     return;
   }
 
-  if (entries.length === 1) {
-    drawShiftBlock(ctx, x, y, DAY_COL_WIDTH, ROW_HEIGHT, entries[0]!, true);
+  const multi = entries.length > 1;
+
+  if (!multi) {
+    drawShiftBlock(ctx, x, y, DAY_COL_WIDTH, rowHeight, entries[0]!, true);
     return;
   }
 
-  const sliceHeight = ROW_HEIGHT / entries.length;
+  const sliceHeight = rowHeight / entries.length;
   entries.forEach((entry, index) => {
     const subY = y + index * sliceHeight;
-    drawShiftBlock(ctx, x, subY, DAY_COL_WIDTH, sliceHeight, entry, index === entries.length - 1);
+    drawShiftBlock(
+      ctx,
+      x,
+      subY,
+      DAY_COL_WIDTH,
+      sliceHeight,
+      entry,
+      index === entries.length - 1,
+      formatScheduleExportEntryDisplayText(entry, true),
+    );
   });
 }
 
 export function renderScheduleExportJpg(table: ScheduleExportTable): Blob {
+  const rowHeights = computeScheduleExportRowHeights(table);
+  const bodyHeight = rowHeights.reduce((sum, h) => sum + h, 0);
   const width = PADDING * 2 + NAME_COL_WIDTH + table.dayColumns.length * DAY_COL_WIDTH;
-  const height =
-    PADDING * 2 + TITLE_HEIGHT + HEADER_HEIGHT + table.guards.length * ROW_HEIGHT + 8;
+  const height = PADDING * 2 + TITLE_HEIGHT + HEADER_HEIGHT + bodyHeight + 8;
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -167,11 +187,12 @@ export function renderScheduleExportJpg(table: ScheduleExportTable): Blob {
 
   y += HEADER_HEIGHT;
 
-  for (const guard of table.guards) {
+  table.guards.forEach((guard, guardIndex) => {
+    const rowHeight = rowHeights[guardIndex] ?? ROW_HEIGHT;
     x = PADDING;
     ctx.fillStyle = designTokens.color.surface;
-    ctx.fillRect(x, y, NAME_COL_WIDTH, ROW_HEIGHT);
-    strokeCell(x, y, NAME_COL_WIDTH, ROW_HEIGHT);
+    ctx.fillRect(x, y, NAME_COL_WIDTH, rowHeight);
+    strokeCell(x, y, NAME_COL_WIDTH, rowHeight);
     ctx.fillStyle = designTokens.color.text;
     ctx.font = FONT;
     ctx.textAlign = "left";
@@ -183,12 +204,12 @@ export function renderScheduleExportJpg(table: ScheduleExportTable): Blob {
 
     for (const col of table.dayColumns) {
       const entries = table.cells[guard.guardId]?.[col.dateIso] ?? [];
-      drawDayCell(ctx, x, y, entries);
+      drawDayCell(ctx, x, y, rowHeight, entries);
       x += DAY_COL_WIDTH;
     }
 
-    y += ROW_HEIGHT;
-  }
+    y += rowHeight;
+  });
 
   const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
   const binary = atob(dataUrl.split(",")[1] ?? "");

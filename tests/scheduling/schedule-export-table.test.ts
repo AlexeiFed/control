@@ -3,6 +3,9 @@ import { buildShiftIntervalFromHm } from "../../src/lib/scheduling/operational-d
 import { buildExportTitle } from "../../src/lib/scheduling/schedule-export-periods";
 import {
   buildScheduleExportTable,
+  computeScheduleExportRowHeight,
+  formatScheduleExportCellText,
+  formatScheduleExportEntryDisplayText,
   formatShiftExportCell,
 } from "../../src/lib/scheduling/schedule-export-table";
 import {
@@ -47,6 +50,20 @@ describe("schedule-export-table", () => {
     expect(cell).toBe("12 ч\n8-20\nневыход");
   });
 
+  it("formats partial attendance with worked and missed intervals", () => {
+    const cell = formatShiftExportCell(
+      makeShift({
+        startsAt: new Date("2026-07-12T08:00:00+10:00"),
+        endsAt: new Date("2026-07-13T08:00:00+10:00"),
+        isNoShow: true,
+        incidentCategory: "LeftWork",
+        incidentWorkedUntilAt: new Date("2026-07-12T20:00:00+10:00"),
+        incidentRecordedAt: new Date("2026-07-12T20:05:00+10:00"),
+      }),
+    );
+    expect(cell).toBe("12 ч\n8-20\n20-8 пропуск\nУшёл с работы");
+  });
+
   it("formats shift cell on two lines without incident", () => {
     const cell = formatShiftExportCell(
       makeShift({
@@ -55,6 +72,34 @@ describe("schedule-export-table", () => {
       }),
     );
     expect(cell).toBe("12 ч\n8-20");
+  });
+
+  it("сжимает несколько смен в ячейке в одну строку на смену", () => {
+    const morning = formatShiftExportCell(
+      makeShift({
+        startsAt: new Date("2026-07-05T08:00:00+10:00"),
+        endsAt: new Date("2026-07-05T18:00:00+10:00"),
+      }),
+    );
+    const night = formatShiftExportCell(
+      makeShift({
+        id: "shift-2",
+        startsAt: new Date("2026-07-05T20:00:00+10:00"),
+        endsAt: new Date("2026-07-06T06:00:00+10:00"),
+      }),
+    );
+    const entries = [
+      { text: morning, shiftKind: "Regular" as const, isNoShow: false },
+      { text: night, shiftKind: "Regular" as const, isNoShow: false },
+    ];
+    expect(formatScheduleExportCellText(entries)).toBe("10 ч 8-18\n10 ч 20-6");
+    expect(formatScheduleExportEntryDisplayText(entries[0]!, true)).toBe("10 ч 8-18");
+  });
+
+  it("увеличивает высоту строки при трёх сменах в один день", () => {
+    expect(computeScheduleExportRowHeight(1)).toBe(52);
+    expect(computeScheduleExportRowHeight(2)).toBe(52);
+    expect(computeScheduleExportRowHeight(3)).toBe(68);
   });
 
   it("builds export title on two lines", () => {

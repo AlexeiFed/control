@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Moon, Sun } from "lucide-react";
 import { designTokens } from "../../lib/design-tokens";
 import {
@@ -12,6 +12,7 @@ import {
   durationHoursLabel,
   durationMinutesFromOffsets,
   formatOperationalDayNightLabels,
+  formatOffsetHm,
   formatOffsetLabel,
   hmPairToOffsets,
   normalizeOperationalAnchorTime,
@@ -29,6 +30,8 @@ export type ShiftOperationalDayTimelineProps = {
   onEndTimeChange: (value: string) => void;
   occupiedIntervals?: ReadonlyArray<{ startsAt: Date; endsAt: Date }>;
   disabled?: boolean;
+  /** Контент справа от подписи длительности (например, тип смены). */
+  headerTrailing?: ReactNode;
 };
 
 type ActiveThumb = "start" | "end" | null;
@@ -51,6 +54,7 @@ export function ShiftOperationalDayTimeline({
   onEndTimeChange,
   occupiedIntervals = [],
   disabled = false,
+  headerTrailing,
 }: ShiftOperationalDayTimelineProps) {
   const anchorTime = normalizeOperationalAnchorTime(operationalDayStartTime);
   const ticks = useMemo(() => buildOperationalTimelineTicks(anchorTime), [anchorTime]);
@@ -95,6 +99,22 @@ export function ShiftOperationalDayTimeline({
     },
     [shiftDateIso, anchorTime, onStartTimeChange, onEndTimeChange],
   );
+
+  const commitHmPair = useCallback(
+    (nextStartTime: string, nextEndTime: string) => {
+      if (!nextStartTime || !nextEndTime) return;
+      const next = hmPairToOffsets(shiftDateIso, nextStartTime, nextEndTime, anchorTime);
+      commitOffsets(next.startOffset, next.endOffset);
+    },
+    [shiftDateIso, anchorTime, commitOffsets],
+  );
+
+  const startHm = formatOffsetHm(offsets.startOffset, anchorTime);
+  const endHm = formatOffsetHm(offsets.endOffset, anchorTime);
+  const startLabel = formatOffsetLabel(offsets.startOffset, shiftDateIso, anchorTime);
+  const endLabel = formatOffsetLabel(offsets.endOffset, shiftDateIso, anchorTime);
+  const startIsNextCalendarDay = startLabel.includes("+1");
+  const endIsNextCalendarDay = endLabel.includes("+1");
 
   const offsetFromClientX = useCallback((clientX: number): number => {
     const track = trackRef.current;
@@ -168,20 +188,23 @@ export function ShiftOperationalDayTimeline({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-muted">
           Период смены
         </span>
-        <span
-          className="rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums"
-          style={{
-            color: designTokens.color.accent.primary,
-            backgroundColor: `${designTokens.color.accent.primary}14`,
-            border: `1px solid ${designTokens.color.accent.primary}33`,
-          }}
-        >
-          {durationHoursLabel(durationMinutes)}
-        </span>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <span
+            className="rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums"
+            style={{
+              color: designTokens.color.accent.primary,
+              backgroundColor: `${designTokens.color.accent.primary}14`,
+              border: `1px solid ${designTokens.color.accent.primary}33`,
+            }}
+          >
+            {durationHoursLabel(durationMinutes)}
+          </span>
+          {headerTrailing}
+        </div>
       </div>
 
       <div
@@ -312,35 +335,64 @@ export function ShiftOperationalDayTimeline({
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-3">
-          <div
+          <label
             className="rounded-button border px-3 py-2"
             style={{
               borderColor: `${designTokens.color.accent.primary}44`,
               backgroundColor: `${designTokens.color.accent.primary}08`,
             }}
           >
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">Начало</p>
-            <p className="mt-0.5 text-lg font-semibold tabular-nums text-app-text">
-              {formatOffsetLabel(offsets.startOffset, shiftDateIso, anchorTime)}
-            </p>
-          </div>
-          <div
+            <span className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">Начало</span>
+              {startIsNextCalendarDay ? (
+                <span className="text-[10px] font-semibold tabular-nums text-app-muted">+1</span>
+              ) : null}
+            </span>
+            <input
+              type="time"
+              name="startTime"
+              step={TIMELINE_SNAP_MINUTES * 60}
+              value={startHm}
+              disabled={disabled || isDragging}
+              aria-label="Начало смены, ввод вручную"
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) return;
+                commitHmPair(value, endHm);
+              }}
+              className="mt-0.5 w-full border-0 bg-transparent p-0 text-lg font-semibold tabular-nums text-app-text outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-70 [color-scheme:light]"
+            />
+          </label>
+          <label
             className="rounded-button border px-3 py-2"
             style={{
               borderColor: `${designTokens.color.accent.secondary}44`,
               backgroundColor: `${designTokens.color.accent.secondary}08`,
             }}
           >
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">Конец</p>
-            <p className="mt-0.5 text-lg font-semibold tabular-nums text-app-text">
-              {formatOffsetLabel(offsets.endOffset, shiftDateIso, anchorTime)}
-            </p>
-          </div>
+            <span className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">Конец</span>
+              {endIsNextCalendarDay ? (
+                <span className="text-[10px] font-semibold tabular-nums text-app-muted">+1</span>
+              ) : null}
+            </span>
+            <input
+              type="time"
+              name="endTime"
+              step={TIMELINE_SNAP_MINUTES * 60}
+              value={endHm}
+              disabled={disabled || isDragging}
+              aria-label="Конец смены, ввод вручную"
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) return;
+                commitHmPair(startHm, value);
+              }}
+              className="mt-0.5 w-full border-0 bg-transparent p-0 text-lg font-semibold tabular-nums text-app-text outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-70 [color-scheme:light]"
+            />
+          </label>
         </div>
       </div>
-
-      <input type="hidden" name="startTime" value={isDragging ? offsetsToHmPair(shiftDateIso, displayOffsets.startOffset, displayOffsets.endOffset, anchorTime).startTime : startTime} />
-      <input type="hidden" name="endTime" value={isDragging ? offsetsToHmPair(shiftDateIso, displayOffsets.startOffset, displayOffsets.endOffset, anchorTime).endTime : endTime} />
     </div>
   );
 }

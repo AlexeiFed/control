@@ -22,28 +22,29 @@ export function resolveInitialProfileFromIso(input: {
   return candidates.sort()[0] ?? input.createdAtIso.slice(0, 10);
 }
 
+/**
+ * Периоды для матчинга правила ставки «У» (удостоверение + ЛК).
+ * Дата начала — столбец personal_card_assigned_on; до этой даты = Б/У.
+ * Флаг «У» на карточке сам по себе период не включает.
+ */
 export function buildLicensePeriodSegments(input: {
   initialFrom: string;
-  licenseType: GuardLicenseType;
   personalCardAssignedOn: string | null;
 }): DatedProfileSegment<GuardLicenseType>[] {
-  const licensed = input.licenseType === "Licensed";
   const lkFrom = input.personalCardAssignedOn;
 
-  if (licensed && lkFrom && lkFrom > input.initialFrom) {
+  if (lkFrom && lkFrom > input.initialFrom) {
     return [
       { effectiveFrom: input.initialFrom, effectiveTo: dayBeforeIso(lkFrom), value: "None" },
       { effectiveFrom: lkFrom, effectiveTo: null, value: "Licensed" },
     ];
   }
 
-  return [
-    {
-      effectiveFrom: input.initialFrom,
-      effectiveTo: null,
-      value: licensed ? "Licensed" : "None",
-    },
-  ];
+  if (lkFrom && lkFrom <= input.initialFrom) {
+    return [{ effectiveFrom: input.initialFrom, effectiveTo: null, value: "Licensed" }];
+  }
+
+  return [{ effectiveFrom: input.initialFrom, effectiveTo: null, value: "None" }];
 }
 
 export function buildEmploymentPeriodSegments(input: {

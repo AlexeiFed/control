@@ -6,8 +6,19 @@ import type { ScheduleObjectRef, ScheduleObjectShortage } from "../scheduling/sc
 import { buildValidShortageDismissKeySet } from "../scheduling/build-shortage-dismiss-state";
 import { filterShortagesByDismissals, shortageDismissKey } from "../scheduling/schedule-shortage-dismiss";
 import type { Shift } from "../scheduling/types";
+import {
+  listMonthlyOperationalDayStarts,
+  monthKeysFromDateIsos,
+} from "./object-monthly-settings-repository";
 import { getSchedulerSnapshot } from "./scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
+
+export async function loadMonthlyOperationalOverridesForDays(
+  objectIds: ReadonlyArray<string>,
+  weekDayIsos: ReadonlyArray<string>,
+): Promise<Map<string, string>> {
+  return listMonthlyOperationalDayStarts(objectIds, monthKeysFromDateIsos(weekDayIsos));
+}
 
 export async function listShortageDismissals(
   objectIds: string[],
@@ -56,18 +67,23 @@ export async function filterShortagesByStoredDismissals(input: {
   shifts: ReadonlyArray<Shift>;
   expectedByObjectDay: Record<string, Record<string, ExpectedShifts>>;
   rawShortages: ReadonlyArray<ScheduleObjectShortage>;
+  monthlyOperationalOverrides?: ReadonlyMap<string, string>;
 }): Promise<ScheduleObjectShortage[]> {
   const storedDismissals = await listShortageDismissals(
     input.objectIds,
     input.weekDayIsos[0]!,
     input.weekDayIsos[input.weekDayIsos.length - 1]!,
   );
+  const monthlyOperationalOverrides =
+    input.monthlyOperationalOverrides ??
+    (await loadMonthlyOperationalOverridesForDays(input.objectIds, input.weekDayIsos));
   const validDismissKeys = buildValidShortageDismissKeySet({
     objects: input.objects,
     shifts: input.shifts,
     expectedByObjectDay: input.expectedByObjectDay,
     weekDayIsos: input.weekDayIsos,
     storedDismissals,
+    monthlyOperationalOverrides,
   });
   return filterShortagesByDismissals(input.rawShortages, validDismissKeys);
 }
@@ -128,6 +144,10 @@ export async function buildCurrentWeekValidShortageDismissKeySet(
   const templates = await listShiftTemplatesForObjectIds(scopedObjectIds);
   const expectedByObjectDay = buildExpectedShiftsByObjectAndDay(scopedObjectIds, weekDayIsos, templates);
   const storedDismissals = await listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[6]!);
+  const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+    scopedObjectIds,
+    weekDayIsos,
+  );
 
   const validKeys = buildValidShortageDismissKeySet({
     objects,
@@ -135,6 +155,7 @@ export async function buildCurrentWeekValidShortageDismissKeySet(
     expectedByObjectDay,
     weekDayIsos,
     storedDismissals,
+    monthlyOperationalOverrides,
   });
 
   return { weekDayIsos, validKeys };

@@ -15,7 +15,7 @@ import {
 import { listGuardProfilePeriods } from "../../../lib/operations/guard-profile-periods-repository";
 import { resolveGuardProfileFromPeriods } from "../../../lib/guards/profile-periods";
 import type { Guard } from "../../../lib/scheduling/types";
-import { listObjects } from "../../../lib/operations/objects-repository";
+import { listObjectsForAssignment } from "../../../lib/operations/objects-repository";
 import {
   guardEmploymentLabels,
   guardLicenseLabels,
@@ -59,7 +59,7 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
     listGuardShiftHistory(guardId),
     listGuardServiceHistory(guardId),
     listGuardProfilePeriods(guardId),
-    listObjects(),
+    listObjectsForAssignment(),
   ]);
   if (!guard) notFound();
 

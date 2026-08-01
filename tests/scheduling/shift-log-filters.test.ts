@@ -47,4 +47,35 @@ describe("shift log filters", () => {
 
     expect(result.map((log) => log.id)).toEqual(["log-3"]);
   });
+
+  it("searches guard across objects when guard query is set", () => {
+    const logs: ShiftLog[] = [
+      baseLog,
+      {
+        ...baseLog,
+        id: "log-pavlyuk",
+        objectName: "ООО СЗ СК + и",
+        guardName: "Павлюк Виктор",
+        note: "Проверка",
+      },
+    ];
+    expect(
+      filterShiftLogs(logs, { objectName: "ООО СЗ ДАУП", guardQuery: "павлюк" }).map((l) => l.id),
+    ).toEqual(["log-pavlyuk"]);
+  });
+
+  it("filters by month of shift date", () => {
+    const logs: ShiftLog[] = [
+      baseLog,
+      {
+        ...baseLog,
+        id: "log-june",
+        createdAt: new Date("2026-07-03T22:11:00+10:00"),
+        shiftStartsAt: new Date("2026-06-01T08:00:00+10:00"),
+        shiftEndsAt: new Date("2026-06-01T20:00:00+10:00"),
+      },
+    ];
+    expect(filterShiftLogs(logs, { monthKey: "2026-05" }).map((l) => l.id)).toEqual(["log-1"]);
+    expect(filterShiftLogs(logs, { monthKey: "2026-06" }).map((l) => l.id)).toEqual(["log-june"]);
+  });
 });

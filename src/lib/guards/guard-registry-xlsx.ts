@@ -7,9 +7,50 @@ import type { GuardListRow } from "../operations/guards-repository";
 
 const TITLE = "Реестр охранников";
 
+/** Ширины синхронизированы с `GUARD_REGISTRY_EXPORT_HEADERS` (28 колонок). */
 const COLUMN_WIDTHS = [
-  6, 18, 14, 14, 14, 16, 16, 16, 12, 8, 14, 16, 16, 14, 16, 14, 8, 14, 8, 12, 8, 28, 14, 14,
+  6, // № п/п
+  18, // Фамилия
+  14, // Имя
+  14, // Отчество
+  14, // Дата рождения
+  16, // Телефон
+  16, // Контактный телефон
+  16, // Должность
+  12, // Удостоверение
+  8, // Разряд
+  14, // Удостоверение до
+  16, // Трудоустройство
+  16, // Дата оф. трудоустройства
+  14, // Медкомиссия
+  16, // Периодическая проверка
+  14, // Личная карточка
+  8, // Стажёр
+  14, // Стажировка до
+  8, // Авто
+  12, // Размер формы
+  8, // Рост
+  10, // Форма выдана
+  14, // Дата выдачи формы
+  12, // Состояние формы
+  20, // Примечание к форме
+  28, // Объекты
+  14, // Статус
+  14, // Дата увольнения
 ] as const;
+
+const OBJECTS_COL_INDEX = GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Объекты");
+
+function excelColumnLetter(colIndex1: number): string {
+  let n = colIndex1;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
 
 function applyTableBorder(cell: ExcelJS.Cell): void {
   cell.border = {
@@ -21,12 +62,18 @@ function applyTableBorder(cell: ExcelJS.Cell): void {
 }
 
 export async function buildGuardRegistryWorkbook(guards: readonly GuardListRow[]): Promise<Buffer> {
+  if (COLUMN_WIDTHS.length !== GUARD_REGISTRY_EXPORT_HEADERS.length) {
+    throw new Error(
+      `COLUMN_WIDTHS (${COLUMN_WIDTHS.length}) !== headers (${GUARD_REGISTRY_EXPORT_HEADERS.length})`,
+    );
+  }
+
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet("Реестр");
 
   ws.columns = COLUMN_WIDTHS.map((width) => ({ width }));
 
-  const lastColLetter = String.fromCharCode(64 + GUARD_REGISTRY_EXPORT_HEADERS.length);
+  const lastColLetter = excelColumnLetter(GUARD_REGISTRY_EXPORT_HEADERS.length);
   ws.mergeCells(`A1:${lastColLetter}1`);
   const titleCell = ws.getCell("A1");
   titleCell.value = TITLE;
@@ -54,7 +101,11 @@ export async function buildGuardRegistryWorkbook(guards: readonly GuardListRow[]
       if (colIndex === 0 || colIndex >= row.length - 1) {
         cell.alignment = { horizontal: "center", vertical: "middle" };
       } else {
-        cell.alignment = { horizontal: "left", vertical: "middle", wrapText: colIndex === 21 };
+        cell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: colIndex === OBJECTS_COL_INDEX,
+        };
       }
       applyTableBorder(cell);
     });

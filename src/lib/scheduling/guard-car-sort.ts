@@ -42,8 +42,8 @@ export function sortGuardsForShiftAssignment<T extends GuardForAssignmentSort>(
 export function formatGuardAssignmentLabel(
   name: string,
   hasCar: boolean,
-  shiftKind: ShiftKind,
+  _shiftKind?: ShiftKind,
 ): string {
-  if (shiftKind === "RapidResponse" && hasCar) return `${name} · авто`;
+  if (hasCar) return `${name} · авто`;
   return name;
 }

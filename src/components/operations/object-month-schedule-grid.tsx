@@ -20,6 +20,7 @@ import { Button } from "../ui/button";
 import type { Shift, ShiftKind, GuardStatus } from "../../lib/scheduling/types";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import { toast } from "../../store/toast-store";
+import { humanizeClientError } from "../../lib/ui/humanize-client-error";
 import { designTokens } from "../../lib/design-tokens";
 import { ScheduleExportDialog, type ScheduleExportFormat } from "./schedule-export-dialog";
 import {
@@ -348,7 +349,7 @@ export function ObjectMonthScheduleGrid({
         const fd = new FormData();
         fd.set("items", JSON.stringify(payload));
         fd.set("redirect", `/objects/${objectId}?month=${redirectMonth}`);
-        fd.set("scrollY", String(window.scrollY));
+        fd.set("scrollY", String(Math.max(0, Math.round(window.scrollY))));
         fd.set("noRedirect", "true");
         try {
           const result = await bulkCreateShiftsAction(fd);
@@ -370,7 +371,7 @@ export function ObjectMonthScheduleGrid({
         } catch (err) {
           toast({
             title: "Смена не назначена",
-            message: err instanceof Error ? err.message : "Не удалось создать смену",
+            message: humanizeClientError(err, "Не удалось создать смену"),
             variant: "error",
             durationMs: 6500,
           });

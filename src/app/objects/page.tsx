@@ -40,7 +40,7 @@ export default async function ObjectsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-app-bg p-6 text-app-text">
+    <main className="min-h-screen bg-app-bg p-3 text-app-text md:p-6">
       <ObjectsTableLazy
         objects={objects}
         guards={guards}

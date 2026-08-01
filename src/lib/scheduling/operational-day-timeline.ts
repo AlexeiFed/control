@@ -201,7 +201,7 @@ export function buildShiftIntervalFromOffsets(
   const startsAt = offsetToDateTime(shiftDateIso, startOffset, anchorTime);
   const endsAt = offsetToDateTime(shiftDateIso, endOffset, anchorTime);
   if (endsAt <= startsAt) {
-    throw new Error("Shift end must be after shift start");
+    throw new Error("Окончание смены должно быть позже начала");
   }
   return { startsAt, endsAt };
 }
@@ -259,7 +259,7 @@ export function buildShiftIntervalFromHm(
 ): { startsAt: Date; endsAt: Date } {
   const interval = tryBuildShiftIntervalFromHm(shiftDateIso, startTime, endTime, anchorTime);
   if (interval) return interval;
-  throw new Error("Shift end must be after shift start");
+  throw new Error("Окончание смены должно быть позже начала");
 }
 
 export function presetToOffsets(

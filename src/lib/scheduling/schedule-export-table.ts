@@ -1,6 +1,7 @@
 import { coerceToDate, getHoursKhabarovsk } from "../format/display-date";
 import { scheduleShiftColumnDateIso } from "./operational-day-timeline";
 import { incidentCategoryLabels } from "../operations/status-labels";
+import { isFullNoShow, isPartialAttendance, partialAttendanceWindow } from "./shift-attendance";
 import type { Shift, ShiftKind } from "./types";
 import type { ScheduleExportDayColumn } from "./schedule-export-periods";
 
@@ -22,8 +23,48 @@ export type ScheduleExportTable = {
   cells: Record<string, Record<string, ScheduleExportCellEntry[]>>;
 };
 
+export const SCHEDULE_EXPORT_BASE_ROW_HEIGHT = 52;
+export const SCHEDULE_EXPORT_COMPACT_BLOCK_HEIGHT = 20;
+export const SCHEDULE_EXPORT_FULL_BLOCK_HEIGHT = 36;
+
+/** Одна строка на смену, если в ячейке больше одной — иначе двухстрочный блок. */
+export function formatScheduleExportEntryDisplayText(
+  entry: ScheduleExportCellEntry,
+  multiShiftInCell: boolean,
+): string {
+  if (!multiShiftInCell) return entry.text;
+  return entry.text.split("\n").filter(Boolean).join(" ");
+}
+
 export function formatScheduleExportCellText(entries: ReadonlyArray<ScheduleExportCellEntry>): string {
-  return entries.map((entry) => entry.text).join("\n");
+  const multi = entries.length > 1;
+  return entries.map((entry) => formatScheduleExportEntryDisplayText(entry, multi)).join("\n");
+}
+
+export function maxScheduleExportEntriesInRow(
+  table: ScheduleExportTable,
+  guardId: string,
+): number {
+  let maxEntries = 0;
+  for (const col of table.dayColumns) {
+    const count = table.cells[guardId]?.[col.dateIso]?.length ?? 0;
+    if (count > maxEntries) maxEntries = count;
+  }
+  return maxEntries;
+}
+
+export function computeScheduleExportRowHeight(maxEntriesInRow: number): number {
+  if (maxEntriesInRow <= 1) return SCHEDULE_EXPORT_BASE_ROW_HEIGHT;
+  return Math.max(
+    SCHEDULE_EXPORT_BASE_ROW_HEIGHT,
+    maxEntriesInRow * SCHEDULE_EXPORT_COMPACT_BLOCK_HEIGHT + 8,
+  );
+}
+
+export function computeScheduleExportRowHeights(table: ScheduleExportTable): number[] {
+  return table.guards.map((guard) =>
+    computeScheduleExportRowHeight(maxScheduleExportEntriesInRow(table, guard.guardId)),
+  );
 }
 
 function formatDurationRuHours(start: Date, end: Date): string {
@@ -35,7 +76,10 @@ function formatDurationRuHours(start: Date, end: Date): string {
 }
 
 function formatShiftExportIncidentLine(shift: Shift): string | null {
-  if (shift.isNoShow) return "невыход";
+  if (isFullNoShow(shift)) return "невыход";
+  if (isPartialAttendance(shift) && shift.incidentCategory) {
+    return incidentCategoryLabels[shift.incidentCategory];
+  }
   if (shift.incidentRecordedAt && shift.incidentCategory) {
     return incidentCategoryLabels[shift.incidentCategory];
   }
@@ -45,12 +89,18 @@ function formatShiftExportIncidentLine(shift: Shift): string | null {
 export function formatShiftExportCell(shift: Shift): string {
   const startsAt = coerceToDate(shift.startsAt);
   const endsAt = coerceToDate(shift.endsAt);
-  const duration = formatDurationRuHours(startsAt, endsAt);
-  const startH = getHoursKhabarovsk(startsAt);
-  const endH = getHoursKhabarovsk(endsAt);
-  const time = `${startH}-${endH}`;
+  const worked = partialAttendanceWindow(shift);
+  const displayStart = worked?.start ?? startsAt;
+  const displayEnd = worked?.end ?? endsAt;
+  const duration = formatDurationRuHours(displayStart, displayEnd);
+  const time = `${getHoursKhabarovsk(displayStart)}-${getHoursKhabarovsk(displayEnd)}`;
+  const lines = [duration, time];
+  if (worked && worked.end.getTime() < endsAt.getTime()) {
+    lines.push(`${getHoursKhabarovsk(worked.end)}-${getHoursKhabarovsk(endsAt)} пропуск`);
+  }
   const incident = formatShiftExportIncidentLine(shift);
-  return incident ? `${duration}\n${time}\n${incident}` : `${duration}\n${time}`;
+  if (incident) lines.push(incident);
+  return lines.join("\n");
 }
 
 export function buildScheduleExportTable(

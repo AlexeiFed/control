@@ -79,7 +79,7 @@ export function buildSegmentContext(
   };
 }
 
-function dateInRuleRange(localDateKey: string, rule: ObjectRateRuleRecord): boolean {
+export function dateInRuleRange(localDateKey: string, rule: Pick<ObjectRateRuleRecord, "effectiveFrom" | "effectiveTo">): boolean {
   if (localDateKey < rule.effectiveFrom) return false;
   if (rule.effectiveTo && localDateKey > rule.effectiveTo) return false;
   return true;
