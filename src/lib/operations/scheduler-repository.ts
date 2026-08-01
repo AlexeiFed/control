@@ -20,14 +20,29 @@ import {
   currentMonthStartIsoKhabarovsk,
   isShiftDateInCurrentOrFutureMonth,
 } from "../scheduling/pending-incident-month-filter";
+import { isOperationalDayPlanSatisfied } from "../scheduling/pending-incident-plan-satisfied";
+import { buildOperationalDayAnchorByObjectIdForDate } from "../scheduling/operational-day-anchors";
+import { expectedShiftsForObjectDay } from "../scheduling/object-shift-templates";
+import {
+  normalizeOperationalAnchorTime,
+  operationalDayEnd,
+  operationalDayStart,
+  shiftBelongsToOperationalDayColumn,
+  shiftOperationalDayDateIso,
+} from "../scheduling/operational-day-timeline";
+import type { ScheduleObjectRef } from "../scheduling/schedule-shortage";
 import type { Guard, RateUnit, SecurityObject, Shift, ShiftKind, ShiftLog, IncidentCategory } from "../scheduling/types";
 import type { GuardProfileResolver } from "../guards/profile-periods";
 import { buildGuardProfileResolver } from "./guard-profile-periods-repository";
-import { normalizeOperationalAnchorTime } from "../scheduling/operational-day-timeline";
 import { mapGuardLicenseFromDb } from "../scheduling/guard-profile";
 import { normalizeShiftKindFromDb } from "../scheduling/types";
 import { guardStatusLabels } from "./status-labels";
 import { splitMinutesByMonth, totalMinutesByMonth } from "../scheduling/month-split";
+import {
+  listMonthlyOperationalDayStarts,
+  monthKeysFromDateIsos,
+} from "./object-monthly-settings-repository";
+import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
 import { listObjectRateRulesForObjects, type ObjectRateRuleRecord } from "./object-rate-rules-repository";
 import { getGuardsHasCarSelect, getGuardsPhoneSelect } from "./guards-repository";
 
@@ -1325,6 +1340,7 @@ export async function listPendingIncidentReplacements(): Promise<PendingIncident
     first_name: string;
     incident_category: string | null;
     incident_comment: string | null;
+    operational_day_start_time: string | null;
   }>(
     `
       SELECT
@@ -1334,6 +1350,7 @@ export async function listPendingIncidentReplacements(): Promise<PendingIncident
         s.ends_at,
         s.incident_worked_until_at,
         o.name AS object_name,
+        o.operational_day_start_time::text AS operational_day_start_time,
         g.last_name,
         g.first_name,
         s.incident_category,
@@ -1351,21 +1368,149 @@ export async function listPendingIncidentReplacements(): Promise<PendingIncident
     [monthStartAt],
   );
 
-  const out: PendingIncidentReplacement[] = [];
-  const now = new Date();
+  if (rows.length === 0) return [];
 
+  const now = new Date();
+  const objectById = new Map<string, ScheduleObjectRef>();
+  for (const row of rows) {
+    if (objectById.has(row.object_id)) continue;
+    objectById.set(row.object_id, {
+      id: row.object_id,
+      name: row.object_name,
+      operationalDayStartTime: normalizeOperationalAnchorTime(row.operational_day_start_time),
+    });
+  }
+  const objects = [...objectById.values()];
+  const objectIds = objects.map((o) => o.id);
+
+  const draftDateIsos = [
+    ...new Set(
+      rows.map((row) => {
+        const startsAt = new Date(row.starts_at);
+        const endsAt = new Date(row.ends_at);
+        const draftAnchor = new Map([
+          [row.object_id, normalizeOperationalAnchorTime(row.operational_day_start_time)],
+        ]);
+        return shiftOperationalDayDateIso(
+          { objectId: row.object_id, startsAt, endsAt },
+          draftAnchor,
+        );
+      }),
+    ),
+  ].filter((iso) => isShiftDateInCurrentOrFutureMonth(iso, now));
+
+  const monthlyOperationalOverrides =
+    objectIds.length > 0 && draftDateIsos.length > 0
+      ? await listMonthlyOperationalDayStarts(objectIds, monthKeysFromDateIsos(draftDateIsos))
+      : new Map<string, string>();
+
+  type Candidate = {
+    shiftId: string;
+    objectId: string;
+    objectName: string;
+    shiftDateKey: string;
+    guardName: string;
+    category: IncidentCategory;
+    comment: string;
+  };
+
+  const candidates: Candidate[] = [];
   for (const row of rows) {
     const startsAt = new Date(row.starts_at);
-    const shiftDateKey = toDateIsoKhabarovsk(startsAt);
+    const endsAt = new Date(row.ends_at);
+    const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
+      objects,
+      toDateIsoKhabarovsk(startsAt),
+      monthlyOperationalOverrides,
+    );
+    let shiftDateKey = shiftOperationalDayDateIso(
+      { objectId: row.object_id, startsAt, endsAt },
+      anchorByObjectId,
+    );
+    const refinedAnchor = buildOperationalDayAnchorByObjectIdForDate(
+      objects,
+      shiftDateKey,
+      monthlyOperationalOverrides,
+    );
+    shiftDateKey = shiftOperationalDayDateIso(
+      { objectId: row.object_id, startsAt, endsAt },
+      refinedAnchor,
+    );
     if (!isShiftDateInCurrentOrFutureMonth(shiftDateKey, now)) continue;
 
-    out.push({
+    candidates.push({
       shiftId: row.id,
+      objectId: row.object_id,
       objectName: row.object_name,
       shiftDateKey,
       guardName: `${row.last_name} ${row.first_name}`.trim(),
       category: (row.incident_category as IncidentCategory | null) ?? "Other",
       comment: row.incident_comment?.trim() ?? "",
+    });
+  }
+
+  if (candidates.length === 0) return [];
+
+  const dateIsos = [...new Set(candidates.map((c) => c.shiftDateKey))].sort();
+  const templates = await listShiftTemplatesForObjectIds(objectIds);
+
+  const rangeStart = operationalDayStart(dateIsos[0]!, "00:00");
+  const rangeEnd = operationalDayEnd(addDaysToIsoDate(dateIsos[dateIsos.length - 1]!, 1), "00:00");
+  const [incidentSel, rateRuleSel] = await Promise.all([
+    getShiftIncidentSelectColumns(),
+    getShiftSelectedRateRuleSelect(),
+  ]);
+  const dayShiftRows = await query<ShiftRow>(
+    `
+      SELECT
+        id, guard_id, object_id, post_id, starts_at, ends_at, shift_kind,
+        manual_client_rate_cents, manual_guard_rate_cents,
+        manual_rate_unit, manual_rate_reason,
+        is_no_show,
+        ${rateRuleSel},
+        ${incidentSel}
+      FROM shifts
+      WHERE object_id = ANY($1::uuid[])
+        AND ends_at > $2
+        AND starts_at < $3
+      ORDER BY starts_at ASC
+    `,
+    [objectIds, rangeStart.toISOString(), rangeEnd.toISOString()],
+  );
+  const objectDayShifts = dayShiftRows.map(mapDbShiftRow);
+
+  const dayShiftsCache = new Map<string, Shift[]>();
+  function dayShiftsFor(objectId: string, dateIso: string): Shift[] {
+    const key = `${objectId}|${dateIso}`;
+    const cached = dayShiftsCache.get(key);
+    if (cached) return cached;
+    const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
+      objects,
+      dateIso,
+      monthlyOperationalOverrides,
+    );
+    const filtered = objectDayShifts.filter(
+      (s) =>
+        s.objectId === objectId &&
+        shiftBelongsToOperationalDayColumn(s, dateIso, anchorByObjectId),
+    );
+    dayShiftsCache.set(key, filtered);
+    return filtered;
+  }
+
+  const out: PendingIncidentReplacement[] = [];
+  for (const item of candidates) {
+    const norms = expectedShiftsForObjectDay(templates, item.objectId, item.shiftDateKey);
+    if (isOperationalDayPlanSatisfied(dayShiftsFor(item.objectId, item.shiftDateKey), norms)) {
+      continue;
+    }
+    out.push({
+      shiftId: item.shiftId,
+      objectName: item.objectName,
+      shiftDateKey: item.shiftDateKey,
+      guardName: item.guardName,
+      category: item.category,
+      comment: item.comment,
     });
   }
 
