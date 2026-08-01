@@ -16,6 +16,10 @@ import {
   localDatesSpannedByShift,
 } from "../scheduling/guard-daily-load";
 import { addDaysToIsoDate, formatDisplayDateLocal, parseIsoDateKhabarovskOrNull, toDateIsoKhabarovsk } from "../format/display-date";
+import {
+  currentMonthStartIsoKhabarovsk,
+  isShiftDateInCurrentOrFutureMonth,
+} from "../scheduling/pending-incident-month-filter";
 import type { Guard, RateUnit, SecurityObject, Shift, ShiftKind, ShiftLog, IncidentCategory } from "../scheduling/types";
 import type { GuardProfileResolver } from "../guards/profile-periods";
 import { buildGuardProfileResolver } from "./guard-profile-periods-repository";
@@ -1302,64 +1306,71 @@ export type PendingIncidentReplacement = {
   comment: string;
 };
 
-  export async function listPendingIncidentReplacements(): Promise<PendingIncidentReplacement[]> {
-    if (!(await shiftsHaveIncidentColumns())) return [];
+export async function listPendingIncidentReplacements(): Promise<PendingIncidentReplacement[]> {
+  if (!(await shiftsHaveIncidentColumns())) return [];
 
-    const hasDismissCol = await shiftsHaveIncidentAlertDismissedColumn();
-    const dismissFilter = hasDismissCol ? "AND s.incident_alert_dismissed_at IS NULL" : "";
+  const hasDismissCol = await shiftsHaveIncidentAlertDismissedColumn();
+  const dismissFilter = hasDismissCol ? "AND s.incident_alert_dismissed_at IS NULL" : "";
+  const monthStartIso = currentMonthStartIsoKhabarovsk();
+  const monthStartAt = new Date(`${monthStartIso}T00:00:00+10:00`);
 
-    const rows = await query<{
-      id: string;
-      object_id: string;
-      starts_at: string;
-      ends_at: string;
-      incident_worked_until_at: string | null;
-      object_name: string;
-      last_name: string;
-      first_name: string;
-      incident_category: string | null;
-      incident_comment: string | null;
-    }>(
-      `
-        SELECT
-          s.id,
-          s.object_id,
-          s.starts_at,
-          s.ends_at,
-          s.incident_worked_until_at,
-          o.name AS object_name,
-          g.last_name,
-          g.first_name,
-          s.incident_category,
-          s.incident_comment
-        FROM shifts s
-        INNER JOIN security_objects o ON o.id = s.object_id
-        INNER JOIN guards g ON g.id = s.guard_id
-        WHERE s.incident_recorded_at IS NOT NULL
-          AND s.replaced_by_shift_id IS NULL
-          ${dismissFilter}
-        ORDER BY s.incident_recorded_at DESC
-        LIMIT 30
-      `,
-    );
-  
-    const out: PendingIncidentReplacement[] = [];
-  
-    for (const row of rows) {
-      const startsAt = new Date(row.starts_at);
-      
-      out.push({
-        shiftId: row.id,
-        objectName: row.object_name,
-        shiftDateKey: toDateIsoKhabarovsk(startsAt),
-        guardName: `${row.last_name} ${row.first_name}`.trim(),
-        category: (row.incident_category as IncidentCategory | null) ?? "Other",
-        comment: row.incident_comment?.trim() ?? "",
-      });
-    }
-  
-    return out;
+  const rows = await query<{
+    id: string;
+    object_id: string;
+    starts_at: string;
+    ends_at: string;
+    incident_worked_until_at: string | null;
+    object_name: string;
+    last_name: string;
+    first_name: string;
+    incident_category: string | null;
+    incident_comment: string | null;
+  }>(
+    `
+      SELECT
+        s.id,
+        s.object_id,
+        s.starts_at,
+        s.ends_at,
+        s.incident_worked_until_at,
+        o.name AS object_name,
+        g.last_name,
+        g.first_name,
+        s.incident_category,
+        s.incident_comment
+      FROM shifts s
+      INNER JOIN security_objects o ON o.id = s.object_id
+      INNER JOIN guards g ON g.id = s.guard_id
+      WHERE s.incident_recorded_at IS NOT NULL
+        AND s.replaced_by_shift_id IS NULL
+        AND s.starts_at >= $1
+        ${dismissFilter}
+      ORDER BY s.incident_recorded_at DESC
+      LIMIT 30
+    `,
+    [monthStartAt],
+  );
+
+  const out: PendingIncidentReplacement[] = [];
+  const now = new Date();
+
+  for (const row of rows) {
+    const startsAt = new Date(row.starts_at);
+    const shiftDateKey = toDateIsoKhabarovsk(startsAt);
+    if (!isShiftDateInCurrentOrFutureMonth(shiftDateKey, now)) continue;
+
+    out.push({
+      shiftId: row.id,
+      objectName: row.object_name,
+      shiftDateKey,
+      guardName: `${row.last_name} ${row.first_name}`.trim(),
+      category: (row.incident_category as IncidentCategory | null) ?? "Other",
+      comment: row.incident_comment?.trim() ?? "",
+    });
   }
+
+  return out;
+}
 
 export async function dismissIncidentReplacementAlert(shiftId: string): Promise<void> {
   if (!(await shiftsHaveIncidentColumns())) {

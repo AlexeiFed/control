@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, EyeOff, X } from "lucide-react";
 import { incidentCategoryLabels } from "../../lib/operations/status-labels";
 import type { IncidentCategory } from "../../lib/scheduling/types";
 import { designTokens } from "../../lib/design-tokens";
+import { pluralizeRu } from "../../lib/format/pluralize-ru";
 import { toast } from "../../store/toast-store";
 
 type PendingItem = {
@@ -150,8 +151,7 @@ export function GlobalIncidentReplacementsBanner({
 
   if (items === null || items.length === 0 || dismissed) return null;
 
-  const countLabel =
-    items.length === 1 ? "1 инцидент" : `${items.length} инцидента`;
+  const countLabel = `${items.length} ${pluralizeRu(items.length, "инцидент", "инцидента", "инцидентов")}`;
 
   return (
     <div
