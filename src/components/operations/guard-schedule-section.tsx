@@ -10,7 +10,7 @@ import {
   toDateIsoKhabarovsk,
 } from "../../lib/format/display-date";
 import type { GuardShiftHistoryRow } from "../../lib/operations/guards-repository";
-import { shiftKindLabels } from "../../lib/operations/status-labels";
+import { shiftKindLabels, incidentCategoryLabels } from "../../lib/operations/status-labels";
 
 type GuardScheduleSectionProps = {
   guardId: string;
@@ -72,14 +72,25 @@ export function GuardScheduleSection({
             </h2>
             <ul className="max-h-[240px] space-y-2 overflow-y-auto pr-1 text-sm sm:max-h-[300px] sm:space-y-3">
               {shiftsForDate.length > 0 ? (
-                shiftsForDate.map((shift) => (
+                shiftsForDate.map((shift) => {
+                  const hasIncident = shift.isNoShow || shift.incidentRecordedAt != null;
+                  const incidentLabel = shift.incidentCategory
+                    ? incidentCategoryLabels[shift.incidentCategory]
+                    : shift.isNoShow
+                      ? "Невыход"
+                      : hasIncident
+                        ? "Инцидент"
+                        : null;
+                  return (
                   <li
                     key={shift.id}
                     className="rounded-button border border-app-border bg-app-surface px-3.5 py-3 shadow-sm"
                     style={
-                      shift.shiftKind === "Reinforcement"
+                      hasIncident
                         ? { borderColor: designTokens.color.accent.danger }
-                        : undefined
+                        : shift.shiftKind === "Reinforcement"
+                          ? { borderColor: designTokens.color.accent.danger }
+                          : undefined
                     }
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
@@ -87,26 +98,37 @@ export function GuardScheduleSection({
                       <span
                         className="text-xs font-bold px-2 py-0.5 rounded-full"
                         style={
-                          shift.shiftKind === "Reinforcement"
+                          hasIncident
                             ? {
-                                backgroundColor: "rgba(185, 28, 28, 0.1)",
+                                backgroundColor: "rgba(185, 28, 28, 0.12)",
                                 color: designTokens.color.accent.danger,
                               }
-                            : {
-                                backgroundColor: "rgba(71, 85, 105, 0.1)",
-                                color: designTokens.color.textMuted,
-                              }
+                            : shift.shiftKind === "Reinforcement"
+                              ? {
+                                  backgroundColor: "rgba(185, 28, 28, 0.1)",
+                                  color: designTokens.color.accent.danger,
+                                }
+                              : {
+                                  backgroundColor: "rgba(71, 85, 105, 0.1)",
+                                  color: designTokens.color.textMuted,
+                                }
                         }
                       >
-                        {shiftKindLabels[shift.shiftKind]}
+                        {hasIncident && incidentLabel ? incidentLabel : shiftKindLabels[shift.shiftKind]}
                       </span>
                     </div>
                     <div className="text-xs font-medium text-app-muted">
                       {formatDisplayDateTimeLocal(shiftStartsAt(shift))} —{" "}
                       {formatDisplayDateTimeLocal(shiftEndsAt(shift))}
                     </div>
+                    {hasIncident && !shift.isNoShow && shift.incidentCategory ? (
+                      <p className="mt-1 text-[11px] font-semibold" style={{ color: designTokens.color.accent.danger }}>
+                        {shiftKindLabels[shift.shiftKind]} · инцидент
+                      </p>
+                    ) : null}
                   </li>
-                ))
+                  );
+                })
               ) : (
                 <li className="text-app-muted py-4 text-center">В выбранную дату смен нет.</li>
               )}

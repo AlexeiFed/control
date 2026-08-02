@@ -1,4 +1,4 @@
-import { isUndefinedColumnOrTableError } from "../db/column-compat";
+import { isUndefinedColumnOrTableError, shiftsHaveIncidentColumns } from "../db/column-compat";
 import { query } from "../db/pool";
 import type {
   Guard,
@@ -11,6 +11,7 @@ import type {
 } from "../scheduling/types";
 import { normalizeShiftKindFromDb } from "../scheduling/types";
 import { mapGuardLicenseFromDb } from "../scheduling/guard-profile";
+import { isIncidentCompanionShiftLog } from "../scheduling/guard-service-history";
 import { normalizeGuardFilters, type GuardFilterInput } from "./guard-filters";
 import { toDateIsoKhabarovsk } from "../format/display-date";
 import type { UniformCondition } from "../format/uniform";
@@ -592,6 +593,9 @@ export type GuardShiftHistoryRow = {
   startsAt: Date;
   endsAt: Date;
   shiftKind: ShiftKind;
+  isNoShow: boolean;
+  incidentCategory: IncidentCategory | null;
+  incidentRecordedAt: Date | null;
 };
 
 export type GuardServiceHistoryEntry =
@@ -737,8 +741,11 @@ export async function listGuardServiceHistory(
   ]);
 
   const entries: GuardServiceHistoryEntry[] = [];
+  const incidentsByShiftId = new Map<string, { category: IncidentCategory }>();
 
   for (const row of incidents) {
+    const category = (row.incident_category as IncidentCategory | null) ?? "Other";
+    incidentsByShiftId.set(row.id, { category });
     const replacementGuardName =
       row.repl_first_name || row.repl_last_name
         ? `${row.repl_last_name ?? ""} ${row.repl_first_name ?? ""}`.trim()
@@ -751,7 +758,7 @@ export async function listGuardServiceHistory(
       objectName: row.object_name,
       shiftStartsAt: new Date(row.starts_at),
       shiftEndsAt: new Date(row.ends_at),
-      category: (row.incident_category as IncidentCategory | null) ?? "Other",
+      category,
       comment: row.incident_comment?.trim() ?? "",
       workedUntilAt: row.incident_worked_until_at ? new Date(row.incident_worked_until_at) : null,
       replacementGuardName,
@@ -761,6 +768,15 @@ export async function listGuardServiceHistory(
   for (const row of logs) {
     const level = row.incident_level;
     if (level !== "Info" && level !== "Warning" && level !== "Critical") continue;
+    if (
+      isIncidentCompanionShiftLog({
+        shiftId: row.shift_id,
+        note: row.note,
+        incidentsByShiftId,
+      })
+    ) {
+      continue;
+    }
     entries.push({
       kind: "shift_log",
       id: `log:${row.id}`,
@@ -1825,6 +1841,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
 }
 
 export async function listGuardShiftHistory(guardId: string, limit = 240): Promise<GuardShiftHistoryRow[]> {
+  const hasIncidentCols = await shiftsHaveIncidentColumns();
   const rows = await query<{
     id: string;
     object_id: string;
@@ -1832,9 +1849,24 @@ export async function listGuardShiftHistory(guardId: string, limit = 240): Promi
     starts_at: string;
     ends_at: string;
     shift_kind: string | null;
+    is_no_show: boolean | null;
+    incident_category: string | null;
+    incident_recorded_at: string | null;
   }>(
     `
-      SELECT s.id, s.object_id, so.name AS object_name, s.starts_at, s.ends_at, s.shift_kind
+      SELECT
+        s.id,
+        s.object_id,
+        so.name AS object_name,
+        s.starts_at,
+        s.ends_at,
+        s.shift_kind,
+        s.is_no_show,
+        ${
+          hasIncidentCols
+            ? "s.incident_category, s.incident_recorded_at"
+            : "NULL::text AS incident_category, NULL::timestamptz AS incident_recorded_at"
+        }
       FROM shifts s
       JOIN security_objects so ON so.id = s.object_id
       WHERE s.guard_id = $1
@@ -1851,6 +1883,9 @@ export async function listGuardShiftHistory(guardId: string, limit = 240): Promi
     startsAt: new Date(row.starts_at),
     endsAt: new Date(row.ends_at),
     shiftKind: normalizeShiftKindFromDb(row.shift_kind),
+    isNoShow: row.is_no_show === true,
+    incidentCategory: (row.incident_category as IncidentCategory | null) ?? null,
+    incidentRecordedAt: row.incident_recorded_at ? new Date(row.incident_recorded_at) : null,
   }));
 }
 

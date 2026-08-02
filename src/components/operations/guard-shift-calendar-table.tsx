@@ -11,7 +11,7 @@ import {
   toDateIsoKhabarovsk,
 } from "../../lib/format/display-date";
 import { calculateShiftHours } from "../../lib/scheduling/hour-calculator";
-import { shiftKindLabels } from "../../lib/operations/status-labels";
+import { shiftKindLabels, incidentCategoryLabels } from "../../lib/operations/status-labels";
 
 type GuardShiftCalendarTableProps = {
   history: GuardShiftHistoryRow[];
@@ -239,10 +239,29 @@ export function GuardShiftCalendarTable({
                           return sum + h.totalHours;
                         }, 0);
 
+                        const hasIncident = dayShiftsForObj.some(
+                          (s) => s.isNoShow || s.incidentRecordedAt != null,
+                        );
+                        const primaryIncident = dayShiftsForObj.find(
+                          (s) => s.isNoShow || s.incidentRecordedAt != null,
+                        );
+                        const incidentLabel = primaryIncident?.isNoShow
+                          ? primaryIncident.incidentCategory
+                            ? incidentCategoryLabels[primaryIncident.incidentCategory]
+                            : "Невыход"
+                          : primaryIncident?.incidentCategory
+                            ? incidentCategoryLabels[primaryIncident.incidentCategory]
+                            : "Инцидент";
+
                         // Получаем цвета из дизайн-токенов
-                        const tokenColors =
-                          designTokens.color.shiftKind[primaryShift.shiftKind] ||
-                          designTokens.color.shiftKind.Regular;
+                        const tokenColors = hasIncident
+                          ? {
+                              bg: "rgba(185, 28, 28, 0.18)",
+                              text: designTokens.color.accent.danger,
+                              border: designTokens.color.accent.danger,
+                            }
+                          : designTokens.color.shiftKind[primaryShift.shiftKind] ||
+                            designTokens.color.shiftKind.Regular;
 
                         const tooltipText = dayShiftsForObj
                           .map((s) => {
@@ -260,7 +279,17 @@ export function GuardShiftCalendarTable({
                               minute: "2-digit",
                               timeZone: "Asia/Vladivostok",
                             });
-                            return `${shiftKindLabels[s.shiftKind]}: ${startStr} - ${endStr} (${h.totalHours} ч)`;
+                            const incidentPart =
+                              s.isNoShow || s.incidentRecordedAt
+                                ? ` · ${
+                                    s.incidentCategory
+                                      ? incidentCategoryLabels[s.incidentCategory]
+                                      : s.isNoShow
+                                        ? "Невыход"
+                                        : "Инцидент"
+                                  }`
+                                : "";
+                            return `${shiftKindLabels[s.shiftKind]}: ${startStr} - ${endStr} (${h.totalHours} ч)${incidentPart}`;
                           })
                           .join("\n");
 
@@ -274,14 +303,19 @@ export function GuardShiftCalendarTable({
                             title={`${obj.name}\n${dateIso}\n${tooltipText}`}
                           >
                             <div
-                              className="mx-auto flex h-6 items-center justify-center rounded-button text-[10px] font-bold shadow-sm transition-transform hover:scale-105 sm:h-7 sm:text-[11px]"
+                              className="mx-auto flex min-h-6 flex-col items-center justify-center gap-0.5 rounded-button px-0.5 py-0.5 text-[10px] font-bold shadow-sm transition-transform hover:scale-105 sm:min-h-7 sm:text-[11px]"
                               style={{
                                 backgroundColor: tokenColors.bg,
                                 color: tokenColors.text,
                                 border: `1px solid ${tokenColors.border}`,
                               }}
                             >
-                              {totalHours}ч
+                              <span className="leading-none">{totalHours}ч</span>
+                              {hasIncident ? (
+                                <span className="text-[7px] font-bold uppercase leading-none tracking-wide sm:text-[8px]">
+                                  {incidentLabel === "Полный невыход" ? "Невыход" : incidentLabel}
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                         );
@@ -349,6 +383,16 @@ export function GuardShiftCalendarTable({
             }}
           />
           <span>ГБР ({shiftKindLabels.RapidResponse})</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div
+            className="size-3 rounded border"
+            style={{
+              backgroundColor: "rgba(185, 28, 28, 0.18)",
+              borderColor: designTokens.color.accent.danger,
+            }}
+          />
+          <span>Невыход / инцидент</span>
         </div>
       </div>
     </div>
