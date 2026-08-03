@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { getDaysInMonth, getKhabarovskComponents } from "../format/display-date";
+import { getDaysInMonth } from "../format/display-date";
 import {
   buildTimesheetApprovalBlocks,
   type TimesheetObjectApprovalSettings,
@@ -7,12 +7,19 @@ import {
 import { guardPositionLabels } from "../operations/status-labels";
 import type { TimesheetRow } from "../scheduling/timesheet";
 import type { GuardEmploymentType, GuardPosition } from "../scheduling/types";
+import {
+  DEFAULT_OPERATIONAL_DAY_START_TIME,
+  normalizeOperationalAnchorTime,
+  scheduleShiftColumnDateIso,
+} from "../scheduling/operational-day-timeline";
 
 export type TimesheetObjectWorkbookSheet = {
   objectName: string;
   objectAddress: string;
   rows: TimesheetRow[];
   approval: TimesheetObjectApprovalSettings;
+  /** Якорь операционных суток объекта — колонки табеля как в графике. */
+  operationalDayStartTime?: string;
 };
 
 type GuardDayCell = {
@@ -103,7 +110,12 @@ export async function buildTimesheetObjectWorkbook(
     }
     setHeaderCell(ws, headerRow, dayEndCol + 1, "Часов\nмесяц");
 
-    const byPost = groupTimesheetObjectRowsByPostAndGuard(sheet.rows, year, monthIndex0);
+    const byPost = groupTimesheetObjectRowsByPostAndGuard(
+      sheet.rows,
+      year,
+      monthIndex0,
+      sheet.operationalDayStartTime,
+    );
     const posts = Array.from(byPost.values()).sort((a, b) => a.postName.localeCompare(b.postName, "ru-RU"));
 
     const firstDataRow = headerRow + 1;
@@ -263,14 +275,14 @@ export function groupTimesheetObjectRowsByPostAndGuard(
   rows: TimesheetRow[],
   year: number,
   monthIndex0: number,
+  operationalDayStartTime: string = DEFAULT_OPERATIONAL_DAY_START_TIME,
 ): Map<string, { postName: string; guards: Map<string, { days: Map<number, GuardDayCell> }> }> {
   const byPost = new Map<string, { postName: string; guards: Map<string, { days: Map<number, GuardDayCell> }> }>();
+  const anchor = normalizeOperationalAnchorTime(operationalDayStartTime);
 
   for (const row of rows) {
-    const day = dayOfMonthInKhabarovsk(row.startsAt);
-    const kh = getKhabarovskComponents(new Date(row.startsAt));
-    if (kh.year !== year || kh.month0 !== monthIndex0) continue;
-    if (!day || day < 1) continue;
+    const dayMeta = timesheetRowDayInMonth(row, year, monthIndex0, anchor);
+    if (!dayMeta) continue;
 
     const kind = row.reinforcementHours > 0 ? "Reinforcement" : row.rapidResponseHours > 0 ? "RapidResponse" : "Regular";
     const hours = round2(row.totalHours);
@@ -283,11 +295,11 @@ export function groupTimesheetObjectRowsByPostAndGuard(
     const guardName = row.guardName?.trim() || "—";
     const guardBucket = postBucket.guards.get(guardName) ?? { days: new Map<number, GuardDayCell>() };
 
-    const existing = guardBucket.days.get(day);
+    const existing = guardBucket.days.get(dayMeta.day);
     if (!existing) {
-      guardBucket.days.set(day, { hours, kind });
+      guardBucket.days.set(dayMeta.day, { hours, kind });
     } else {
-      guardBucket.days.set(day, {
+      guardBucket.days.set(dayMeta.day, {
         hours: round2(existing.hours + hours),
         kind: mergeKind(existing.kind, kind),
       });
@@ -304,13 +316,14 @@ export function groupTimesheetObjectRowsByGuard(
   rows: TimesheetRow[],
   year: number,
   monthIndex0: number,
+  operationalDayStartTime: string = DEFAULT_OPERATIONAL_DAY_START_TIME,
 ): Map<string, { days: Map<number, GuardDayCell> }> {
   const byGuard = new Map<string, { days: Map<number, GuardDayCell> }>();
+  const anchor = normalizeOperationalAnchorTime(operationalDayStartTime);
+
   for (const row of rows) {
-    const day = dayOfMonthInKhabarovsk(row.startsAt);
-    const kh = getKhabarovskComponents(new Date(row.startsAt));
-    if (kh.year !== year || kh.month0 !== monthIndex0) continue;
-    if (!day || day < 1) continue;
+    const dayMeta = timesheetRowDayInMonth(row, year, monthIndex0, anchor);
+    if (!dayMeta) continue;
 
     const kind = row.reinforcementHours > 0 ? "Reinforcement" : row.rapidResponseHours > 0 ? "RapidResponse" : "Regular";
     const hours = round2(row.totalHours);
@@ -319,11 +332,11 @@ export function groupTimesheetObjectRowsByGuard(
     const guardName = row.guardName?.trim() || "—";
     const bucket = byGuard.get(guardName) ?? { days: new Map<number, GuardDayCell>() };
 
-    const existing = bucket.days.get(day);
+    const existing = bucket.days.get(dayMeta.day);
     if (!existing) {
-      bucket.days.set(day, { hours, kind });
+      bucket.days.set(dayMeta.day, { hours, kind });
     } else {
-      bucket.days.set(day, {
+      bucket.days.set(dayMeta.day, {
         hours: round2(existing.hours + hours),
         kind: mergeKind(existing.kind, kind),
       });
@@ -334,6 +347,25 @@ export function groupTimesheetObjectRowsByGuard(
   return byGuard;
 }
 
+function timesheetRowDayInMonth(
+  row: TimesheetRow,
+  year: number,
+  monthIndex0: number,
+  anchorTime: string,
+): { day: number } | null {
+  const dateIso = scheduleShiftColumnDateIso(
+    { startsAt: row.startsAt, endsAt: row.endsAt },
+    anchorTime,
+  );
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateIso);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m0 = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  if (y !== year || m0 !== monthIndex0 || !day || day < 1) return null;
+  return { day };
+}
+
 function mergeKind(
   a: GuardDayCell["kind"],
   b: GuardDayCell["kind"],
@@ -341,12 +373,6 @@ function mergeKind(
   if (a === "Reinforcement" || b === "Reinforcement") return "Reinforcement";
   if (a === "RapidResponse" || b === "RapidResponse") return "RapidResponse";
   return "Regular";
-}
-
-function dayOfMonthInKhabarovsk(iso: string): number | null {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return getKhabarovskComponents(d).date;
 }
 
 function appendPostSubtotalRow(

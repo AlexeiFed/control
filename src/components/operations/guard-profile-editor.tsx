@@ -263,7 +263,9 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
               disabled
               className={`${fieldClass} opacity-70`}
             />
-            <span className="text-xs text-app-muted">Меняется через смену статуса в реестре.</span>
+            <span className="text-xs text-app-muted">
+              История увольнения с ТК. После «Вернуть в работу» дата сохраняется, статус снова Active (Б/У).
+            </span>
           </label>
         ) : null}
 

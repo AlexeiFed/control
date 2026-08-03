@@ -1368,12 +1368,13 @@ export async function updateGuardStatus(
 
   const hasDismissedOn = await resolveGuardsOptionalColumn("dismissed_on");
   if (hasDismissedOn) {
+    // Дата увольнения — история ТК: при уходе с Dismissed не затираем (нужна для возврата Б/У).
     await query(
       `
         UPDATE guards
         SET
           status = $2,
-          dismissed_on = CASE WHEN $2 = 'Dismissed' THEN $3::date ELSE NULL END
+          dismissed_on = CASE WHEN $2 = 'Dismissed' THEN $3::date ELSE dismissed_on END
         WHERE id = $1
       `,
       [guardId, status, status === "Dismissed" ? dismissedOn : null],
@@ -1388,6 +1389,130 @@ export async function updateGuardStatus(
     `,
     [guardId, status],
   );
+}
+
+/**
+ * Возврат уволенного в работу как Б/У: Active + новые периоды с даты возврата.
+ * `dismissed_on` сохраняется как дата последнего увольнения с ТК.
+ */
+export async function returnGuardToWork(input: {
+  guardId: string;
+  returnedOn: string;
+  createdBy?: string | null;
+}): Promise<void> {
+  const {
+    canReturnGuardToWork,
+    profileCloseDateBeforeReturn,
+    validateReturnToWorkDate,
+  } = await import("../guards/return-to-work");
+
+  const hasDismissedOn = await resolveGuardsOptionalColumn("dismissed_on");
+  const rows = await query<{ status: GuardStatus; dismissed_on: string | null }>(
+    hasDismissedOn
+      ? `SELECT status, dismissed_on::text AS dismissed_on FROM guards WHERE id = $1::uuid`
+      : `SELECT status, NULL::text AS dismissed_on FROM guards WHERE id = $1::uuid`,
+    [input.guardId],
+  );
+  const current = rows[0];
+  if (!current) throw new Error("Охранник не найден");
+  if (!canReturnGuardToWork(current.status)) {
+    throw new Error("Вернуть в работу можно только уволенного охранника");
+  }
+
+  const dateCheck = validateReturnToWorkDate({
+    returnedOn: input.returnedOn,
+    dismissedOn: current.dismissed_on,
+  });
+  if (!dateCheck.ok) throw new Error(dateCheck.error);
+
+  const basicsRows = await query<{
+    position: GuardPosition;
+    license_type: string | null;
+  }>(
+    `
+      SELECT position, license_type
+      FROM guards
+      WHERE id = $1::uuid
+    `,
+    [input.guardId],
+  );
+  const basics = basicsRows[0];
+  if (!basics) throw new Error("Охранник не найден");
+
+  const {
+    assignGuardProfilePeriod,
+    closeOpenProfilePeriodsOnDate,
+    syncGuardProfileCacheFromPeriods,
+  } = await import("./guard-profile-periods-repository");
+
+  // Сначала режем старые периоды по дате увольнения — иначе trimOverlappingPeriods
+  // при возврате растянет их до дня перед returnedOn.
+  await closeOpenProfilePeriodsOnDate(
+    input.guardId,
+    profileCloseDateBeforeReturn({
+      returnedOn: input.returnedOn,
+      dismissedOn: current.dismissed_on,
+    }),
+  );
+
+  await query(
+    `
+      UPDATE guards
+      SET status = 'Active'
+      WHERE id = $1::uuid
+    `,
+    [input.guardId],
+  );
+
+  const createdBy = input.createdBy ?? null;
+  const note = "Возврат в работу";
+  const from = input.returnedOn;
+  const position = (basics.position ?? "Guard") as GuardPosition;
+  const licenseType = (basics.license_type as GuardLicenseType | null) ?? "None";
+
+  await assignGuardProfilePeriod({
+    guardId: input.guardId,
+    periodKind: "employment",
+    effectiveFrom: from,
+    effectiveTo: null,
+    employmentType: "Unemployed",
+    note: `${note} (Б/У)`,
+    createdBy,
+    confirmOverlap: true,
+  });
+  await assignGuardProfilePeriod({
+    guardId: input.guardId,
+    periodKind: "position",
+    effectiveFrom: from,
+    effectiveTo: null,
+    position,
+    note,
+    createdBy,
+    confirmOverlap: true,
+  });
+  await assignGuardProfilePeriod({
+    guardId: input.guardId,
+    periodKind: "license",
+    effectiveFrom: from,
+    effectiveTo: null,
+    licenseType,
+    note,
+    createdBy,
+    confirmOverlap: true,
+  });
+  await assignGuardProfilePeriod({
+    guardId: input.guardId,
+    periodKind: "trainee",
+    effectiveFrom: from,
+    effectiveTo: null,
+    isTrainee: false,
+    traineeUntil: null,
+    note,
+    createdBy,
+    confirmOverlap: true,
+  });
+
+  await syncGuardProfileCacheFromPeriods(input.guardId, from);
 }
 
 export async function updateGuardProfile(input: UpdateGuardProfileInput): Promise<void> {

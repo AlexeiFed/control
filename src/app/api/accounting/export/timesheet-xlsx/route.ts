@@ -77,6 +77,7 @@ export async function GET(request: Request) {
       return {
         objectName: o.name,
         objectAddress: o.address ?? "",
+        operationalDayStartTime: o.operationalDayStartTime,
         rows: rowsFiltered.filter((r) =>
           r.objectId ? r.objectId === o.id : r.objectName === o.name,
         ),

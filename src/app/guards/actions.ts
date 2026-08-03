@@ -34,12 +34,14 @@ import {
   getGuardDetails,
   isGuardAssignedToObject,
   listGuardObjectAssignments,
+  returnGuardToWork,
   setGuardObjects,
   unassignGuardFromObject,
   updateGuardProfile,
   updateGuardStatus,
 } from "../../lib/operations/guards-repository";
 import type { GuardProfilePeriodKind } from "../../lib/guards/profile-periods";
+import { canReturnGuardToWork } from "../../lib/guards/return-to-work";
 import {
   revalidateAfterGuardStatusChange,
   revalidateGuardComplianceAlerts,
@@ -308,6 +310,17 @@ export async function updateGuardStatusAction(formData: FormData): Promise<Updat
       dismissedOn: formData.get("dismissedOn"),
     });
 
+    const existing = await getGuardDetails(input.guardId);
+    if (!existing) {
+      return { ok: false, error: "Охранник не найден" };
+    }
+    if (canReturnGuardToWork(existing.status) && input.status !== "Dismissed") {
+      return {
+        ok: false,
+        error: "Для уволенного используйте «Вернуть в работу»",
+      };
+    }
+
     await updateGuardStatus(
       input.guardId,
       input.status,
@@ -323,6 +336,41 @@ export async function updateGuardStatusAction(formData: FormData): Promise<Updat
       return { ok: false, error: error.message };
     }
     return { ok: false, error: "Не удалось обновить статус" };
+  }
+}
+
+const returnToWorkSchema = z.object({
+  guardId: z.string().uuid(),
+  returnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Укажите дату возврата"),
+});
+
+export type ReturnGuardToWorkResult = { ok: true } | { ok: false; error: string };
+
+export async function returnGuardToWorkAction(formData: FormData): Promise<ReturnGuardToWorkResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "guards:manage");
+
+    const input = returnToWorkSchema.parse({
+      guardId: formData.get("guardId"),
+      returnedOn: formData.get("returnedOn"),
+    });
+
+    await returnGuardToWork({
+      guardId: input.guardId,
+      returnedOn: input.returnedOn,
+      createdBy: session.user.id,
+    });
+    revalidateAfterGuardStatusChange(input.guardId);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: formatZodError(error) };
+    }
+    if (error instanceof Error && error.message) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: false, error: "Не удалось вернуть охранника в работу" };
   }
 }
 

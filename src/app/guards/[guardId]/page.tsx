@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { GuardHistoryCard } from "../../../components/operations/guard-history-card";
 import { GuardProfileEditor } from "../../../components/operations/guard-profile-editor";
+import { GuardReturnToWorkButton } from "../../../components/operations/guard-return-to-work-button";
 import { GuardServiceRecordSection } from "../../../components/operations/guard-service-record-section";
 import { GuardTraineeSection } from "../../../components/operations/guard-trainee-section";
 import { GuardScheduleSection } from "../../../components/operations/guard-schedule-section";
@@ -14,6 +15,7 @@ import {
 } from "../../../lib/operations/guards-repository";
 import { listGuardProfilePeriods } from "../../../lib/operations/guard-profile-periods-repository";
 import { resolveGuardProfileFromPeriods } from "../../../lib/guards/profile-periods";
+import { canReturnGuardToWork } from "../../../lib/guards/return-to-work";
 import type { Guard } from "../../../lib/scheduling/types";
 import { listObjectsForAssignment } from "../../../lib/operations/objects-repository";
 import {
@@ -130,9 +132,14 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
               </span>
             </h1>
           </div>
-          <ButtonLink href="/guards" variant="secondary" className="w-full justify-center sm:w-auto">
-            Назад к реестру
-          </ButtonLink>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-start">
+            {canReturnGuardToWork(guard.status) ? (
+              <GuardReturnToWorkButton guardId={guard.id} dismissedOn={guard.dismissedOn} />
+            ) : null}
+            <ButtonLink href="/guards" variant="secondary" className="w-full justify-center sm:w-auto">
+              Назад к реестру
+            </ButtonLink>
+          </div>
         </div>
 
         {/* 1. Вся информация в удобном читаемом виде */}

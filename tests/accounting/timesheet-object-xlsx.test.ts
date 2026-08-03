@@ -58,7 +58,7 @@ describe("groupTimesheetObjectRowsByPostAndGuard", () => {
     ...overrides,
   });
 
-  it("группирует смены по охраннику и дню месяца", () => {
+  it("группирует смены по охраннику и операционным суткам", () => {
     const grouped = groupTimesheetObjectRowsByPostAndGuard(
       [
         baseRow({}),
@@ -72,6 +72,7 @@ describe("groupTimesheetObjectRowsByPostAndGuard", () => {
       ],
       2026,
       4,
+      "00:00",
     );
 
     expect(grouped.size).toBe(1);
@@ -100,9 +101,42 @@ describe("groupTimesheetObjectRowsByPostAndGuard", () => {
       ],
       2026,
       4,
+      "00:00",
     );
 
     expect(grouped.size).toBe(0);
+  });
+
+  it("хвост до якоря 09:00 не склеивается с сутками следующего дня (кейс 1ч 8-9 + 24ч 9-9)", () => {
+    // 17.07 08:00–09:00 и 18.07 09:00–19.07 09:00 (Хабаровск, UTC+10)
+    const grouped = groupTimesheetObjectRowsByPostAndGuard(
+      [
+        baseRow({
+          guardName: "Алфутов Алексей",
+          startsAt: "2026-07-17T22:00:00.000Z",
+          endsAt: "2026-07-17T23:00:00.000Z",
+          totalHours: 1,
+          regularHours: 1,
+          nightHours: 0,
+        }),
+        baseRow({
+          guardName: "Алфутов Алексей",
+          startsAt: "2026-07-17T23:00:00.000Z",
+          endsAt: "2026-07-18T23:00:00.000Z",
+          totalHours: 24,
+          regularHours: 24,
+          nightHours: 12,
+        }),
+      ],
+      2026,
+      6,
+      "09:00",
+    );
+
+    const days = grouped.get("none")?.guards.get("Алфутов Алексей")?.days;
+    expect(days?.get(17)).toMatchObject({ hours: 1, kind: "Regular" });
+    expect(days?.get(18)).toMatchObject({ hours: 24, kind: "Regular" });
+    expect(days?.get(18)?.hours).not.toBe(25);
   });
 });
 
