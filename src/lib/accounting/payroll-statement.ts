@@ -1,8 +1,9 @@
 import type { PayrollHalf } from "../payroll/advance-period";
-import { shiftBelongsToHalf } from "../payroll/advance-period";
+import { dateIsoBelongsToHalf } from "../payroll/advance-period";
 import { getDaysInMonth } from "../format/display-date";
 import type { GuardAdvanceTotals } from "../operations/advances-repository";
 import type { TimesheetRow } from "../scheduling/timesheet";
+import { DEFAULT_SHIFT_TIMEZONE, localDateKeyInTimeZone } from "../scheduling/local-date-key";
 
 export type PayrollStatementRow = {
   guardName: string;
@@ -68,6 +69,7 @@ export function buildPayrollStatementSheets(input: {
   guardIdByName: Map<string, string>;
   advancesByGuardId: Map<string, GuardAdvanceTotals>;
   objectIdFilter?: string;
+  resolveOperationalDateIso?: (row: TimesheetRow) => string;
 }): PayrollStatementSheet[] {
   const objects =
     input.objectIdFilter != null && input.objectIdFilter !== ""
@@ -75,6 +77,7 @@ export function buildPayrollStatementSheets(input: {
       : input.objects;
 
   const sheets: PayrollStatementSheet[] = [];
+  const month = { year: input.year, monthIndex0: input.monthIndex0 };
 
   for (const object of objects) {
     const byGuard = new Map<
@@ -86,10 +89,10 @@ export function buildPayrollStatementSheets(input: {
       const sameObject =
         row.objectId != null ? row.objectId === object.id : row.objectName === object.name;
       if (!sameObject) continue;
-      if (!shiftBelongsToHalf(row.startsAt, input.half, {
-        year: input.year,
-        monthIndex0: input.monthIndex0,
-      })) {
+      const dateIso =
+        input.resolveOperationalDateIso?.(row) ??
+        localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE);
+      if (!dateIsoBelongsToHalf(dateIso, input.half, month)) {
         continue;
       }
 

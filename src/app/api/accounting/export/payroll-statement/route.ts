@@ -6,6 +6,7 @@ import {
 } from "../../../../../lib/accounting/timesheet-export-server";
 import { buildPayrollStatementSheets } from "../../../../../lib/accounting/payroll-statement";
 import { buildPayrollStatementWorkbook } from "../../../../../lib/accounting/payroll-statement-xlsx";
+import { padTimesheetQueryRange } from "../../../../../lib/accounting/timesheet-operational-day";
 import { sumAdvancesByGuardForMonth } from "../../../../../lib/operations/advances-repository";
 import { getTimesheetSnapshot } from "../../../../../lib/operations/scheduler-repository";
 import type { PayrollHalf } from "../../../../../lib/payroll/advance-period";
@@ -28,14 +29,19 @@ export async function GET(request: Request) {
     return new Response("Выберите месяц в фильтре табеля", { status: 400 });
   }
 
-  const [rows, snapshot, advancesByGuardId] = await Promise.all([
+  const snapshotRange = padTimesheetQueryRange(parsed.rangeStart, parsed.rangeEnd);
+  const [{ rows, resolveOperationalDateIso }, snapshot, advancesByGuardId] = await Promise.all([
     getTimesheetRowsForExport(parsed),
-    getTimesheetSnapshot(parsed.rangeStart, parsed.rangeEnd, {
+    getTimesheetSnapshot(snapshotRange.start, snapshotRange.end, {
       guardId: parsed.guardId || undefined,
       objectId: parsed.objectId || undefined,
     }),
     sumAdvancesByGuardForMonth(parsed.month.year, parsed.month.monthIndex),
   ]);
+
+  if (!resolveOperationalDateIso) {
+    return new Response("Не удалось разрешить операционные сутки", { status: 500 });
+  }
 
   const guardIdByName = new Map(snapshot.guards.map((g) => [g.name, g.id] as const));
   const sheets = buildPayrollStatementSheets({
@@ -47,6 +53,7 @@ export async function GET(request: Request) {
     guardIdByName,
     advancesByGuardId,
     objectIdFilter: parsed.objectId || undefined,
+    resolveOperationalDateIso,
   });
 
   if (sheets.length === 0) {

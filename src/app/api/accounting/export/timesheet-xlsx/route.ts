@@ -6,13 +6,16 @@ import {
   buildTimesheetObjectWorkbook,
   type TimesheetObjectWorkbookSheet,
 } from "../../../../../lib/accounting/timesheet-object-xlsx";
-import { listGuardPersonalCardAssignedOnByIds } from "../../../../../lib/operations/guards-repository";
 import {
-  listMonthlyOperationalDayStarts,
-} from "../../../../../lib/operations/object-monthly-settings-repository";
+  loadTimesheetOperationalDayContext,
+  monthKeysForPayrollMonth,
+  padTimesheetQueryRange,
+} from "../../../../../lib/accounting/timesheet-operational-day";
+import { listGuardPersonalCardAssignedOnByIds } from "../../../../../lib/operations/guards-repository";
 import { listObjectTimesheetApprovalsByIds } from "../../../../../lib/operations/objects-repository";
 import { getTimesheetSnapshot } from "../../../../../lib/operations/scheduler-repository";
 import { operationalDayMonthKey } from "../../../../../lib/scheduling/operational-day-anchors";
+import { normalizeOperationalAnchorTime } from "../../../../../lib/scheduling/operational-day-timeline";
 
 function parseObjectIdsParam(url: URL): Set<string> | null {
   const raw = url.searchParams.get("objectIds")?.trim() ?? "";
@@ -40,9 +43,10 @@ export async function GET(request: Request) {
 
   const selectedObjectIds = parseObjectIdsParam(url);
 
-  const [rows, snapshot] = await Promise.all([
+  const snapshotRange = padTimesheetQueryRange(parsed.rangeStart, parsed.rangeEnd);
+  const [{ rows }, snapshot] = await Promise.all([
     getTimesheetRowsForExport(parsed),
-    getTimesheetSnapshot(parsed.rangeStart, parsed.rangeEnd, {
+    getTimesheetSnapshot(snapshotRange.start, snapshotRange.end, {
       guardId: parsed.guardId || undefined,
     }),
   ]);
@@ -75,21 +79,23 @@ export async function GET(request: Request) {
   );
   const approvalsByObjectId = await listObjectTimesheetApprovalsByIds(objects.map((o) => o.id));
 
-  // Как в графике объекта: месячный якорь суток перекрывает default из security_objects.
   const monthKey = `${parsed.month.year}-${String(parsed.month.monthIndex + 1).padStart(2, "0")}`;
-  const monthlyAnchors = await listMonthlyOperationalDayStarts(
-    objects.map((o) => o.id),
-    [monthKey],
+  const { objectDefaultById, monthlyByKey } = await loadTimesheetOperationalDayContext(
+    objects,
+    monthKeysForPayrollMonth(parsed.month.year, parsed.month.monthIndex),
   );
 
   const sheets: TimesheetObjectWorkbookSheet[] = objects
     .map((o) => {
       const approvalRow = approvalsByObjectId.get(o.id);
-      const monthlyAnchor = monthlyAnchors.get(operationalDayMonthKey(o.id, monthKey));
+      const monthlyAnchor = monthlyByKey.get(operationalDayMonthKey(o.id, monthKey));
       return {
         objectName: o.name,
         objectAddress: o.address ?? "",
-        operationalDayStartTime: monthlyAnchor ?? o.operationalDayStartTime,
+        operationalDayStartTime:
+          monthlyAnchor ??
+          objectDefaultById.get(o.id) ??
+          normalizeOperationalAnchorTime(o.operationalDayStartTime),
         rows: rowsFiltered.filter((r) =>
           r.objectId ? r.objectId === o.id : r.objectName === o.name,
         ),
@@ -121,4 +127,3 @@ export async function GET(request: Request) {
     },
   });
 }
-

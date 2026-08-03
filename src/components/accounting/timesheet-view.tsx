@@ -12,7 +12,7 @@ import { PayrollTuExportButton } from "./payroll-tu-export-button";
 import { TimesheetXlsxExportButton } from "./timesheet-xlsx-export-button";
 import type { GuardPayrollHalfSummary, ObjectPayrollHalfSummary } from "../../lib/payroll/timesheet-payroll-summary";
 import { halfPeriodShortRu } from "../../lib/payroll/advance-period";
-import { buildGuardPeriodBreakdownByName } from "../../lib/payroll/timesheet-guard-period-summary";
+import type { GuardPeriodBreakdown } from "../../lib/payroll/timesheet-guard-period-summary";
 import type { GuardPayrollHalfBreakdown } from "../../lib/payroll/timesheet-guard-profile-segments";
 
 type TimesheetViewProps = {
@@ -32,6 +32,8 @@ type TimesheetViewProps = {
   payrollHalfMonth?: { year: number; monthIndex0: number };
   objectPayrollHalves?: ObjectPayrollHalfSummary[];
   guardPayrollHalfBreakdownByName?: Map<string, GuardPayrollHalfBreakdown>;
+  /** Уже по операционным суткам (считается на сервере). */
+  guardPeriodByName?: Map<string, GuardPeriodBreakdown>;
 };
 
 export function TimesheetView({
@@ -44,6 +46,7 @@ export function TimesheetView({
   payrollHalfMonth,
   objectPayrollHalves,
   guardPayrollHalfBreakdownByName,
+  guardPeriodByName: guardPeriodByNameProp,
 }: TimesheetViewProps) {
   const showInvoiceExport = hasPermission(currentRole, "invoice:export");
   const showPayrollExport = hasPermission(currentRole, "payroll:export");
@@ -81,10 +84,7 @@ export function TimesheetView({
   const objectFilterActive = Boolean(filters.objectId?.trim());
   const guardObjectSummary = buildGuardObjectSummary(rows);
   const guardObjectGroups = groupGuardObjects(guardObjectSummary);
-  const guardPeriodByName =
-    objectFilterActive && payrollHalfMonth
-      ? buildGuardPeriodBreakdownByName(rows, payrollHalfMonth)
-      : undefined;
+  const guardPeriodByName = objectFilterActive ? guardPeriodByNameProp : undefined;
 
   const detailShiftColSpan = 12 + (showPayroll ? 1 : 0) + (showFinance ? 1 : 0);
 

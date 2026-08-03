@@ -2,6 +2,7 @@
  * CSV-экспорт смен видимой недели графика.
  * URL: /api/scheduler/export/csv?week=YYYY-MM-DD
  * Формат: одна строка на смену; объекты, охранники, время и тип уже расшифрованы.
+ * Дата — операционные сутки (как колонка графика), не календарный старт.
  *
  * Используется кнопкой «Экспорт CSV» в фильтре графика.
  */
@@ -9,17 +10,22 @@ import { assertPermission } from "../../../../../lib/auth/rbac";
 import { requireSession } from "../../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../../lib/operations/scheduler-repository";
 import {
+  listMonthlyOperationalDayStarts,
+  monthKeysFromDateIsos,
+} from "../../../../../lib/operations/object-monthly-settings-repository";
+import {
   formatCompactTimeRangeLocal,
   getKhabarovskComponents,
   toDateIsoKhabarovsk,
 } from "../../../../../lib/format/display-date";
 import { shiftKindLabels } from "../../../../../lib/operations/status-labels";
 import type { ShiftKind } from "../../../../../lib/scheduling/types";
+import { resolveTimesheetRowOperationalDateIso } from "../../../../../lib/accounting/timesheet-operational-day";
+import { normalizeOperationalAnchorTime } from "../../../../../lib/scheduling/operational-day-timeline";
 
 function csvEscape(value: string | number | null | undefined): string {
   if (value == null) return "";
   const s = String(value);
-  // CSV-правило: кавычки, запятые и переносы строк требуют обрамления и экранирования двойных кавычек.
   if (/[",\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
@@ -43,7 +49,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const weekStart = parseWeekStartKhabarovsk(url.searchParams.get("week"));
-  const weekEnd = new Date(weekStart.getTime() + 14 * 24 * 3_600_000);
+  const weekEnd = new Date(weekStart.getTime() + 14 * 24 * 60 * 60_000);
   const objectIdFilter = url.searchParams.get("objectId");
 
   const snapshot = await getSchedulerSnapshot(weekStart);
@@ -61,6 +67,15 @@ export async function GET(request: Request) {
       return a.startsAt.getTime() - b.startsAt.getTime();
     });
 
+  const objectDefaults = new Map(
+    snapshot.objects.map((o) => [o.id, normalizeOperationalAnchorTime(o.operationalDayStartTime)] as const),
+  );
+  const dateIsos = filteredShifts.map((s) => toDateIsoKhabarovsk(s.startsAt));
+  const monthlyByKey = await listMonthlyOperationalDayStarts(
+    [...objectById.keys()],
+    monthKeysFromDateIsos(dateIsos),
+  );
+
   const headers = [
     "Дата",
     "Объект",
@@ -73,7 +88,15 @@ export async function GET(request: Request) {
   ];
   const lines: string[] = [headers.join(";")];
   for (const shift of filteredShifts) {
-    const dateIso = toDateIsoKhabarovsk(shift.startsAt);
+    const dateIso = resolveTimesheetRowOperationalDateIso(
+      {
+        startsAt: shift.startsAt,
+        endsAt: shift.endsAt,
+        objectId: shift.objectId,
+      },
+      objectDefaults,
+      monthlyByKey,
+    );
     const obj = objectById.get(shift.objectId);
     const guard = guardById.get(shift.guardId);
     const interval = formatCompactTimeRangeLocal(shift.startsAt, shift.endsAt);
@@ -93,7 +116,6 @@ export async function GET(request: Request) {
     );
   }
 
-  // BOM для Excel, чтобы кириллица не ломалась.
   const csv = "\uFEFF" + lines.join("\r\n") + "\r\n";
   const filename = `scheduler-${toDateIsoKhabarovsk(weekStart)}.csv`;
 

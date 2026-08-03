@@ -1,8 +1,8 @@
 import {
+  dateIsoBelongsToHalf,
+  dateIsoInPayrollMonth,
   halfPeriodShortRu,
   periodMonthIso,
-  shiftBelongsToHalf,
-  shiftStartsInPayrollMonth,
   type PayrollHalf,
   type PayrollMonthContext,
 } from "./advance-period";
@@ -92,8 +92,14 @@ function halfDateRange(month: PayrollMonthContext, half: PayrollHalf): { fromIso
   return { fromIso: `${monthPrefix}-16`, toIso: monthEndIso(month) };
 }
 
-function shiftDateIso(row: TimesheetRow): string {
-  return localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE);
+function shiftDateIso(
+  row: TimesheetRow,
+  resolveOperationalDateIso?: (row: TimesheetRow) => string,
+): string {
+  return (
+    resolveOperationalDateIso?.(row) ??
+    localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE)
+  );
 }
 
 function profileLabelFromResolved(resolved: {
@@ -162,14 +168,14 @@ function buildHalfSegments(
   baseGuard: Guard,
   profileResolver: GuardProfileResolver,
   periods: readonly GuardProfilePeriodRecord[],
+  resolveOperationalDateIso?: (row: TimesheetRow) => string,
 ): GuardPayrollHalfWithSegments {
   const halfLabel = halfPeriodShortRu(half, month.year, month.monthIndex0);
   const { fromIso: halfFrom, toIso: halfTo } = halfDateRange(month, half);
-  const halfRows = guardRows.filter(
-    (row) =>
-      shiftStartsInPayrollMonth(row.startsAt, month) &&
-      shiftBelongsToHalf(row.startsAt, half, month),
-  );
+  const halfRows = guardRows.filter((row) => {
+    const dateIso = shiftDateIso(row, resolveOperationalDateIso);
+    return dateIsoInPayrollMonth(dateIso, month) && dateIsoBelongsToHalf(dateIso, half, month);
+  });
 
   const result = emptyHalf(halfLabel);
   if (halfRows.length === 0) return result;
@@ -203,7 +209,7 @@ function buildHalfSegments(
   });
 
   for (const row of halfRows) {
-    const dateIso = shiftDateIso(row);
+    const dateIso = shiftDateIso(row, resolveOperationalDateIso);
     const segmentIndex = segmentRanges.findIndex(
       (range) => dateIso >= range.fromIso && dateIso <= range.toIso,
     );
@@ -222,10 +228,27 @@ export function buildGuardPayrollHalfBreakdown(
   baseGuard: Guard,
   profileResolver: GuardProfileResolver,
   periods: readonly GuardProfilePeriodRecord[],
+  resolveOperationalDateIso?: (row: TimesheetRow) => string,
 ): GuardPayrollHalfBreakdown {
   return {
-    first: buildHalfSegments(guardRows, month, "first", baseGuard, profileResolver, periods),
-    second: buildHalfSegments(guardRows, month, "second", baseGuard, profileResolver, periods),
+    first: buildHalfSegments(
+      guardRows,
+      month,
+      "first",
+      baseGuard,
+      profileResolver,
+      periods,
+      resolveOperationalDateIso,
+    ),
+    second: buildHalfSegments(
+      guardRows,
+      month,
+      "second",
+      baseGuard,
+      profileResolver,
+      periods,
+      resolveOperationalDateIso,
+    ),
   };
 }
 
@@ -236,6 +259,7 @@ export function buildGuardPayrollHalfBreakdownByName(input: {
   guardsById: Map<string, Guard>;
   profileResolver: GuardProfileResolver;
   periods: readonly GuardProfilePeriodRecord[];
+  resolveOperationalDateIso?: (row: TimesheetRow) => string;
 }): Map<string, GuardPayrollHalfBreakdown> {
   const rowsByGuard = new Map<string, TimesheetRow[]>();
   for (const row of input.rows) {
@@ -257,6 +281,7 @@ export function buildGuardPayrollHalfBreakdownByName(input: {
         baseGuard,
         input.profileResolver,
         input.periods,
+        input.resolveOperationalDateIso,
       ),
     );
   }

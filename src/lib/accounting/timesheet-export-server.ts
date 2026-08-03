@@ -1,7 +1,13 @@
 import { listTimesheetEntries } from "../accounting/timesheet-entries-repository";
-import type { TimesheetRow } from "../scheduling/timesheet";
+import {
+  loadTimesheetOperationalDayContext,
+  monthKeysForPayrollMonth,
+  padTimesheetQueryRange,
+} from "../accounting/timesheet-operational-day";
 import { getKhabarovskComponents } from "../format/display-date";
-import { monthEndKhabarovsk, monthStartKhabarovsk } from "../payroll/advance-period";
+import { listObjectSwitchTabs } from "../operations/objects-repository";
+import { dateIsoInPayrollMonth, monthEndKhabarovsk, monthStartKhabarovsk } from "../payroll/advance-period";
+import type { TimesheetRow } from "../scheduling/timesheet";
 
 export type ParsedTimesheetExportUrl = {
   guardId: string;
@@ -34,16 +40,41 @@ export function parseTimesheetExportUrl(url: URL): ParsedTimesheetExportUrl {
   return { guardId, objectId, month, week, q, rangeStart, rangeEnd };
 }
 
-export async function getTimesheetRowsForExport(parsed: ParsedTimesheetExportUrl): Promise<TimesheetRow[]> {
-  const { guardId, objectId, q, rangeStart, rangeEnd } = parsed;
-  const rowsRaw = await listTimesheetEntries(rangeStart, rangeEnd, {
+export async function getTimesheetRowsForExport(parsed: ParsedTimesheetExportUrl): Promise<{
+  rows: TimesheetRow[];
+  resolveOperationalDateIso: ((row: TimesheetRow) => string) | undefined;
+}> {
+  const { guardId, objectId, q, rangeStart, rangeEnd, month, week } = parsed;
+  const queryRange =
+    month && !week ? padTimesheetQueryRange(rangeStart, rangeEnd) : { start: rangeStart, end: rangeEnd };
+
+  const rowsRaw = await listTimesheetEntries(queryRange.start, queryRange.end, {
     guardId: guardId || undefined,
     objectId: objectId || undefined,
   });
 
-  return q
-    ? rowsRaw.filter((row) => `${row.guardName} ${row.objectName}`.toLowerCase().includes(q))
-    : rowsRaw;
+  let resolveOperationalDateIso: ((row: TimesheetRow) => string) | undefined;
+  let rows = rowsRaw;
+
+  if (month) {
+    const objects = await listObjectSwitchTabs();
+    const scoped = objectId ? objects.filter((o) => o.id === objectId) : objects;
+    const opDay = await loadTimesheetOperationalDayContext(
+      scoped,
+      monthKeysForPayrollMonth(month.year, month.monthIndex),
+    );
+    resolveOperationalDateIso = opDay.resolveRowDateIso;
+    if (!week) {
+      const monthCtx = { year: month.year, monthIndex0: month.monthIndex };
+      rows = rows.filter((row) => dateIsoInPayrollMonth(opDay.resolveRowDateIso(row), monthCtx));
+    }
+  }
+
+  if (q) {
+    rows = rows.filter((row) => `${row.guardName} ${row.objectName}`.toLowerCase().includes(q));
+  }
+
+  return { rows, resolveOperationalDateIso };
 }
 
 function normalizeMonth(value: string): { year: number; monthIndex: number } | undefined {

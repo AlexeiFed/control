@@ -1,6 +1,10 @@
-import { shiftBelongsToHalf, type PayrollMonthContext } from "../payroll/advance-period";
+import {
+  dateIsoBelongsToHalf,
+  type PayrollMonthContext,
+} from "../payroll/advance-period";
 import type { GuardAdvanceTotals } from "../operations/advances-repository";
 import type { TimesheetRow } from "../scheduling/timesheet";
+import { DEFAULT_SHIFT_TIMEZONE, localDateKeyInTimeZone } from "../scheduling/local-date-key";
 
 export type GuardPayrollHalfSummary = {
   guardId: string;
@@ -14,21 +18,33 @@ export type GuardPayrollHalfSummary = {
   salaryCents: number;
 };
 
+function rowPayrollDateIso(
+  row: TimesheetRow,
+  resolveOperationalDateIso?: (row: TimesheetRow) => string,
+): string {
+  return (
+    resolveOperationalDateIso?.(row) ??
+    localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE)
+  );
+}
+
 export function buildGuardPayrollHalfSummaries(input: {
   rows: TimesheetRow[];
   guardIdByName: Map<string, string>;
   advancesByGuardId: Map<string, GuardAdvanceTotals>;
   month: PayrollMonthContext;
+  resolveOperationalDateIso?: (row: TimesheetRow) => string;
 }): Map<string, GuardPayrollHalfSummary> {
   const earned = new Map<string, { first: number; second: number; name: string }>();
 
   for (const row of input.rows) {
     const guardId = input.guardIdByName.get(row.guardName);
     if (!guardId) continue;
+    const dateIso = rowPayrollDateIso(row, input.resolveOperationalDateIso);
     const current = earned.get(guardId) ?? { first: 0, second: 0, name: row.guardName };
-    if (shiftBelongsToHalf(row.startsAt, "first", input.month)) {
+    if (dateIsoBelongsToHalf(dateIso, "first", input.month)) {
       current.first += row.guardAmountCents;
-    } else if (shiftBelongsToHalf(row.startsAt, "second", input.month)) {
+    } else if (dateIsoBelongsToHalf(dateIso, "second", input.month)) {
       current.second += row.guardAmountCents;
     }
     earned.set(guardId, current);
@@ -80,6 +96,7 @@ export type ObjectPayrollHalfSummary = {
 export function buildObjectPayrollHalfSummaries(
   rows: TimesheetRow[],
   month: PayrollMonthContext,
+  resolveOperationalDateIso?: (row: TimesheetRow) => string,
 ): ObjectPayrollHalfSummary[] {
   const earned = new Map<string, { objectId?: string; objectName: string; first: number; second: number }>();
 
@@ -93,9 +110,10 @@ export function buildObjectPayrollHalfSummaries(
     };
     // Актуальное имя побеждает (после rename снапшоты могут отличаться).
     if (row.objectName) current.objectName = row.objectName;
-    if (shiftBelongsToHalf(row.startsAt, "first", month)) {
+    const dateIso = rowPayrollDateIso(row, resolveOperationalDateIso);
+    if (dateIsoBelongsToHalf(dateIso, "first", month)) {
       current.first += row.guardAmountCents;
-    } else if (shiftBelongsToHalf(row.startsAt, "second", month)) {
+    } else if (dateIsoBelongsToHalf(dateIso, "second", month)) {
       current.second += row.guardAmountCents;
     }
     earned.set(key, current);

@@ -5,6 +5,11 @@ import {
   isUndefinedColumnOrTableError,
 } from "../db/column-compat";
 import { toDateIsoKhabarovsk } from "../format/display-date";
+import {
+  monthKeysAroundDateIso,
+  resolveTimesheetRowOperationalDateIso,
+} from "./timesheet-operational-day";
+import { listMonthlyOperationalDayStarts } from "../operations/object-monthly-settings-repository";
 import { listProfilePeriodsForGuards } from "../operations/guard-profile-periods-repository";
 import { GuardProfileResolver } from "../guards/profile-periods";
 import { listObjectRateRules } from "../operations/object-rate-rules-repository";
@@ -17,8 +22,9 @@ import {
 } from "../scheduling/timesheet";
 import type { Guard, IncidentCategory, SecurityObject, Shift } from "../scheduling/types";
 import { normalizeShiftKindFromDb } from "../scheduling/types";
+import { normalizeOperationalAnchorTime } from "../scheduling/operational-day-timeline";
 
-const TIMESHEET_ENTRY_COMPUTATION_VERSION = 4;
+const TIMESHEET_ENTRY_COMPUTATION_VERSION = 5;
 
 type ShiftSyncRow = {
   id: string;
@@ -49,6 +55,7 @@ type ShiftSyncRow = {
   is_trainee: boolean;
   trainee_until: string | null;
   object_name: string;
+  operational_day_start_time: string | null;
 };
 
 type LogLineRow = {
@@ -94,7 +101,7 @@ function mapShiftSyncRow(row: ShiftSyncRow): { shift: Shift; guard: Guard; objec
     name: row.object_name,
     address: "",
     status: "Active",
-    operationalDayStartTime: "08:00",
+    operationalDayStartTime: normalizeOperationalAnchorTime(row.operational_day_start_time),
   };
   return { shift, guard, object };
 }
@@ -130,7 +137,8 @@ async function loadShiftForTimesheetSync(shiftId: string): Promise<ShiftSyncRow 
         g.employment_type,
         g.is_trainee,
         g.trainee_until::text,
-        o.name AS object_name
+        o.name AS object_name,
+        o.operational_day_start_time::text AS operational_day_start_time
       FROM shifts s
       JOIN guards g ON g.id = s.guard_id
       JOIN security_objects o ON o.id = s.object_id
@@ -202,8 +210,25 @@ async function mapPool<T>(items: readonly T[], concurrency: number, fn: (item: T
   await Promise.all(workers);
 }
 
-async function upsertTimesheetEntry(shift: Shift, row: TimesheetRow): Promise<void> {
-  const workDate = toDateIsoKhabarovsk(shift.startsAt);
+async function upsertTimesheetEntry(
+  shift: Shift,
+  row: TimesheetRow,
+  objectDefaultAnchor: string,
+): Promise<void> {
+  const calIso = toDateIsoKhabarovsk(shift.startsAt);
+  const monthlyByKey = await listMonthlyOperationalDayStarts(
+    [shift.objectId],
+    monthKeysAroundDateIso(calIso),
+  );
+  const workDate = resolveTimesheetRowOperationalDateIso(
+    {
+      startsAt: shift.startsAt,
+      endsAt: shift.endsAt,
+      objectId: shift.objectId,
+    },
+    new Map([[shift.objectId, normalizeOperationalAnchorTime(objectDefaultAnchor)]]),
+    monthlyByKey,
+  );
   const attendanceIncident: AttendanceIncidentLine | null = row.attendanceIncident;
   await query(
     `
@@ -348,7 +373,7 @@ export async function syncTimesheetEntryFromShift(shiftId: string): Promise<void
     return;
   }
 
-  await upsertTimesheetEntry(shift, row);
+  await upsertTimesheetEntry(shift, row, object.operationalDayStartTime);
 }
 
 export async function syncTimesheetEntryFromShiftSafe(shiftId: string): Promise<void> {
@@ -500,7 +525,8 @@ export async function backfillTimesheetEntriesForObjectFromDate(
         g.employment_type,
         g.is_trainee,
         g.trainee_until::text,
-        o.name AS object_name
+        o.name AS object_name,
+        o.operational_day_start_time::text AS operational_day_start_time
       FROM shifts s
       JOIN guards g ON g.id = s.guard_id
       JOIN security_objects o ON o.id = s.object_id
@@ -557,7 +583,7 @@ export async function backfillTimesheetEntriesForObjectFromDate(
       await query(`DELETE FROM timesheet_shift_entries WHERE shift_id = $1::uuid`, [shift.id]);
       return;
     }
-    await upsertTimesheetEntry(shift, row);
+    await upsertTimesheetEntry(shift, row, object.operationalDayStartTime);
   });
 
   return loadedRows.length;

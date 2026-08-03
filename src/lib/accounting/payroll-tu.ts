@@ -1,12 +1,12 @@
 import { formatDisplayDateFromIso, getDaysInMonth } from "../format/display-date";
 import {
-  dayOfMonthInZone,
-  shiftBelongsToHalf,
-  shiftStartsInPayrollMonth,
+  dateIsoBelongsToHalf,
+  dateIsoInPayrollMonth,
   type PayrollMonthContext,
 } from "../payroll/advance-period";
 import type { TimesheetRow } from "../scheduling/timesheet";
 import type { Guard, GuardEmploymentType, GuardPosition } from "../scheduling/types";
+import { DEFAULT_SHIFT_TIMEZONE, localDateKeyInTimeZone } from "../scheduling/local-date-key";
 
 export type PayrollTuDayCell = {
   hours: number;
@@ -72,9 +72,13 @@ export function shiftIncludedInPayrollTu(
   startsAt: string,
   employedOn: string | null | undefined,
   month: PayrollMonthContext,
+  operationalDateIso?: string,
 ): boolean {
-  if (!shiftStartsInPayrollMonth(startsAt, month)) return false;
-  return dayIncludedInPayrollTu(dayOfMonthInZone(startsAt), employedOn, month.year, month.monthIndex0);
+  const dateIso =
+    operationalDateIso ?? localDateKeyInTimeZone(new Date(startsAt), DEFAULT_SHIFT_TIMEZONE);
+  if (!dateIsoInPayrollMonth(dateIso, month)) return false;
+  const day = Number(dateIso.slice(8, 10));
+  return dayIncludedInPayrollTu(day, employedOn, month.year, month.monthIndex0);
 }
 
 /** Суммы 1–15 и 16–30 из guard_amount_cents табеля — как в сводке табеля, без усреднений. */
@@ -84,6 +88,7 @@ export function buildPayrollTuSalaryByGuardId(input: {
   employedOnByGuardId: Map<string, string | null | undefined>;
   month: PayrollMonthContext;
   includedGuardIds: ReadonlySet<string>;
+  resolveOperationalDateIso?: (row: TimesheetRow) => string;
 }): Map<string, { firstHalfRub: number; secondHalfRub: number }> {
   const centsByGuard = new Map<string, { first: number; second: number }>();
 
@@ -91,13 +96,16 @@ export function buildPayrollTuSalaryByGuardId(input: {
     const guardId = input.guardIdByName.get(row.guardName);
     if (!guardId || !input.includedGuardIds.has(guardId)) continue;
 
+    const dateIso =
+      input.resolveOperationalDateIso?.(row) ??
+      localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE);
     const employedOn = input.employedOnByGuardId.get(guardId);
-    if (!shiftIncludedInPayrollTu(row.startsAt, employedOn, input.month)) continue;
+    if (!shiftIncludedInPayrollTu(row.startsAt, employedOn, input.month, dateIso)) continue;
 
     const bucket = centsByGuard.get(guardId) ?? { first: 0, second: 0 };
-    if (shiftBelongsToHalf(row.startsAt, "first", input.month)) {
+    if (dateIsoBelongsToHalf(dateIso, "first", input.month)) {
       bucket.first += row.guardAmountCents;
-    } else if (shiftBelongsToHalf(row.startsAt, "second", input.month)) {
+    } else if (dateIsoBelongsToHalf(dateIso, "second", input.month)) {
       bucket.second += row.guardAmountCents;
     }
     centsByGuard.set(guardId, bucket);

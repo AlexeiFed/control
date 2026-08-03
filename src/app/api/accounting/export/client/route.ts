@@ -9,8 +9,8 @@ export async function GET(request: Request) {
   assertPermission(session.user.role, "holidays:read");
 
   const url = new URL(request.url);
-  const rows = await getTimesheetRowsForExport(parseTimesheetExportUrl(url));
-  const csv = exportClientInvoiceCsv(rows);
+  const { rows, resolveOperationalDateIso } = await getTimesheetRowsForExport(parseTimesheetExportUrl(url));
+  const csv = exportClientInvoiceCsv(rows, resolveOperationalDateIso);
 
   return new Response(csv, {
     headers: {

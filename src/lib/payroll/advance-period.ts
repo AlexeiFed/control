@@ -36,6 +36,23 @@ export function dayOfMonthInZone(isoOrDate: string | Date, timeZone = DEFAULT_SH
   return Number.isFinite(day) ? day : 1;
 }
 
+/** Принадлежность по дате операционных суток `YYYY-MM-DD` (как колонка графика/табеля). */
+export function dateIsoInPayrollMonth(dateIso: string, month: PayrollMonthContext): boolean {
+  const expectedPrefix = periodMonthIso(month.year, month.monthIndex0).slice(0, 7);
+  return dateIso.slice(0, 7) === expectedPrefix;
+}
+
+export function dateIsoBelongsToHalf(
+  dateIso: string,
+  half: PayrollHalf,
+  month?: PayrollMonthContext,
+): boolean {
+  if (month && !dateIsoInPayrollMonth(dateIso, month)) return false;
+  const day = Number(dateIso.slice(8, 10));
+  if (!Number.isFinite(day)) return false;
+  return half === "first" ? day >= 1 && day <= 15 : day >= 16;
+}
+
 export function shiftStartsInPayrollMonth(
   shiftStartsAt: string | Date,
   month: PayrollMonthContext,
@@ -45,8 +62,7 @@ export function shiftStartsInPayrollMonth(
     typeof shiftStartsAt === "string" ? new Date(shiftStartsAt) : shiftStartsAt,
     timeZone,
   );
-  const expectedPrefix = periodMonthIso(month.year, month.monthIndex0).slice(0, 7);
-  return key.startsWith(expectedPrefix);
+  return dateIsoInPayrollMonth(key, month);
 }
 
 export function shiftBelongsToHalf(
@@ -55,11 +71,11 @@ export function shiftBelongsToHalf(
   month?: PayrollMonthContext,
   timeZone = DEFAULT_SHIFT_TIMEZONE,
 ): boolean {
-  if (month && !shiftStartsInPayrollMonth(shiftStartsAt, month, timeZone)) {
-    return false;
-  }
-  const day = dayOfMonthInZone(shiftStartsAt, timeZone);
-  return half === "first" ? day >= 1 && day <= 15 : day >= 16;
+  const key = localDateKeyInTimeZone(
+    typeof shiftStartsAt === "string" ? new Date(shiftStartsAt) : shiftStartsAt,
+    timeZone,
+  );
+  return dateIsoBelongsToHalf(key, half, month);
 }
 
 export function halfPeriodLabelRu(half: PayrollHalf, year: number, monthIndex0: number): string {

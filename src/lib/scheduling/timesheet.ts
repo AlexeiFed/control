@@ -266,11 +266,17 @@ function splitHoursByShiftKind(
   return { regularHours: 0, reinforcementHours: 0, rapidResponseHours: totalHours };
 }
 
+export type TimesheetCsvDateResolver = (row: TimesheetRow) => string;
+
 /** Счёт клиенту: без сумм зарплаты сотрудника. */
-export function exportClientInvoiceCsv(rows: TimesheetRow[]): string {
+export function exportClientInvoiceCsv(
+  rows: TimesheetRow[],
+  resolveOperationalDateIso?: TimesheetCsvDateResolver,
+): string {
   const header = [
     "охранник",
     "объект",
+    "дата опер. суток",
     "начало смены",
     "конец смены",
     "всего часов",
@@ -288,6 +294,7 @@ export function exportClientInvoiceCsv(rows: TimesheetRow[]): string {
     [
       row.guardName,
       row.objectName,
+      resolveOperationalDateIso?.(row) ?? "",
       row.startsAt,
       row.endsAt,
       String(row.totalHours),
@@ -308,10 +315,14 @@ export function exportClientInvoiceCsv(rows: TimesheetRow[]): string {
 }
 
 /** Зарплата сотрудникам: без клиентских сумм и маржи. */
-export function exportPayrollCsv(rows: TimesheetRow[]): string {
+export function exportPayrollCsv(
+  rows: TimesheetRow[],
+  resolveOperationalDateIso?: TimesheetCsvDateResolver,
+): string {
   const header = [
     "охранник",
     "объект",
+    "дата опер. суток",
     "начало смены",
     "конец смены",
     "всего часов",
@@ -329,6 +340,7 @@ export function exportPayrollCsv(rows: TimesheetRow[]): string {
     [
       row.guardName,
       row.objectName,
+      resolveOperationalDateIso?.(row) ?? "",
       row.startsAt,
       row.endsAt,
       String(row.totalHours),

@@ -5,20 +5,31 @@ import {
   listTimesheetEntries,
   listTimesheetFilterOptions,
 } from "../../../lib/accounting/timesheet-entries-repository";
+import {
+  loadTimesheetOperationalDayContext,
+  monthKeysForPayrollMonth,
+  padTimesheetQueryRange,
+} from "../../../lib/accounting/timesheet-operational-day";
 import { sumAdvancesByGuardForMonth } from "../../../lib/operations/advances-repository";
 import {
   buildGuardPayrollHalfSummaries,
   buildObjectPayrollHalfSummaries,
   payrollHalfSummaryByGuardName,
 } from "../../../lib/payroll/timesheet-payroll-summary";
-import { monthEndKhabarovsk, monthStartKhabarovsk } from "../../../lib/payroll/advance-period";
+import {
+  dateIsoInPayrollMonth,
+  monthEndKhabarovsk,
+  monthStartKhabarovsk,
+} from "../../../lib/payroll/advance-period";
 import { getKhabarovskComponents } from "../../../lib/format/display-date";
 import { buildGuardPayrollHalfBreakdownByName } from "../../../lib/payroll/timesheet-guard-profile-segments";
+import { buildGuardPeriodBreakdownByName } from "../../../lib/payroll/timesheet-guard-period-summary";
 import {
   buildGuardProfileResolver,
   listProfilePeriodsForGuards,
 } from "../../../lib/operations/guard-profile-periods-repository";
 import { listGuardsByIds } from "../../../lib/operations/guards-repository";
+import { getTimesheetSnapshot } from "../../../lib/operations/scheduler-repository";
 
 type TimesheetPageProps = {
   searchParams?: Promise<{
@@ -54,10 +65,31 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
       ? monthEndKhabarovsk(month.year, month.monthIndex)
       : new Date();
 
-  const [rowsRaw, filterOptions] = await Promise.all([
-    listTimesheetEntries(rangeStart, rangeEnd, { guardId, objectId }),
+  const queryRange =
+    month && !week ? padTimesheetQueryRange(rangeStart, rangeEnd) : { start: rangeStart, end: rangeEnd };
+
+  const [rowsRawPadded, filterOptions, snapshot] = await Promise.all([
+    listTimesheetEntries(queryRange.start, queryRange.end, { guardId, objectId }),
     listTimesheetFilterOptions(),
+    month
+      ? getTimesheetSnapshot(queryRange.start, queryRange.end, { guardId, objectId })
+      : Promise.resolve(null),
   ]);
+
+  const opDay =
+    month && snapshot
+      ? await loadTimesheetOperationalDayContext(
+          snapshot.objects,
+          monthKeysForPayrollMonth(month.year, month.monthIndex),
+        )
+      : null;
+  const resolveOperationalDateIso = opDay?.resolveRowDateIso;
+
+  const monthCtx = month ? { year: month.year, monthIndex0: month.monthIndex } : null;
+  const rowsRaw =
+    month && !week && resolveOperationalDateIso && monthCtx
+      ? rowsRawPadded.filter((row) => dateIsoInPayrollMonth(resolveOperationalDateIso(row), monthCtx))
+      : rowsRawPadded;
 
   const query = filters.q?.trim().toLowerCase() ?? "";
   let rows = query
@@ -77,7 +109,8 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
 
   let payrollHalfByGuardName: ReturnType<typeof payrollHalfSummaryByGuardName> | undefined;
   let objectPayrollHalves: ReturnType<typeof buildObjectPayrollHalfSummaries> | undefined;
-  if (showPayrollHalves && month) {
+  let guardPeriodByName: ReturnType<typeof buildGuardPeriodBreakdownByName> | undefined;
+  if (showPayrollHalves && month && monthCtx) {
     const advancesByGuardId = await sumAdvancesByGuardForMonth(month.year, month.monthIndex);
     const guardIdByName = new Map(filterOptions.guards.map((g) => [g.name, g.id] as const));
     const payrollRows = unpricedOnly ? rows : rowsRaw;
@@ -85,13 +118,22 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
       rows: payrollRows,
       guardIdByName,
       advancesByGuardId,
-      month: { year: month.year, monthIndex0: month.monthIndex },
+      month: monthCtx,
+      resolveOperationalDateIso,
     });
     payrollHalfByGuardName = payrollHalfSummaryByGuardName(summaries);
-    objectPayrollHalves = buildObjectPayrollHalfSummaries(payrollRows, {
-      year: month.year,
-      monthIndex0: month.monthIndex,
-    });
+    objectPayrollHalves = buildObjectPayrollHalfSummaries(
+      payrollRows,
+      monthCtx,
+      resolveOperationalDateIso,
+    );
+    if (objectId) {
+      guardPeriodByName = buildGuardPeriodBreakdownByName(
+        rows,
+        monthCtx,
+        resolveOperationalDateIso,
+      );
+    }
   }
 
   let guardPayrollHalfBreakdownByName: ReturnType<typeof buildGuardPayrollHalfBreakdownByName> | undefined;
@@ -118,6 +160,7 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
         guardsById,
         profileResolver,
         periods,
+        resolveOperationalDateIso,
       });
     }
   }
@@ -137,6 +180,7 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
         payrollHalfMonth={month ? { year: month.year, monthIndex0: month.monthIndex } : undefined}
         objectPayrollHalves={objectPayrollHalves}
         guardPayrollHalfBreakdownByName={guardPayrollHalfBreakdownByName}
+        guardPeriodByName={guardPeriodByName}
       />
     </main>
   );

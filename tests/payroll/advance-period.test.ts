@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  dateIsoBelongsToHalf,
+  dateIsoInPayrollMonth,
   dayOfMonthInZone,
   halfPeriodLabelRu,
   halfPeriodShortRu,
@@ -7,6 +9,8 @@ import {
   shiftStartsInPayrollMonth,
   type PayrollMonthContext,
 } from "../../src/lib/payroll/advance-period";
+import { resolveTimesheetRowOperationalDateIso } from "../../src/lib/accounting/timesheet-operational-day";
+import { operationalDayMonthKey } from "../../src/lib/scheduling/operational-day-anchors";
 import { buildGuardPayrollHalfSummaries, buildObjectPayrollHalfSummaries } from "../../src/lib/payroll/timesheet-payroll-summary";
 import type { TimesheetRow } from "../../src/lib/scheduling/timesheet";
 
@@ -35,6 +39,34 @@ describe("advance-period", () => {
     expect(halfPeriodShortRu("first", 2026, 4)).toBe("1–15");
     expect(halfPeriodShortRu("second", 2026, 4)).toBe("16–31");
     expect(halfPeriodLabelRu("second", 2026, 1)).toBe("с 16 по 28");
+  });
+
+  it("dateIsoBelongsToHalf режет по операционным суткам", () => {
+    const july = { year: 2026, monthIndex0: 6 };
+    expect(dateIsoInPayrollMonth("2026-07-17", july)).toBe(true);
+    expect(dateIsoBelongsToHalf("2026-07-15", "first", july)).toBe(true);
+    expect(dateIsoBelongsToHalf("2026-07-16", "second", july)).toBe(true);
+    expect(dateIsoBelongsToHalf("2026-07-15", "second", july)).toBe(false);
+  });
+});
+
+describe("resolveTimesheetRowOperationalDateIso + payroll halves", () => {
+  it("хвост 8–9 при якоре 09:00 уходит в 15-е, не в 16-е", () => {
+    const objectId = "obj-1";
+    const monthly = new Map([[operationalDayMonthKey(objectId, "2026-07"), "09:00"]]);
+    const defaults = new Map([[objectId, "08:00"]]);
+    const dateIso = resolveTimesheetRowOperationalDateIso(
+      {
+        objectId,
+        startsAt: "2026-07-15T22:00:00.000Z",
+        endsAt: "2026-07-15T23:00:00.000Z",
+      },
+      defaults,
+      monthly,
+    );
+    expect(dateIso).toBe("2026-07-15");
+    expect(dateIsoBelongsToHalf(dateIso, "first", { year: 2026, monthIndex0: 6 })).toBe(true);
+    expect(dateIsoBelongsToHalf(dateIso, "second", { year: 2026, monthIndex0: 6 })).toBe(false);
   });
 });
 

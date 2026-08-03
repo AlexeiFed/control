@@ -1,5 +1,10 @@
-import { shiftBelongsToHalf, shiftStartsInPayrollMonth, type PayrollMonthContext } from "./advance-period";
+import {
+  dateIsoBelongsToHalf,
+  dateIsoInPayrollMonth,
+  type PayrollMonthContext,
+} from "./advance-period";
 import type { TimesheetRow } from "../scheduling/timesheet";
+import { DEFAULT_SHIFT_TIMEZONE, localDateKeyInTimeZone } from "../scheduling/local-date-key";
 
 export type ShiftTypeBucket = "regular" | "reinforcement" | "rapidResponse";
 
@@ -177,14 +182,18 @@ export function addContributionsToRateLinesForRow(
 export function buildGuardPeriodBreakdownByName(
   rows: TimesheetRow[],
   month: PayrollMonthContext,
+  resolveOperationalDateIso?: (row: TimesheetRow) => string,
 ): Map<string, GuardPeriodBreakdown> {
   const map = new Map<string, GuardPeriodBreakdown>();
 
   for (const row of rows) {
-    if (!shiftStartsInPayrollMonth(row.startsAt, month)) continue;
+    const dateIso =
+      resolveOperationalDateIso?.(row) ??
+      localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE);
+    if (!dateIsoInPayrollMonth(dateIso, month)) continue;
 
     const breakdown = map.get(row.guardName) ?? { first: emptyHalf(), second: emptyHalf() };
-    const halfKey = shiftBelongsToHalf(row.startsAt, "first", month) ? "first" : "second";
+    const halfKey = dateIsoBelongsToHalf(dateIso, "first", month) ? "first" : "second";
     addRowToHalf(breakdown[halfKey], row);
     map.set(row.guardName, breakdown);
   }
