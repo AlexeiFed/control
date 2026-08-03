@@ -7,8 +7,12 @@ import {
   type TimesheetObjectWorkbookSheet,
 } from "../../../../../lib/accounting/timesheet-object-xlsx";
 import { listGuardPersonalCardAssignedOnByIds } from "../../../../../lib/operations/guards-repository";
+import {
+  listMonthlyOperationalDayStarts,
+} from "../../../../../lib/operations/object-monthly-settings-repository";
 import { listObjectTimesheetApprovalsByIds } from "../../../../../lib/operations/objects-repository";
 import { getTimesheetSnapshot } from "../../../../../lib/operations/scheduler-repository";
+import { operationalDayMonthKey } from "../../../../../lib/scheduling/operational-day-anchors";
 
 function parseObjectIdsParam(url: URL): Set<string> | null {
   const raw = url.searchParams.get("objectIds")?.trim() ?? "";
@@ -71,13 +75,21 @@ export async function GET(request: Request) {
   );
   const approvalsByObjectId = await listObjectTimesheetApprovalsByIds(objects.map((o) => o.id));
 
+  // Как в графике объекта: месячный якорь суток перекрывает default из security_objects.
+  const monthKey = `${parsed.month.year}-${String(parsed.month.monthIndex + 1).padStart(2, "0")}`;
+  const monthlyAnchors = await listMonthlyOperationalDayStarts(
+    objects.map((o) => o.id),
+    [monthKey],
+  );
+
   const sheets: TimesheetObjectWorkbookSheet[] = objects
     .map((o) => {
       const approvalRow = approvalsByObjectId.get(o.id);
+      const monthlyAnchor = monthlyAnchors.get(operationalDayMonthKey(o.id, monthKey));
       return {
         objectName: o.name,
         objectAddress: o.address ?? "",
-        operationalDayStartTime: o.operationalDayStartTime,
+        operationalDayStartTime: monthlyAnchor ?? o.operationalDayStartTime,
         rows: rowsFiltered.filter((r) =>
           r.objectId ? r.objectId === o.id : r.objectName === o.name,
         ),
@@ -100,7 +112,6 @@ export async function GET(request: Request) {
     parsed.month.monthIndex,
     guardPositionByName,
   );
-  const monthKey = `${parsed.month.year}-${String(parsed.month.monthIndex + 1).padStart(2, "0")}`;
   const filename = `tabel_${monthKey}${selectedObjectIds ? "" : "_all"}.xlsx`;
 
   return new Response(new Uint8Array(buffer), {

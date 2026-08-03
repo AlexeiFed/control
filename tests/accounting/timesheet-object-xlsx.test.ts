@@ -138,6 +138,36 @@ describe("groupTimesheetObjectRowsByPostAndGuard", () => {
     expect(days?.get(18)).toMatchObject({ hours: 24, kind: "Regular" });
     expect(days?.get(18)?.hours).not.toBe(25);
   });
+
+  it("с якорем 08:00 тот же хвост 8-9 уезжает на календарный день старта (регресс месячной настройки)", () => {
+    const grouped = groupTimesheetObjectRowsByPostAndGuard(
+      [
+        baseRow({
+          guardName: "Алфутов Алексей",
+          startsAt: "2026-07-17T22:00:00.000Z",
+          endsAt: "2026-07-17T23:00:00.000Z",
+          totalHours: 1,
+          regularHours: 1,
+          nightHours: 0,
+        }),
+        baseRow({
+          guardName: "Алфутов Алексей",
+          startsAt: "2026-07-17T23:00:00.000Z",
+          endsAt: "2026-07-18T23:00:00.000Z",
+          totalHours: 24,
+          regularHours: 24,
+          nightHours: 12,
+        }),
+      ],
+      2026,
+      6,
+      "08:00",
+    );
+
+    const days = grouped.get("none")?.guards.get("Алфутов Алексей")?.days;
+    expect(days?.get(17)).toBeUndefined();
+    expect(days?.get(18)).toMatchObject({ hours: 25, kind: "Regular" });
+  });
 });
 
 describe("buildTimesheetObjectWorkbook", () => {
