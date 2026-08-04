@@ -32,7 +32,7 @@ import {
   listShiftTemplatesForObjectIds,
   replaceShiftTemplatesForObject,
 } from "../../lib/operations/shift-templates-repository";
-import { activeShiftsSequence, inheritZeroTemplateCounts } from "../../lib/scheduling/object-shift-templates";
+import { activeShiftsSequence } from "../../lib/scheduling/object-shift-templates";
 import { getPreviousCivilDate } from "../../lib/scheduling/shift-template-history";
 import type { GuardEmploymentType, GuardLicenseType, GuardPosition, RateUnit, ShiftKind } from "../../lib/scheduling/types";
 
@@ -401,52 +401,23 @@ export async function saveShiftTemplatesAction(formData: FormData) {
   }
 
   try {
-  const templates = await listShiftTemplatesForObjectIds([input.objectId]);
-  const baseline = activeShiftsSequence(
-    templates,
-    input.objectId,
-    getPreviousCivilDate(input.effectiveFrom),
-    input.postId ?? null,
-  );
-
-  const perDay = [1, 2, 3, 4, 5, 6, 7].map((dayOfWeek, index) => {
-    const merged = inheritZeroTemplateCounts(
-      {
-        regular: [input.d1, input.d2, input.d3, input.d4, input.d5, input.d6, input.d7][index] ?? 0,
-        shiftHours: [input.h1, input.h2, input.h3, input.h4, input.h5, input.h6, input.h7][index] ?? 24,
-        reinforcement: [input.r1, input.r2, input.r3, input.r4, input.r5, input.r6, input.r7][index] ?? 0,
-        reinforcementShiftHours:
-          [input.rh1, input.rh2, input.rh3, input.rh4, input.rh5, input.rh6, input.rh7][index] ?? 24,
-        rapidResponse: [input.mp1, input.mp2, input.mp3, input.mp4, input.mp5, input.mp6, input.mp7][index] ?? 0,
-        rapidResponseShiftHours:
-          [input.mph1, input.mph2, input.mph3, input.mph4, input.mph5, input.mph6, input.mph7][index] ?? 24,
-        shiftLead: [input.stm1, input.stm2, input.stm3, input.stm4, input.stm5, input.stm6, input.stm7][index] ?? 0,
-        shiftLeadShiftHours:
-          [input.stmh1, input.stmh2, input.stmh3, input.stmh4, input.stmh5, input.stmh6, input.stmh7][index] ?? 24,
-      },
-      {
-        regular: baseline.regular[index] ?? 2,
-        shiftHours: baseline.shiftHours[index] ?? 24,
-        reinforcement: baseline.reinforcement[index] ?? 0,
-        reinforcementShiftHours: baseline.reinforcementShiftHours[index] ?? 24,
-        rapidResponse: baseline.rapidResponse[index] ?? 0,
-        rapidResponseShiftHours: baseline.rapidResponseShiftHours[index] ?? 24,
-        shiftLead: baseline.shiftLead[index] ?? 0,
-        shiftLeadShiftHours: baseline.shiftLeadShiftHours[index] ?? 24,
-      },
-    );
-    return {
-      dayOfWeek,
-      shiftsPerDay: merged.regular,
-      shiftsReinforcementPerDay: merged.reinforcement,
-      shiftHours: merged.shiftHours,
-      reinforcementShiftHours: merged.reinforcementShiftHours,
-      shiftsRapidResponsePerDay: merged.rapidResponse,
-      rapidResponseShiftHours: merged.rapidResponseShiftHours,
-      shiftsShiftLeadPerDay: merged.shiftLead,
-      shiftLeadShiftHours: merged.shiftLeadShiftHours,
-    };
-  });
+  // Пишем ровно то, что прислал UI: 0 = тип не нужен (не «наследовать из прошлой версии»).
+  const perDay = [1, 2, 3, 4, 5, 6, 7].map((dayOfWeek, index) => ({
+    dayOfWeek,
+    shiftsPerDay: [input.d1, input.d2, input.d3, input.d4, input.d5, input.d6, input.d7][index] ?? 0,
+    shiftHours: [input.h1, input.h2, input.h3, input.h4, input.h5, input.h6, input.h7][index] ?? 24,
+    shiftsReinforcementPerDay: [input.r1, input.r2, input.r3, input.r4, input.r5, input.r6, input.r7][index] ?? 0,
+    reinforcementShiftHours:
+      [input.rh1, input.rh2, input.rh3, input.rh4, input.rh5, input.rh6, input.rh7][index] ?? 24,
+    shiftsRapidResponsePerDay:
+      [input.mp1, input.mp2, input.mp3, input.mp4, input.mp5, input.mp6, input.mp7][index] ?? 0,
+    rapidResponseShiftHours:
+      [input.mph1, input.mph2, input.mph3, input.mph4, input.mph5, input.mph6, input.mph7][index] ?? 24,
+    shiftsShiftLeadPerDay:
+      [input.stm1, input.stm2, input.stm3, input.stm4, input.stm5, input.stm6, input.stm7][index] ?? 0,
+    shiftLeadShiftHours:
+      [input.stmh1, input.stmh2, input.stmh3, input.stmh4, input.stmh5, input.stmh6, input.stmh7][index] ?? 24,
+  }));
 
   await replaceShiftTemplatesForObject(input.objectId, perDay, input.effectiveFrom, input.postId ?? null);
   revalidateAfterShiftMutation(["/objects", `/objects/${input.objectId}`, "/scheduler"]);

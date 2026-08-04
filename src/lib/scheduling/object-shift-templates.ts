@@ -113,54 +113,16 @@ function rowToExpectedShifts(row: ObjectShiftTemplateRow): ExpectedShifts {
   };
 }
 
-/** Нули усиления/МП в новой версии = «не менял» — наследуем из предыдущей. */
+/**
+ * @deprecated Раньше 0 усиления/МП/СтМ читался как «наследовать».
+ * UI «Сменность» пишет 0 = тип не нужен — не используй для save/read плана.
+ * Оставлено для редких legacy-мерджей; новое поведение — брать current as-is.
+ */
 export function inheritZeroTemplateCounts(
   current: ExpectedShifts,
-  previous: ExpectedShifts | null,
+  _previous: ExpectedShifts | null,
 ): ExpectedShifts {
-  if (!previous) return current;
-  const inheritCount = (value: number, fallback: number) => (value > 0 ? value : fallback);
-  return {
-    regular: current.regular,
-    shiftHours: current.shiftHours,
-    reinforcement: inheritCount(current.reinforcement, previous.reinforcement),
-    reinforcementShiftHours: (() => {
-      const reinf = current.reinforcement;
-      return reinf > 0 ? current.reinforcementShiftHours : previous.reinforcementShiftHours;
-    })(),
-    rapidResponse: inheritCount(current.rapidResponse, previous.rapidResponse),
-    rapidResponseShiftHours: (() => {
-      const mp = current.rapidResponse;
-      return mp > 0 ? current.rapidResponseShiftHours : previous.rapidResponseShiftHours;
-    })(),
-    shiftLead: inheritCount(current.shiftLead, previous.shiftLead),
-    shiftLeadShiftHours: (() => {
-      const lead = current.shiftLead;
-      return lead > 0 ? current.shiftLeadShiftHours : previous.shiftLeadShiftHours;
-    })(),
-  };
-}
-
-function findPreviousTemplateRow(
-  rows: ReadonlyArray<ObjectShiftTemplateRow>,
-  objectId: string,
-  dayOfWeek: number,
-  beforeEffectiveFrom: string,
-  postId?: string | null,
-): ObjectShiftTemplateRow | null {
-  let best: ObjectShiftTemplateRow | null = null;
-  for (const row of rows) {
-    if (row.objectId !== objectId || row.dayOfWeek !== dayOfWeek) continue;
-    if (row.effectiveFrom >= beforeEffectiveFrom) continue;
-    const rowPostId = row.postId ?? null;
-    if (postId) {
-      if (rowPostId !== postId && rowPostId !== null) continue;
-    } else if (rowPostId !== null) {
-      continue;
-    }
-    if (!best || row.effectiveFrom > best.effectiveFrom) best = row;
-  }
-  return best;
+  return current;
 }
 
 function pickTemplateRowForDate(
@@ -208,16 +170,8 @@ export function expectedShiftsForDate(
 ): ExpectedShifts | null {
   const best = pickTemplateRowForDate(rows, objectId, civilDateIso, postId);
   if (!best) return null;
-  const current = rowToExpectedShifts(best);
-  const previousRow = findPreviousTemplateRow(
-    rows,
-    objectId,
-    best.dayOfWeek,
-    best.effectiveFrom,
-    best.postId ?? postId ?? null,
-  );
-  const previous = previousRow ? rowToExpectedShifts(previousRow) : null;
-  return inheritZeroTemplateCounts(current, previous);
+  // 0 в активной версии = тип выключен (не подмешиваем прошлую версию).
+  return rowToExpectedShifts(best);
 }
 
 /** План по каждому дню локального месяца (учитывает версии шаблона и effective_to). */
@@ -450,45 +404,12 @@ export function activeShiftsSequence(
   return { regular, reinforcement, shiftHours, reinforcementShiftHours, rapidResponse, rapidResponseShiftHours, shiftLead, shiftLeadShiftHours };
 }
 
-/** Для карточки шаблона: нули МП/усиления не затирают значения предыдущей версии. */
+/** Для карточки шаблона: берём значения версии as-is (0 = тип не нужен). */
 export function mergeShiftTemplateForDisplay(
   atMonthStart: ActiveShiftsSequenceResult,
-  dayBeforeMonth: ActiveShiftsSequenceResult,
+  _dayBeforeMonth: ActiveShiftsSequenceResult,
 ): ActiveShiftsSequenceResult {
-  const merged = Array.from({ length: 7 }, (_, i) =>
-    inheritZeroTemplateCounts(
-      {
-        regular: atMonthStart.regular[i] ?? DEFAULT_SHIFTS_PER_DAY,
-        shiftHours: atMonthStart.shiftHours[i] ?? DEFAULT_SHIFT_HOURS,
-        reinforcement: atMonthStart.reinforcement[i] ?? 0,
-        reinforcementShiftHours: atMonthStart.reinforcementShiftHours[i] ?? DEFAULT_REINFORCEMENT_SHIFT_HOURS,
-        rapidResponse: atMonthStart.rapidResponse[i] ?? 0,
-        rapidResponseShiftHours: atMonthStart.rapidResponseShiftHours[i] ?? DEFAULT_RAPID_RESPONSE_SHIFT_HOURS,
-        shiftLead: atMonthStart.shiftLead[i] ?? 0,
-        shiftLeadShiftHours: atMonthStart.shiftLeadShiftHours[i] ?? DEFAULT_SHIFT_LEAD_SHIFT_HOURS,
-      },
-      {
-        regular: dayBeforeMonth.regular[i] ?? DEFAULT_SHIFTS_PER_DAY,
-        shiftHours: dayBeforeMonth.shiftHours[i] ?? DEFAULT_SHIFT_HOURS,
-        reinforcement: dayBeforeMonth.reinforcement[i] ?? 0,
-        reinforcementShiftHours: dayBeforeMonth.reinforcementShiftHours[i] ?? DEFAULT_REINFORCEMENT_SHIFT_HOURS,
-        rapidResponse: dayBeforeMonth.rapidResponse[i] ?? 0,
-        rapidResponseShiftHours: dayBeforeMonth.rapidResponseShiftHours[i] ?? DEFAULT_RAPID_RESPONSE_SHIFT_HOURS,
-        shiftLead: dayBeforeMonth.shiftLead[i] ?? 0,
-        shiftLeadShiftHours: dayBeforeMonth.shiftLeadShiftHours[i] ?? DEFAULT_SHIFT_LEAD_SHIFT_HOURS,
-      },
-    ),
-  );
-  return {
-    regular: merged.map((m) => m.regular),
-    reinforcement: merged.map((m) => m.reinforcement),
-    shiftHours: merged.map((m) => m.shiftHours),
-    reinforcementShiftHours: merged.map((m) => m.reinforcementShiftHours),
-    rapidResponse: merged.map((m) => m.rapidResponse),
-    rapidResponseShiftHours: merged.map((m) => m.rapidResponseShiftHours),
-    shiftLead: merged.map((m) => m.shiftLead),
-    shiftLeadShiftHours: merged.map((m) => m.shiftLeadShiftHours),
-  };
+  return atMonthStart;
 }
 
 export function countRegularShiftsOnObjectDay(

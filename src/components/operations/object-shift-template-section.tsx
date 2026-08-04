@@ -12,6 +12,7 @@ import {
   type ActiveShiftsSequenceResult,
 } from "../../lib/scheduling/object-shift-templates";
 import { toast } from "../../store/toast-store";
+import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 
 const weekdayShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MAX_DAY_HOURS = 24 * 24;
@@ -208,6 +209,8 @@ export function ObjectShiftTemplateSection({
                 variant: "success",
               });
               setTemplateDraft(null);
+              // Сетка обновляется через RSC; колокольчик держит свой fetch-стейт — форсим пересчёт.
+              window.dispatchEvent(new CustomEvent(SCHEDULE_SHORTAGE_REFRESH_EVENT));
               router.refresh();
             } catch (err) {
               toast({

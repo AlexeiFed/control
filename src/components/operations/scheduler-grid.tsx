@@ -66,6 +66,7 @@ import {
 import { ScheduleHoursShortageIcon } from "./schedule-hours-shortage-icon";
 import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard-shift-alert";
 import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
+import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import {
   buildRateRuleTimePresets,
@@ -283,6 +284,7 @@ export function SchedulerGrid({
     setDismissingShortageKeys((prev) => new Set(prev).add(key));
     try {
       await dismissDayShortage(objectId, dateIso);
+      window.dispatchEvent(new CustomEvent(SCHEDULE_SHORTAGE_REFRESH_EVENT));
       router.refresh();
     } catch (err) {
       setOptimisticDismissedShortageKeys((prev) => {

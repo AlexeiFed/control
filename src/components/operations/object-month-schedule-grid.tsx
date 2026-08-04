@@ -55,6 +55,7 @@ import { confirmDeleteShift } from "../../lib/scheduling/shift-delete-confirm";
 import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard-shift-alert";
 import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
 import { ScheduleHoursShortageIcon } from "./schedule-hours-shortage-icon";
+import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 import {
   buildScheduleDayColumnStyle,
   mergeScheduleCellStyles,
@@ -470,6 +471,7 @@ export function ObjectMonthScheduleGrid({
     setDismissingShortageIsos((prev) => new Set(prev).add(dateIso));
     try {
       await dismissDayShortage(objectId, dateIso);
+      window.dispatchEvent(new CustomEvent(SCHEDULE_SHORTAGE_REFRESH_EVENT));
       router.refresh();
     } catch (err) {
       setOptimisticDismissedIsos((prev) => {

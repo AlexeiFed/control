@@ -190,14 +190,15 @@ describe("object shift templates", () => {
     expect(regular.every((n: number) => n === 2)).toBe(true);
   });
 
-  it("inherits MP and reinforcement when new version stores zeros", () => {
+  it("keeps explicit zeros for MP/reinforcement/STM (0 = type off, not inherit)", () => {
     const rows: ObjectShiftTemplateRow[] = [
       {
         objectId: "o1",
         dayOfWeek: 1,
         shiftsPerDay: 2,
-        shiftsReinforcementPerDay: 0,
+        shiftsReinforcementPerDay: 1,
         shiftHours: 14,
+        reinforcementShiftHours: 24,
         shiftsRapidResponsePerDay: 1,
         rapidResponseShiftHours: 12,
         effectiveFrom: "2026-05-01",
@@ -211,6 +212,7 @@ describe("object shift templates", () => {
         shiftHours: 24,
         shiftsRapidResponsePerDay: 0,
         rapidResponseShiftHours: 24,
+        shiftsShiftLeadPerDay: 0,
         effectiveFrom: "2026-06-10",
         effectiveTo: null,
       },
@@ -218,11 +220,19 @@ describe("object shift templates", () => {
     const may = expectedShiftsForDate(rows, "o1", "2026-05-04");
     expect(may?.shiftHours).toBe(14);
     expect(may?.rapidResponse).toBe(1);
+    expect(may?.reinforcement).toBe(1);
 
     const june = expectedShiftsForDate(rows, "o1", "2026-06-15");
     expect(june?.shiftHours).toBe(24);
-    expect(june?.rapidResponse).toBe(1);
-    expect(june?.rapidResponseShiftHours).toBe(12);
+    expect(june?.rapidResponse).toBe(0);
+    expect(june?.rapidResponseShiftHours).toBe(24);
+    expect(june?.reinforcement).toBe(0);
+  });
+
+  it("encodeTemplateTotalHours(0) round-trips as zero plan hours", () => {
+    const encoded = encodeTemplateTotalHours(0);
+    expect(encoded.count).toBe(0);
+    expect(templatePartTotalHours(encoded.count, encoded.hours)).toBe(0);
   });
 
   it("buildExpectedShiftsForLocalMonth resolves each calendar day", () => {
