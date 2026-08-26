@@ -4,6 +4,7 @@ import { requireSession } from "../../../lib/auth/session";
 import { getKhabarovskComponents } from "../../../lib/format/display-date";
 import { listGuardAdvancesForMonth } from "../../../lib/operations/advances-repository";
 import { listGuards } from "../../../lib/operations/guards-repository";
+import { listObjectsForAssignment } from "../../../lib/operations/objects-repository";
 
 type AdvancesPageProps = {
   searchParams?: Promise<{ month?: string }>;
@@ -17,10 +18,16 @@ export default async function AdvancesPage({ searchParams }: AdvancesPageProps) 
   const month = normalizeMonth(filters.month) ?? currentMonthKey();
   const { year, monthIndex0 } = parseMonthKey(month);
 
-  const [advances, guards] = await Promise.all([
+  const [advances, guards, objects] = await Promise.all([
     listGuardAdvancesForMonth(year, monthIndex0),
     listGuards({ status: "Active" }),
+    listObjectsForAssignment(),
   ]);
+
+  const objectOptions = objects
+    .filter((o) => o.status === "Active")
+    .map((o) => ({ id: o.id, name: o.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru-RU"));
 
   return (
     <main className="min-h-screen bg-app-bg p-4 text-app-text sm:p-6">
@@ -31,6 +38,7 @@ export default async function AdvancesPage({ searchParams }: AdvancesPageProps) 
           id: g.id,
           name: `${g.lastName} ${g.firstName}`.trim(),
         }))}
+        objectOptions={objectOptions}
         canManage
         issuerName={session.user.name}
       />

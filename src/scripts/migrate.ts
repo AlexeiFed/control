@@ -67,31 +67,34 @@ async function main() {
       }
     }
 
+    if (process.env.MIGRATE_SKIP_POST_SYNC === "1") {
+      console.log("[post-sync] пропущен (MIGRATE_SKIP_POST_SYNC=1)");
+      return;
+    }
+
+    console.log("[post-sync] timesheet backfill…");
     const { backfillMissingTimesheetEntriesSafe, resyncOutdatedTimesheetEntriesSafe } = await import(
       "../lib/accounting/sync-timesheet-entry"
     );
     const backfilled = await backfillMissingTimesheetEntriesSafe();
-    if (backfilled > 0) {
-      console.log(`[timesheet-backfill] дозаполнено смен: ${backfilled}`);
-    }
-    const resynced = await resyncOutdatedTimesheetEntriesSafe();
-    if (resynced > 0) {
-      console.log(`[timesheet-resync] пересчитано смен: ${resynced}`);
-    }
+    console.log(`[timesheet-backfill] дозаполнено смен: ${backfilled}`);
 
+    console.log("[post-sync] timesheet resync…");
+    const resynced = await resyncOutdatedTimesheetEntriesSafe();
+    console.log(`[timesheet-resync] пересчитано смен: ${resynced}`);
+
+    console.log("[post-sync] curator sync…");
     const { resyncCuratorTopUpExclusionShiftsSafe } = await import("../lib/curators/sync-shift-entry");
     const curatorResynced = await resyncCuratorTopUpExclusionShiftsSafe();
-    if (curatorResynced > 0) {
-      console.log(`[curator-sync] пересчитано смен с исключением доплаты: ${curatorResynced}`);
-    }
+    console.log(`[curator-sync] пересчитано смен с исключением доплаты: ${curatorResynced}`);
 
+    console.log("[post-sync] profile-periods…");
     const { backfillAllGuardProfilePeriodsFromCompliance } = await import(
       "../lib/operations/guard-profile-periods-repository"
     );
     const profileBackfilled = await backfillAllGuardProfilePeriodsFromCompliance();
-    if (profileBackfilled > 0) {
-      console.log(`[profile-periods] синхронизировано профилей охранников: ${profileBackfilled}`);
-    }
+    console.log(`[profile-periods] синхронизировано профилей охранников: ${profileBackfilled}`);
+    console.log("[post-sync] готово");
   } finally {
     await pool.end();
   }

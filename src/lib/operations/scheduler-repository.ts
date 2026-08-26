@@ -20,6 +20,7 @@ import {
   currentMonthStartIsoKhabarovsk,
   isShiftDateInCurrentOrFutureMonth,
 } from "../scheduling/pending-incident-month-filter";
+import { isKhabarovskMonthPast } from "../scheduling/schedule-month-guards";
 import { isOperationalDayPlanSatisfied } from "../scheduling/pending-incident-plan-satisfied";
 import { buildOperationalDayAnchorByObjectIdForDate } from "../scheduling/operational-day-anchors";
 import { expectedShiftsForObjectDay } from "../scheduling/object-shift-templates";
@@ -96,6 +97,7 @@ type ShiftLogRow = {
   created_at: string;
   note: string;
   incident_level: ShiftLog["incidentLevel"];
+  accounted_at?: string | null;
   object_name?: string;
   guard_last_name?: string;
   guard_first_name?: string;
@@ -115,7 +117,7 @@ export type ObjectMonthScheduledGuard = {
   displayName: string;
 };
 
-function getMonthRangeKhabarovsk(year: number, monthIndex0: number): { start: string; end: string } {
+export function getMonthRangeKhabarovsk(year: number, monthIndex0: number): { start: string; end: string } {
   const pad = (n: number) => String(n).padStart(2, "0");
   const startIso = `${year}-${pad(monthIndex0 + 1)}-01T00:00:00+10:00`;
   
@@ -295,6 +297,7 @@ async function loadSchedulerSnapshotRaw(weekStartIso: string): Promise<Scheduler
           l.created_at,
           l.note,
           l.incident_level,
+          l.accounted_at,
           o.name AS object_name,
           g.last_name AS guard_last_name,
           g.first_name AS guard_first_name,
@@ -332,20 +335,96 @@ function mapSchedulerSnapshotRaw(raw: SchedulerSnapshotRaw): SchedulerSnapshot {
     operationalDayStartTime: normalizeOperationalAnchorTime(row.operational_day_start_time),
   }));
   const shifts = raw.shiftsRows.map(mapDbShiftRow);
-  const logs = raw.logsRows.map((row) => ({
+  const logs = raw.logsRows.map(mapShiftLogRow);
+
+  return { guards, objects, shifts, logs };
+}
+
+function mapShiftLogRow(row: ShiftLogRow): ShiftLog {
+  return {
     id: row.id,
     shiftId: row.shift_id,
     authorUserId: row.author_user_id,
     createdAt: new Date(row.created_at),
     note: row.note,
     incidentLevel: row.incident_level,
+    accountedAt: row.accounted_at ? new Date(row.accounted_at) : null,
     objectName: row.object_name,
     guardName: `${row.guard_last_name ?? ""} ${row.guard_first_name ?? ""}`.trim() || undefined,
     shiftStartsAt: row.shift_starts_at ? new Date(row.shift_starts_at) : undefined,
     shiftEndsAt: row.shift_ends_at ? new Date(row.shift_ends_at) : undefined,
-  }));
+  };
+}
 
-  return { guards, objects, shifts, logs };
+/** Последние записи журнала смен (для отдельной страницы журнала). */
+export async function listRecentShiftLogs(limit = 500): Promise<ShiftLog[]> {
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 2000) : 500;
+  const rows = await query<ShiftLogRow>(
+    `
+      SELECT
+        l.id,
+        l.shift_id,
+        l.author_user_id,
+        l.created_at,
+        l.note,
+        l.incident_level,
+        l.accounted_at,
+        o.name AS object_name,
+        g.last_name AS guard_last_name,
+        g.first_name AS guard_first_name,
+        s.starts_at AS shift_starts_at,
+        s.ends_at AS shift_ends_at
+      FROM shift_logs l
+      INNER JOIN shifts s ON s.id = l.shift_id
+      INNER JOIN security_objects o ON o.id = s.object_id
+      INNER JOIN guards g ON g.id = s.guard_id
+      ORDER BY l.created_at DESC
+      LIMIT $1
+    `,
+    [safeLimit],
+  );
+  return rows.map(mapShiftLogRow);
+}
+
+export async function setShiftLogAccounted(input: {
+  logId: string;
+  accounted: boolean;
+}): Promise<ShiftLog> {
+  const rows = await query<ShiftLogRow>(
+    `
+      UPDATE shift_logs
+      SET accounted_at = CASE WHEN $2::boolean THEN COALESCE(accounted_at, now()) ELSE NULL END
+      WHERE id = $1
+      RETURNING
+        id,
+        shift_id,
+        author_user_id,
+        created_at,
+        note,
+        incident_level,
+        accounted_at
+    `,
+    [input.logId, input.accounted],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("Запись журнала не найдена");
+  return mapShiftLogRow(row);
+}
+
+export async function deleteShiftLog(logId: string): Promise<{ shiftId: string }> {
+  const rows = await query<{ shift_id: string }>(
+    `
+      DELETE FROM shift_logs
+      WHERE id = $1
+      RETURNING shift_id
+    `,
+    [logId],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("Запись журнала не найдена");
+  const { syncTimesheetEntryFromShiftSafe } = await import("../accounting/sync-timesheet-entry");
+  await syncTimesheetEntryFromShiftSafe(row.shift_id);
+  return { shiftId: row.shift_id };
 }
 
 export async function listShiftsInLocalRange(rangeStart: Date, rangeEnd: Date): Promise<Shift[]> {
@@ -584,6 +663,74 @@ export async function deleteShiftById(shiftId: string): Promise<{ objectId: stri
     if (!row) throw new Error("Смена не найдена");
     await client.query("COMMIT");
     return { objectId: row.object_id };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // транзакция могла не начаться
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function removeGuardFromObjectMonthSchedule(
+  objectId: string,
+  guardId: string,
+  year: number,
+  monthIndex0: number,
+): Promise<{ deletedShifts: number }> {
+  const pool = getDbPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const hasReplacedBy = await tableColumnExists("shifts", "replaced_by_shift_id");
+    const { start, end } = getMonthRangeKhabarovsk(year, monthIndex0);
+    const month = `${year}-${String(monthIndex0 + 1).padStart(2, "0")}`;
+
+    const selected = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM shifts
+        WHERE object_id = $1 AND guard_id = $2 AND ends_at > $3 AND starts_at < $4
+        FOR UPDATE
+      `,
+      [objectId, guardId, start, end],
+    );
+
+    const ids = selected.rows.map((row) => row.id);
+
+    if (ids.length > 0) {
+      if (hasReplacedBy) {
+        await client.query(
+          `UPDATE shifts SET replaced_by_shift_id = NULL WHERE replaced_by_shift_id = ANY($1::uuid[])`,
+          [ids],
+        );
+        await client.query(
+          `UPDATE shifts SET replaced_by_shift_id = NULL WHERE id = ANY($1::uuid[])`,
+          [ids],
+        );
+      }
+      await client.query(`DELETE FROM shifts WHERE id = ANY($1::uuid[])`, [ids]);
+    }
+
+    await client.query(
+      `DELETE FROM object_monthly_post_guards WHERE object_id = $1 AND guard_id = $2 AND month = $3`,
+      [objectId, guardId, month],
+    );
+
+    // Текущий/будущий месяц: убрать и из пула объекта, чтобы строка исчезла из живого графика.
+    // Прошлые месяцы пул не трогаем — их снимки штата остаются.
+    if (!isKhabarovskMonthPast(year, monthIndex0)) {
+      await client.query(
+        `DELETE FROM guard_object_assignments WHERE object_id = $1 AND guard_id = $2`,
+        [objectId, guardId],
+      );
+    }
+
+    await client.query("COMMIT");
+    return { deletedShifts: ids.length };
   } catch (error) {
     try {
       await client.query("ROLLBACK");
@@ -1807,7 +1954,7 @@ export async function createShiftLog(input: {
     `
       INSERT INTO shift_logs (shift_id, author_user_id, note, incident_level)
       VALUES ($1, $2, $3, $4)
-      RETURNING id, shift_id, author_user_id, created_at, note, incident_level
+      RETURNING id, shift_id, author_user_id, created_at, note, incident_level, accounted_at
     `,
     [input.shiftId, input.authorUserId, input.note.trim(), input.incidentLevel],
   );
@@ -1815,12 +1962,5 @@ export async function createShiftLog(input: {
   if (!row) throw new Error("Не удалось создать запись журнала");
   const { syncTimesheetEntryFromShiftSafe } = await import("../accounting/sync-timesheet-entry");
   await syncTimesheetEntryFromShiftSafe(input.shiftId);
-  return {
-    id: row.id,
-    shiftId: row.shift_id,
-    authorUserId: row.author_user_id,
-    createdAt: new Date(row.created_at),
-    note: row.note,
-    incidentLevel: row.incident_level,
-  };
+  return mapShiftLogRow(row);
 }

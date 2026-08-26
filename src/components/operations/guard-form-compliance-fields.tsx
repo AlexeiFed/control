@@ -5,6 +5,7 @@ import {
   guardEmploymentLabels,
   guardLicenseLabels,
 } from "../../lib/operations/status-labels";
+import { DateInput } from "../ui/date-input";
 
 const licenseGradeOptions = [4, 5, 6] as const;
 
@@ -60,8 +61,7 @@ export function GuardFormComplianceFields({
       {employmentType === "Employed" ? (
         <label className={labelClass}>
           <span className="text-app-muted">Дата офиц. трудоустройства</span>
-          <input
-            type="date"
+          <DateInput
             name="employedOn"
             required
             defaultValue={defaults?.employedOn ?? ""}
@@ -103,8 +103,7 @@ export function GuardFormComplianceFields({
           </label>
           <label className={labelClass}>
             <span className="text-app-muted">Разряд действует до</span>
-            <input
-              type="date"
+            <DateInput
               name="licenseValidUntil"
               required
               defaultValue={defaults?.licenseValidUntil ?? ""}
@@ -115,8 +114,7 @@ export function GuardFormComplianceFields({
       ) : null}
       <label className={labelClass}>
         <span className="text-app-muted">Медкомиссия</span>
-        <input
-          type="date"
+        <DateInput
           name="medicalCommissionPassedOn"
           defaultValue={defaults?.medicalCommissionPassedOn ?? ""}
           className={inputClass}
@@ -124,8 +122,7 @@ export function GuardFormComplianceFields({
       </label>
       <label className={labelClass}>
         <span className="text-app-muted">Периодическая проверка</span>
-        <input
-          type="date"
+        <DateInput
           name="periodicCheckPassedOn"
           defaultValue={defaults?.periodicCheckPassedOn ?? ""}
           className={inputClass}
@@ -133,8 +130,7 @@ export function GuardFormComplianceFields({
       </label>
       <label className={labelClass}>
         <span className="text-app-muted">Личная карточка</span>
-        <input
-          type="date"
+        <DateInput
           name="personalCardAssignedOn"
           defaultValue={defaults?.personalCardAssignedOn ?? ""}
           className={inputClass}

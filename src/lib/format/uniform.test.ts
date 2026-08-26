@@ -3,7 +3,13 @@ import {
   formatUniformConditionLabel,
   formatUniformIssuedTooltip,
   formatUniformSizeDisplay,
+  formatTshirtIssuedTooltip,
+  formatTshirtStatusDisplay,
   normalizeUniformIssuedFields,
+  normalizeUniformReturn,
+  normalizeTshirtIssuedFields,
+  normalizeTshirtReturn,
+  parseTshirtIssuedFromForm,
   parseUniformCondition,
   parseUniformSizeFormValue,
   uniformSizeToFormValue,
@@ -54,6 +60,7 @@ describe("uniform issued", () => {
       uniformIssuedOn: null,
       uniformCondition: null,
       uniformNote: null,
+      uniformReturnedOn: null,
     });
   });
 
@@ -90,6 +97,7 @@ describe("uniform issued", () => {
       uniformIssuedOn: "2026-01-01",
       uniformCondition: "used",
       uniformNote: "порвана",
+      uniformReturnedOn: null,
     });
 
     expect(
@@ -102,6 +110,133 @@ describe("uniform issued", () => {
     ).toBeNull();
   });
 
+  it("сдаёт форму: снимает выдачу и фиксирует дату сдачи", () => {
+    expect(normalizeUniformReturn({ returnedOn: "2026-08-14" })).toEqual({
+      uniformIssued: false,
+      uniformIssuedOn: null,
+      uniformCondition: null,
+      uniformNote: null,
+      uniformReturnedOn: "2026-08-14",
+    });
+  });
+
+  it("требует дату сдачи", () => {
+    expect(() => normalizeUniformReturn({ returnedOn: "  " })).toThrow(/дат/i);
+  });
+});
+
+describe("tshirt issued", () => {
+  it("clears fields when not issued", () => {
+    expect(
+      normalizeTshirtIssuedFields({
+        issued: false,
+        size: 6,
+        issuedOn: "2026-01-01",
+      }),
+    ).toEqual({
+      tshirtIssued: false,
+      tshirtSize: null,
+      tshirtIssuedOn: null,
+      tshirtReturnedOn: null,
+    });
+  });
+
+  it("requires size and date when issued", () => {
+    expect(() =>
+      normalizeTshirtIssuedFields({
+        issued: true,
+        size: null,
+        issuedOn: "2026-01-01",
+      }),
+    ).toThrow(/размер/i);
+
+    expect(() =>
+      normalizeTshirtIssuedFields({
+        issued: true,
+        size: 6,
+        issuedOn: "",
+      }),
+    ).toThrow(/дат/i);
+  });
+
+  it("keeps size and date when issued", () => {
+    expect(
+      normalizeTshirtIssuedFields({
+        issued: true,
+        size: 58,
+        issuedOn: "2026-06-01",
+      }),
+    ).toEqual({
+      tshirtIssued: true,
+      tshirtSize: 58,
+      tshirtIssuedOn: "2026-06-01",
+      tshirtReturnedOn: null,
+    });
+  });
+
+  it("сдаёт футболку: снимает выдачу и фиксирует дату сдачи", () => {
+    expect(normalizeTshirtReturn({ returnedOn: "2026-08-14" })).toEqual({
+      tshirtIssued: false,
+      tshirtSize: null,
+      tshirtIssuedOn: null,
+      tshirtReturnedOn: "2026-08-14",
+    });
+  });
+
+  it("требует дату сдачи футболки", () => {
+    expect(() => normalizeTshirtReturn({ returnedOn: "  " })).toThrow(/дат/i);
+  });
+
+  it("читает чекбокс футболки независимо от выдачи формы", () => {
+    const withTshirt = new FormData();
+    withTshirt.set("tshirtIssued", "on");
+    expect(parseTshirtIssuedFromForm(withTshirt)).toBe(true);
+
+    const withoutTshirt = new FormData();
+    withoutTshirt.set("uniformIssued", "on");
+    expect(parseTshirtIssuedFromForm(withoutTshirt)).toBe(false);
+  });
+
+  it("строит tooltip выдачи футболки", () => {
+    expect(
+      formatTshirtIssuedTooltip({
+        size: 4,
+        issuedOn: "2026-06-01",
+      }),
+    ).toBe("Размер: L, дата: 01.06.2026");
+  });
+
+  it("всегда показывает статус футболки, в том числе без выдачи формы", () => {
+    expect(
+      formatTshirtStatusDisplay({
+        issued: true,
+        size: 58,
+        issuedOn: "2026-06-01",
+        returnedOn: null,
+      }),
+    ).toBe("58 · 01.06.2026");
+
+    expect(
+      formatTshirtStatusDisplay({
+        issued: false,
+        size: null,
+        issuedOn: null,
+        returnedOn: "2026-08-14",
+      }),
+    ).toBe("Нет · сдана 14.08.2026");
+
+    expect(
+      formatTshirtStatusDisplay({
+        issued: false,
+        size: null,
+        issuedOn: null,
+        returnedOn: null,
+      }),
+    ).toBe("Нет");
+  });
+});
+
+describe("uniform issued tooltip", () => {
   it("builds tooltip", () => {
     expect(
       formatUniformIssuedTooltip({

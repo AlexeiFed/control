@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS shift_logs (
   author_user_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   note text NOT NULL CHECK (char_length(note) > 0),
-  incident_level text NOT NULL CHECK (incident_level IN ('None', 'Info', 'Warning', 'Critical'))
+  incident_level text NOT NULL CHECK (incident_level IN ('None', 'Info', 'Warning', 'Critical')),
+  accounted_at timestamptz NULL
 );
 
 CREATE INDEX IF NOT EXISTS guards_name_idx ON guards (last_name, first_name);
@@ -109,6 +110,11 @@ ALTER TABLE guards ADD COLUMN IF NOT EXISTS uniform_issued boolean NOT NULL DEFA
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS uniform_issued_on date;
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS uniform_condition text;
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS uniform_note text;
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS uniform_returned_on date;
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS tshirt_issued boolean NOT NULL DEFAULT false;
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS tshirt_size smallint;
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS tshirt_issued_on date;
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS tshirt_returned_on date;
 
 ALTER TABLE guards DROP CONSTRAINT IF EXISTS guards_uniform_condition_check;
 ALTER TABLE guards ADD CONSTRAINT guards_uniform_condition_check
@@ -126,6 +132,30 @@ ALTER TABLE guards ADD CONSTRAINT guards_uniform_issued_fields_check CHECK (
     uniform_issued = true
     AND uniform_issued_on IS NOT NULL
     AND uniform_condition IS NOT NULL
+    AND uniform_returned_on IS NULL
+  )
+);
+
+ALTER TABLE guards DROP CONSTRAINT IF EXISTS guards_tshirt_size_check;
+ALTER TABLE guards ADD CONSTRAINT guards_tshirt_size_check
+  CHECK (
+    tshirt_size IS NULL
+    OR (tshirt_size >= 1 AND tshirt_size <= 7)
+    OR (tshirt_size >= 44 AND tshirt_size <= 70)
+  );
+
+ALTER TABLE guards DROP CONSTRAINT IF EXISTS guards_tshirt_issued_fields_check;
+ALTER TABLE guards ADD CONSTRAINT guards_tshirt_issued_fields_check CHECK (
+  (
+    tshirt_issued = false
+    AND tshirt_size IS NULL
+    AND tshirt_issued_on IS NULL
+  )
+  OR (
+    tshirt_issued = true
+    AND tshirt_size IS NOT NULL
+    AND tshirt_issued_on IS NOT NULL
+    AND tshirt_returned_on IS NULL
   )
 );
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button, ButtonLink } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import { designTokens } from "../../lib/design-tokens";
 import { rateUnitLabels, shiftKindLabels, shiftKindShortLabels, incidentCategoryLabels } from "../../lib/operations/status-labels";
@@ -3030,8 +3031,7 @@ export function SchedulerGrid({
                     <div className="grid gap-2 sm:grid-cols-2">
                       <label className="grid gap-1 text-xs font-medium text-app-muted">
                         Дата (Хабаровск)
-                        <input
-                          type="date"
+                        <DateInput
                           name="workedDate"
                           required
                           defaultValue={incidentDraft.dateIso}

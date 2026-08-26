@@ -20,6 +20,11 @@ function row(partial: Partial<GuardListRow>): GuardListRow {
     uniformIssuedOn: null,
     uniformCondition: null,
     uniformNote: null,
+    uniformReturnedOn: null,
+    tshirtIssued: false,
+    tshirtSize: null,
+    tshirtIssuedOn: null,
+    tshirtReturnedOn: null,
     position: "Guard",
     licenseType: "Licensed",
     licenseGrade: 4,
@@ -54,7 +59,10 @@ describe("guard-registry-export", () => {
     expect(exported[22]).toBe("");
     expect(exported[23]).toBe("");
     expect(exported[24]).toBe("");
-    expect(exported[25]).toBe("Объект 1");
+    expect(exported[25]).toBe("нет");
+    expect(exported[26]).toBe("");
+    expect(exported[27]).toBe("");
+    expect(exported[28]).toBe("Объект 1");
   });
 
   it("builds uniform issued columns when form is issued", () => {
@@ -71,6 +79,22 @@ describe("guard-registry-export", () => {
     expect(exported[22]).toBe("15.01.2026");
     expect(exported[23]).toBe("новое");
     expect(exported[24]).toBe("комплект полный");
+  });
+
+  it("exports tshirt even when uniform is not issued", () => {
+    const exported = buildGuardRegistryExportRow(
+      row({
+        uniformIssued: false,
+        tshirtIssued: true,
+        tshirtSize: 4,
+        tshirtIssuedOn: "2026-06-01",
+      }),
+      0,
+    );
+    expect(exported[21]).toBe("нет");
+    expect(exported[25]).toBe("да");
+    expect(exported[26]).toBe("L");
+    expect(exported[27]).toBe("01.06.2026");
   });
 
   it("exports expired trainee as not trainee", () => {
@@ -95,6 +119,9 @@ describe("guard-registry-export", () => {
         "Дата выдачи формы",
         "Состояние формы",
         "Примечание к форме",
+        "Футболка выдана",
+        "Размер футболки",
+        "Дата выдачи футболки",
       ]),
     );
     expect(GUARD_REGISTRY_EXPORT_HEADERS.length).toBeGreaterThan(26);

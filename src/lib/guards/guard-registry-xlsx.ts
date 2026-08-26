@@ -7,7 +7,7 @@ import type { GuardListRow } from "../operations/guards-repository";
 
 const TITLE = "Реестр охранников";
 
-/** Ширины синхронизированы с `GUARD_REGISTRY_EXPORT_HEADERS` (28 колонок). */
+/** Ширины синхронизированы с `GUARD_REGISTRY_EXPORT_HEADERS` (31 колонка). */
 const COLUMN_WIDTHS = [
   6, // № п/п
   18, // Фамилия
@@ -34,6 +34,9 @@ const COLUMN_WIDTHS = [
   14, // Дата выдачи формы
   12, // Состояние формы
   20, // Примечание к форме
+  12, // Футболка выдана
+  12, // Размер футболки
+  16, // Дата выдачи футболки
   28, // Объекты
   14, // Статус
   14, // Дата увольнения

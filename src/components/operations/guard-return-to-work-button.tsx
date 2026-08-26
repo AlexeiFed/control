@@ -8,6 +8,7 @@ import { toDateIsoKhabarovsk } from "../../lib/format/display-date";
 import { designTokens } from "../../lib/design-tokens";
 import { toast } from "../../store/toast-store";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 
 type GuardReturnToWorkButtonProps = {
   guardId: string;
@@ -66,11 +67,10 @@ export function GuardReturnToWorkButton({ guardId, dismissedOn }: GuardReturnToW
   return (
     <div className="flex w-full flex-col gap-2 rounded-button border border-app-border bg-app-elevated p-3 sm:w-auto sm:min-w-[16rem]">
       <p className="text-xs font-medium text-app-text">Дата возврата (Б/У)</p>
-      <input
-        type="date"
+      <DateInput
         value={returnedOn}
         min={dismissedOn ?? undefined}
-        onChange={(e) => setReturnedOn(e.target.value)}
+        onChange={setReturnedOn}
         disabled={isPending}
         className="h-9 w-full rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary disabled:opacity-60"
       />

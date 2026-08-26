@@ -2,6 +2,7 @@ import type { PayrollHalf } from "../payroll/advance-period";
 import { dateIsoBelongsToHalf } from "../payroll/advance-period";
 import { getDaysInMonth } from "../format/display-date";
 import type { GuardAdvanceTotals } from "../operations/advances-repository";
+import { guardObjectAdvanceKey } from "../operations/advances-repository";
 import type { TimesheetRow } from "../scheduling/timesheet";
 import { DEFAULT_SHIFT_TIMEZONE, localDateKeyInTimeZone } from "../scheduling/local-date-key";
 
@@ -67,7 +68,8 @@ export function buildPayrollStatementSheets(input: {
   year: number;
   monthIndex0: number;
   guardIdByName: Map<string, string>;
-  advancesByGuardId: Map<string, GuardAdvanceTotals>;
+  /** Ключ `guardId:objectId` — аванс попадает только в ведомость этого объекта. */
+  advancesByGuardObject: Map<string, GuardAdvanceTotals>;
   objectIdFilter?: string;
   resolveOperationalDateIso?: (row: TimesheetRow) => string;
 }): PayrollStatementSheet[] {
@@ -112,7 +114,9 @@ export function buildPayrollStatementSheets(input: {
       .sort((a, b) => a.guardName.localeCompare(b.guardName, "ru-RU"))
       .map((entry) => {
         const guardId = input.guardIdByName.get(entry.guardName);
-        const advances = guardId ? input.advancesByGuardId.get(guardId) : undefined;
+        const advances = guardId
+          ? input.advancesByGuardObject.get(guardObjectAdvanceKey(guardId, object.id))
+          : undefined;
         const advanceRub =
           input.half === "first" ? (advances?.firstHalfRub ?? 0) : (advances?.secondHalfRub ?? 0);
         const totalSalaryRub = Math.round((entry.salaryCents / 100) * 100) / 100;

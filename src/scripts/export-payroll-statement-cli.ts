@@ -4,7 +4,7 @@ import "dotenv/config";
 import { buildPayrollStatementSheets } from "../lib/accounting/payroll-statement";
 import { buildPayrollStatementWorkbook } from "../lib/accounting/payroll-statement-xlsx";
 import { listTimesheetEntries, listTimesheetFilterOptions } from "../lib/accounting/timesheet-entries-repository";
-import { sumAdvancesByGuardForMonth } from "../lib/operations/advances-repository";
+import { sumAdvancesByGuardObjectForMonth } from "../lib/operations/advances-repository";
 import type { PayrollHalf } from "../lib/payroll/advance-period";
 import { monthEndKhabarovsk, monthStartKhabarovsk } from "../lib/payroll/advance-period";
 
@@ -58,10 +58,10 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const { year, monthIndex0, start, end } = monthRange(args.month);
 
-  const [rows, filterOptions, advancesByGuardId] = await Promise.all([
+  const [rows, filterOptions, advancesByGuardObject] = await Promise.all([
     listTimesheetEntries(start, end, { objectId: args.objectId }),
     listTimesheetFilterOptions(),
-    sumAdvancesByGuardForMonth(year, monthIndex0),
+    sumAdvancesByGuardObjectForMonth(year, monthIndex0),
   ]);
 
   const objects = await loadObjects(args.objectId);
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     year,
     monthIndex0,
     guardIdByName,
-    advancesByGuardId,
+    advancesByGuardObject,
     objectIdFilter: args.objectId,
   });
 

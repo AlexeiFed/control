@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS shift_logs (
   author_user_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   note text NOT NULL CHECK (char_length(note) > 0),
-  incident_level text NOT NULL CHECK (incident_level IN ('None', 'Info', 'Warning', 'Critical'))
+  incident_level text NOT NULL CHECK (incident_level IN ('None', 'Info', 'Warning', 'Critical')),
+  accounted_at timestamptz NULL
 );
 
 CREATE INDEX IF NOT EXISTS guards_name_idx ON guards (last_name, first_name);

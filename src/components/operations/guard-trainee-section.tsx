@@ -7,6 +7,7 @@ import { assignGuardProfilePeriodAction } from "../../app/guards/actions";
 import { designTokens } from "../../lib/design-tokens";
 import { toDateIsoKhabarovsk, formatDisplayDateFromIso } from "../../lib/format/display-date";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 
 type GuardTraineeSectionProps = {
   guardId: string;
@@ -105,8 +106,7 @@ export function GuardTraineeSection({ guardId, isTrainee, traineeUntil }: GuardT
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-app-muted">Снять статус стажёра с даты</span>
-                <input
-                  type="date"
+                <DateInput
                   name="effectiveFrom"
                   required
                   defaultValue={todayIso}

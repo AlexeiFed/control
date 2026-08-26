@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  BookOpenCheck,
   CalendarDays,
   CalendarHeart,
   ClipboardList,
@@ -60,9 +61,16 @@ const navigationItems: Array<{
   {
     title: "Графики смен",
     href: "/scheduler",
-    description: "Сетка смен, конфликты и журналы",
+    description: "Сетка смен и конфликты",
     permission: "schedule:read",
     icon: CalendarDays,
+  },
+  {
+    title: "Журнал смен",
+    href: "/shift-logs",
+    description: "Записи и инциденты по сменам",
+    permission: "schedule:read",
+    icon: BookOpenCheck,
   },
   {
     title: "Аванс",

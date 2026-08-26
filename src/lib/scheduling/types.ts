@@ -73,6 +73,8 @@ export type ShiftLog = {
   createdAt: Date;
   note: string;
   incidentLevel: "None" | "Info" | "Warning" | "Critical";
+  /** Когда запись отмечена как учтённая; null/undefined — не учтена. */
+  accountedAt?: Date | null;
 };
 
 /** Минимальный профиль охранника для графика до полной синхронизации с БД. */

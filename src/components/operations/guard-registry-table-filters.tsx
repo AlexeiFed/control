@@ -51,7 +51,7 @@ export function GuardRegistryTableFiltersPanel({
         </p>
       </div>
 
-      <div className="mt-2 grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-9 lg:items-end">
+      <div className="mt-2 grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-10 lg:items-end">
         <FilterCell label="Имя / фамилия">
           <input
             value={filters.query}
@@ -114,6 +114,18 @@ export function GuardRegistryTableFiltersPanel({
           <select
             value={filters.hasUniform}
             onChange={(e) => onChange({ hasUniform: e.target.value as YesNoFilter })}
+            className={fieldClass}
+          >
+            <option value="">—</option>
+            <option value="yes">да</option>
+            <option value="no">нет</option>
+          </select>
+        </FilterCell>
+
+        <FilterCell label="Футболка">
+          <select
+            value={filters.hasTshirt}
+            onChange={(e) => onChange({ hasTshirt: e.target.value as YesNoFilter })}
             className={fieldClass}
           >
             <option value="">—</option>

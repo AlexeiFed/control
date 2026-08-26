@@ -11,12 +11,14 @@ import {
 import type { PayrollHalf } from "../../lib/payroll/advance-period";
 import { halfPeriodLabelRu, halfPeriodShortRu } from "../../lib/payroll/advance-period";
 import { Button, ButtonLink } from "../ui/button";
+import { SearchableSelect } from "../ui/searchable-select";
 import { toast } from "../../store/toast-store";
 
 type Props = {
   monthKey: string;
   advances: GuardAdvanceRecord[];
   guardOptions: Array<{ id: string; name: string }>;
+  objectOptions: Array<{ id: string; name: string }>;
   canManage: boolean;
   issuerName: string;
 };
@@ -27,9 +29,10 @@ const rub = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 0,
 });
 
-export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Props) {
+export function AdvancesView({ monthKey, advances, guardOptions, objectOptions, canManage }: Props) {
   const [isPending, startTransition] = useTransition();
   const [guardId, setGuardId] = useState(guardOptions[0]?.id ?? "");
+  const [objectId, setObjectId] = useState("");
   const [periodHalf, setPeriodHalf] = useState<PayrollHalf>("first");
   const [amountInput, setAmountInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
@@ -49,6 +52,10 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
       toast({ title: "Выберите охранника", message: "Выберите охранника из списка", variant: "error" });
       return;
     }
+    if (!objectId) {
+      toast({ title: "Выберите объект", message: "Аванс должен быть привязан к одному объекту", variant: "error" });
+      return;
+    }
     const amount = Number(amountInput);
     if (!Number.isFinite(amount) || amount <= 0) {
       toast({ title: "Укажите сумму аванса", message: "Сумма должна быть больше нуля", variant: "error" });
@@ -57,6 +64,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
 
     const formData = new FormData();
     formData.set("guardId", guardId);
+    formData.set("objectId", objectId);
     formData.set("month", monthKey);
     formData.set("periodHalf", periodHalf);
     formData.set("amountRub", String(Math.round(amount)));
@@ -140,7 +148,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
       {canManage ? (
         <form
           onSubmit={handleSubmit}
-          className="mt-6 grid gap-3 rounded-lg border border-app-border bg-app-bg/40 p-4 sm:grid-cols-2 lg:grid-cols-4"
+          className="mt-6 grid gap-3 rounded-lg border border-app-border bg-app-bg/40 p-4 sm:grid-cols-2 lg:grid-cols-5"
         >
           <label className="grid gap-1 text-xs text-app-muted sm:col-span-2 lg:col-span-1">
             Охранник
@@ -159,6 +167,17 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="grid gap-1 text-xs text-app-muted sm:col-span-2 lg:col-span-1">
+            Объект
+            <SearchableSelect
+              value={objectId}
+              onChange={setObjectId}
+              options={objectOptions}
+              placeholder="Выберите…"
+              searchPlaceholder="Поиск объекта"
+            />
           </label>
 
           <fieldset className="grid gap-2 sm:col-span-2 lg:col-span-1">
@@ -214,7 +233,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
             />
           </label>
 
-          <div className="sm:col-span-2 lg:col-span-4">
+          <div className="sm:col-span-2 lg:col-span-5">
             <Button type="submit" disabled={isPending} className="w-full sm:w-auto">
               {isPending ? "Сохранение…" : "Выдать аванс"}
             </Button>
@@ -237,6 +256,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
                 <thead className="bg-app-elevated text-app-muted">
                   <tr>
                     <th className="px-4 py-3">Охранник</th>
+                    <th className="px-4 py-3">Объект</th>
                     <th className="px-4 py-3">Период</th>
                     <th className="px-4 py-3 text-right">Сумма</th>
                     <th className="px-4 py-3">Выдал</th>
@@ -248,6 +268,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
                   {advances.map((row) => (
                     <tr key={row.id} className="border-t border-app-border">
                       <td className="px-4 py-3 font-medium">{row.guardName}</td>
+                      <td className="px-4 py-3 text-app-muted">{row.objectName}</td>
                       <td className="px-4 py-3 text-app-muted">
                         {halfPeriodShortRu(row.periodHalf, year, monthIndex0)}
                       </td>
@@ -286,7 +307,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
                     <div className="min-w-0">
                       <div className="font-medium">{row.guardName}</div>
                       <div className="mt-1 text-xs text-app-muted">
-                        {halfPeriodLabelRu(row.periodHalf, year, monthIndex0)} · {monthLabel}
+                        {row.objectName} · {halfPeriodLabelRu(row.periodHalf, year, monthIndex0)} · {monthLabel}
                       </div>
                     </div>
                     <div className="shrink-0 text-right text-lg font-semibold tabular-nums text-accent-success">
@@ -330,7 +351,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, canManage }: Pr
           >
             <h3 className="text-lg font-semibold">Удалить аванс?</h3>
             <p className="mt-2 text-sm text-app-muted">
-              {deleteTarget.guardName} — {rub.format(deleteTarget.amountRub)},{" "}
+              {deleteTarget.guardName} — {deleteTarget.objectName} — {rub.format(deleteTarget.amountRub)},{" "}
               {halfPeriodLabelRu(deleteTarget.periodHalf, year, monthIndex0)}.
             </p>
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">

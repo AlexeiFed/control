@@ -1,5 +1,4 @@
 import { SchedulerGridLazy } from "../../components/operations/scheduler-grid-lazy";
-import { ShiftLogPanelLazy } from "../../components/operations/shift-log-panel-lazy";
 import { assertPermission, hasPermission } from "../../lib/auth/rbac";
 import { requireSession } from "../../lib/auth/session";
 import { loadHolidayDateSetForLocalRange } from "../../lib/rates/holiday-calendar";
@@ -12,7 +11,6 @@ import {
 } from "../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../lib/operations/shift-templates-repository";
 import { buildCurrentWeekValidShortageDismissKeySet } from "../../lib/operations/schedule-shortage-dismissals-repository";
-import { listManagedUsers } from "../../lib/auth/user-service";
 import { formatMonthYearLongRu, toDateIso, getKhabarovskComponents, toDateIsoKhabarovsk } from "../../lib/format/display-date";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../lib/scheduling/object-shift-templates";
 import { bulkCreateShiftsAction, cloneObjectWeekShiftsAction, createShiftAction, createShiftLogAction } from "./actions";
@@ -67,12 +65,6 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
     ]);
   const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
   const dismissedShortageKeys = Array.from(shortageDismissState.validKeys);
-  const users = await listManagedUsers();
-  const userMap = new Map(users.map((u) => [u.id, u.name]));
-  const enrichedLogs = snapshot.logs.map(log => ({
-    ...log,
-    authorName: userMap.get(log.authorUserId) || "Неизвестный",
-  }));
   const kh = getKhabarovskComponents(weekStart);
   const objectMonthTitle = formatMonthYearLongRu(kh.year, kh.month0);
   return (
@@ -125,10 +117,6 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
           );
         })()}
         initialScrollY={params.scrollY && /^\d+$/.test(params.scrollY) ? Number(params.scrollY) : undefined}
-      />
-      <ShiftLogPanelLazy
-        logs={enrichedLogs}
-        currentRole={session.user.role}
       />
     </main>
   );

@@ -14,7 +14,7 @@ import { listShiftTemplatesForObjectIds } from "../../../lib/operations/shift-te
 import { buildExpectedShiftsForLocalMonth } from "../../../lib/scheduling/object-shift-templates";
 import { getObjectOperationalDayStartTimeForMonth } from "../../../lib/operations/objects-repository";
 import { listObjectHolidays } from "../../../lib/operations/object-holidays-repository";
-import { getObjectPosts, ensureMonthlyPostsInherited } from "../../../lib/operations/object-posts-repository";
+import { getObjectPosts, ensureMonthlyPostsInherited, syncObjectGuardsToMonthStaff } from "../../../lib/operations/object-posts-repository";
 import { listMonthlyPostGuardsByObject } from "../../../lib/operations/object-monthly-post-guards-repository";
 import {
   listScheduledGuardsByObjectForLocalMonth,
@@ -25,6 +25,7 @@ import { listValidShortageDismissDateIsosForObject } from "../../../lib/operatio
 import { ObjectDetailViewLazy } from "../../../components/operations/object-detail-view-lazy";
 import { getKhabarovskComponents } from "../../../lib/format/display-date";
 import { loadHolidayDateSetForLocalRange } from "../../../lib/rates/holiday-calendar";
+import { isKhabarovskMonthPast } from "../../../lib/scheduling/schedule-month-guards";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -65,6 +66,11 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
 
   await ensureMonthlyPostsInherited(id, monthKey);
 
+  // Текущий/будущий месяц: фиксируем пул объекта в штат месяца (снимок для изоляции, когда месяц станет прошлым).
+  if (!isKhabarovskMonthPast(year, month0)) {
+    await syncObjectGuardsToMonthStaff(id, monthKey, object.guardIds);
+  }
+
   // Смены всех объектов за месяц для пикера доступности — НЕ грузим в SSR:
   // это главный тормоз загрузки и router.refresh() после назначения.
   // Клиент подтягивает их лениво при открытии модалки назначения.
@@ -92,7 +98,10 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
     listValidShortageDismissDateIsosForObject(id),
   ]);
 
-  const gridGuardIds = [...new Set([...object.guardIds, ...shifts.map((s) => s.guardId)])];
+  const monthlyStaffIds = Object.values(monthlyPostGuardsByPostId).flat();
+  const gridGuardIds = [
+    ...new Set([...object.guardIds, ...monthlyStaffIds, ...shifts.map((s) => s.guardId)]),
+  ];
   const [gridGuardNames, gridGuardStatuses] = await Promise.all([
     listGuardDisplayNamesByIds(gridGuardIds),
     listGuardStatusesByIds(gridGuardIds),

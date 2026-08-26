@@ -17,7 +17,7 @@ const baseLog: ShiftLog = {
 };
 
 describe("shift log filters", () => {
-  it("filters by object, guard name, level and text", () => {
+  it("filters by objects, guard name, level and text", () => {
     const logs: ShiftLog[] = [
       baseLog,
       {
@@ -39,7 +39,7 @@ describe("shift log filters", () => {
     ];
 
     const result = filterShiftLogs(logs, {
-      objectName: "Живописный сад",
+      objectNames: ["Живописный сад"],
       guardQuery: "ким",
       level: "Warning",
       textQuery: "опозд",
@@ -60,11 +60,11 @@ describe("shift log filters", () => {
       },
     ];
     expect(
-      filterShiftLogs(logs, { objectName: "ООО СЗ ДАУП", guardQuery: "павлюк" }).map((l) => l.id),
+      filterShiftLogs(logs, { objectNames: ["ООО СЗ ДАУП"], guardQuery: "павлюк" }).map((l) => l.id),
     ).toEqual(["log-pavlyuk"]);
   });
 
-  it("filters by month of shift date", () => {
+  it("filters by multiple months of shift date", () => {
     const logs: ShiftLog[] = [
       baseLog,
       {
@@ -74,8 +74,37 @@ describe("shift log filters", () => {
         shiftStartsAt: new Date("2026-06-01T08:00:00+10:00"),
         shiftEndsAt: new Date("2026-06-01T20:00:00+10:00"),
       },
+      {
+        ...baseLog,
+        id: "log-july",
+        createdAt: new Date("2026-07-10T10:00:00+10:00"),
+        shiftStartsAt: new Date("2026-07-02T08:00:00+10:00"),
+        shiftEndsAt: new Date("2026-07-02T20:00:00+10:00"),
+      },
     ];
-    expect(filterShiftLogs(logs, { monthKey: "2026-05" }).map((l) => l.id)).toEqual(["log-1"]);
-    expect(filterShiftLogs(logs, { monthKey: "2026-06" }).map((l) => l.id)).toEqual(["log-june"]);
+    expect(filterShiftLogs(logs, { monthKeys: ["2026-05"] }).map((l) => l.id)).toEqual(["log-1"]);
+    expect(filterShiftLogs(logs, { monthKeys: ["2026-06", "2026-07"] }).map((l) => l.id)).toEqual([
+      "log-june",
+      "log-july",
+    ]);
+  });
+
+  it("filters by multiple objects when guard query is empty", () => {
+    const logs: ShiftLog[] = [
+      baseLog,
+      {
+        ...baseLog,
+        id: "log-2",
+        objectName: "Склад Север",
+      },
+      {
+        ...baseLog,
+        id: "log-3",
+        objectName: "База Юг",
+      },
+    ];
+    expect(
+      filterShiftLogs(logs, { objectNames: ["Живописный сад", "База Юг"] }).map((l) => l.id),
+    ).toEqual(["log-1", "log-3"]);
   });
 });

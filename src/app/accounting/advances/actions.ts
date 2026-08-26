@@ -27,6 +27,7 @@ export async function issueGuardAdvanceAction(formData: FormData) {
   assertPermission(session.user.role, "advances:manage");
 
   const guardId = z.string().uuid().parse(formData.get("guardId"));
+  const objectId = z.string().uuid({ message: "Выберите объект" }).parse(formData.get("objectId"));
   const monthKey = z.string().parse(formData.get("month"));
   const periodHalf = periodHalfSchema.parse(formData.get("periodHalf"));
   const amountRub = z.coerce.number().int().min(1).max(9_999_999).parse(formData.get("amountRub"));
@@ -36,6 +37,7 @@ export async function issueGuardAdvanceAction(formData: FormData) {
 
   await createGuardAdvance({
     guardId,
+    objectId,
     year,
     monthIndex0,
     periodHalf,

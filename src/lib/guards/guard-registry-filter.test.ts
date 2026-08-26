@@ -19,6 +19,11 @@ function row(partial: Partial<GuardListRow>): GuardListRow {
     uniformIssuedOn: null,
     uniformCondition: null,
     uniformNote: null,
+    uniformReturnedOn: null,
+    tshirtIssued: false,
+    tshirtSize: null,
+    tshirtIssuedOn: null,
+    tshirtReturnedOn: null,
     position: "Guard",
     licenseType: "Licensed",
     licenseGrade: 5,
@@ -65,6 +70,7 @@ describe("filterGuardsForRegistryTable", () => {
       employed: "yes",
       hasCar: "",
       hasUniform: "",
+      hasTshirt: "",
       objectId: "",
       status: "",
     });
@@ -80,6 +86,7 @@ describe("filterGuardsForRegistryTable", () => {
       employed: "",
       hasCar: "yes",
       hasUniform: "",
+      hasTshirt: "",
       objectId: "",
       status: "",
     });
@@ -121,6 +128,7 @@ describe("filterGuardsForRegistryTable", () => {
         employed: "",
         hasCar: "",
         hasUniform: "no",
+        hasTshirt: "",
         objectId: "",
         status: "",
       });
@@ -135,6 +143,7 @@ describe("filterGuardsForRegistryTable", () => {
         employed: "",
         hasCar: "",
         hasUniform: "yes",
+        hasTshirt: "",
         objectId: "",
         status: "",
       });
@@ -150,10 +159,65 @@ describe("filterGuardsForRegistryTable", () => {
         employed: "",
         hasCar: "",
         hasUniform: "yes",
+        hasTshirt: "",
         objectId: "",
         status: "",
       });
       expect(result.some((g) => g.id === "3")).toBe(false);
+    });
+  });
+
+  describe("filters by tshirt issued independently of uniform", () => {
+    const tshirtGuards = [
+      row({
+        id: "only-tshirt",
+        tshirtIssued: true,
+        tshirtSize: 4,
+        tshirtIssuedOn: "2026-06-01",
+        uniformIssued: false,
+      }),
+      row({
+        id: "only-uniform",
+        uniformIssued: true,
+        uniformIssuedOn: "2026-01-01",
+        uniformCondition: "new",
+        tshirtIssued: false,
+      }),
+      row({
+        id: "none",
+        uniformIssued: false,
+        tshirtIssued: false,
+      }),
+    ];
+
+    it("includes tshirt-only guards when hasTshirt is yes", () => {
+      const result = filterGuardsForRegistryTable(tshirtGuards, {
+        query: "",
+        position: "",
+        licenseType: "",
+        employed: "",
+        hasCar: "",
+        hasUniform: "",
+        hasTshirt: "yes",
+        objectId: "",
+        status: "",
+      });
+      expect(result.map((g) => g.id)).toEqual(["only-tshirt"]);
+    });
+
+    it("excludes tshirt-only guards when hasTshirt is no", () => {
+      const result = filterGuardsForRegistryTable(tshirtGuards, {
+        query: "",
+        position: "",
+        licenseType: "",
+        employed: "",
+        hasCar: "",
+        hasUniform: "",
+        hasTshirt: "no",
+        objectId: "",
+        status: "",
+      });
+      expect(result.map((g) => g.id)).toEqual(["only-uniform", "none"]);
     });
   });
 });

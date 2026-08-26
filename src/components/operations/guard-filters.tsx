@@ -9,6 +9,7 @@ import {
   deleteGuardAction,
 } from "../../app/guards/actions";
 import { Button, ButtonLink } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import { PhoneInput } from "../ui/phone-input";
 import {
   uniformHeightOptions,
@@ -229,8 +230,7 @@ export function GuardFilters({ guards, objects, filters, userId }: GuardFiltersP
         />
         <label className="flex h-12 flex-col justify-center gap-0.5 text-xs text-app-muted">
           <span>Дата рождения</span>
-          <input
-            type="date"
+          <DateInput
             name="birthDate"
             className="h-8 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary"
           />
@@ -248,12 +248,11 @@ export function GuardFilters({ guards, objects, filters, userId }: GuardFiltersP
         {createStatus === "Dismissed" ? (
           <label className="flex h-12 flex-col justify-center gap-0.5 text-xs text-app-muted">
             <span>Дата увольнения</span>
-            <input
-              type="date"
+            <DateInput
               name="dismissedOn"
               required
               value={createDismissedOn}
-              onChange={(e) => setCreateDismissedOn(e.target.value)}
+              onChange={setCreateDismissedOn}
               className="h-8 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary"
             />
           </label>
@@ -329,8 +328,7 @@ export function GuardFilters({ guards, objects, filters, userId }: GuardFiltersP
         </label>
         <label className="flex flex-col gap-0.5 text-xs text-app-muted lg:col-span-1">
           <span>Стажировка до</span>
-          <input
-            type="date"
+          <DateInput
             name="traineeUntil"
             className="h-8 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary"
           />

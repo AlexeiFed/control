@@ -27,6 +27,7 @@ import {
   updateShiftAction,
 } from "../../app/scheduler/actions";
 import { Button, ButtonLink } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import type { ShiftLogDraft } from "./object-month-schedule-grid";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import type { GuardSchedulePickerRow } from "../../lib/operations/guards-repository";
@@ -58,6 +59,7 @@ import {
   addDaysToIsoDate,
 } from "../../lib/format/display-date";
 import { shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
+import { resolveScheduleMonthRosterIds } from "../../lib/scheduling/schedule-month-guards";
 import {
   defaultSutkiShiftInterval,
   normalizeOperationalAnchorTime,
@@ -715,57 +717,79 @@ export function ObjectDetailView({
     return result;
   }, [posts, expectedShiftsByPostId, days, dayColumnMetaByDay]);
 
-  // Список охранников для графика
-  const guardsForGrid = useMemo(() => {
-    const assignedIds = new Set(object.guardIds);
-    const shiftGuardIds = new Set(shifts.map((s) => s.guardId));
-    const allIds = new Set<string>([...Array.from(assignedIds), ...Array.from(shiftGuardIds)]);
-
-    return Array.from(allIds)
-      .map((id) => ({
-        guardId: id,
-        displayName:
-          gridGuardNames[id] ??
-          scheduledGuards.find((g) => g.guardId === id)?.displayName ??
-          "Неизвестный",
-        isAssigned: assignedIds.has(id),
-        status: gridGuardStatuses[id],
-      }))
-      .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
-  }, [object.guardIds, shifts, gridGuardNames, gridGuardStatuses, scheduledGuards]);
-
   const monthKey = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
 
   const firstPostId = posts[0]?.id ?? null;
 
+  // Прошлые месяцы: снимок штата месяца (изоляция от поздних назначений).
+  // Текущий/будущий: пул «Охранники объекта» — без отдельных блоков назначения.
   const guardsByPost = useMemo(() => {
+    const mapRow = (id: string, assignedIds: Set<string>) => ({
+      guardId: id,
+      displayName:
+        gridGuardNames[id] ??
+        scheduledGuards.find((g) => g.guardId === id)?.displayName ??
+        "Неизвестный",
+      isAssigned: assignedIds.has(id),
+      status: gridGuardStatuses[id],
+    });
+    const byName = (
+      a: { displayName: string },
+      b: { displayName: string },
+    ) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU");
+
     if (posts.length === 0) {
-      return { "": guardsForGrid };
+      const allIds = resolveScheduleMonthRosterIds({
+        year: viewYear,
+        monthIndex0: viewMonth0,
+        objectGuardIds: object.guardIds,
+        monthlyStaffIds: [],
+        shiftGuardIds: shifts.map((s) => s.guardId),
+      });
+      const assignedIds = new Set(object.guardIds);
+      return {
+        "": allIds.map((id) => mapRow(id, assignedIds)).sort(byName),
+      };
     }
 
-    const result: Record<string, typeof guardsForGrid> = {};
+    const result: Record<string, ReturnType<typeof mapRow>[]> = {};
     for (const post of posts) {
-      const assignedIds = new Set(monthlyPostGuardsByPostId[post.id] ?? []);
-      const shiftGuardIds = new Set(
-        shifts
-          .filter((s) => shiftMatchesPost(s.postId, post.id, firstPostId))
-          .map((s) => s.guardId),
+      const staffIds = monthlyPostGuardsByPostId[post.id] ?? [];
+      const shiftGuardIds = shifts
+        .filter((s) => shiftMatchesPost(s.postId, post.id, firstPostId))
+        .map((s) => s.guardId);
+      const allIds = resolveScheduleMonthRosterIds({
+        year: viewYear,
+        monthIndex0: viewMonth0,
+        objectGuardIds: object.guardIds,
+        monthlyStaffIds: staffIds,
+        shiftGuardIds,
+      });
+      // isAssigned: в прошлом — был в снимке штата; в текущем — в пуле объекта
+      const assignedIds = new Set(
+        resolveScheduleMonthRosterIds({
+          year: viewYear,
+          monthIndex0: viewMonth0,
+          objectGuardIds: object.guardIds,
+          monthlyStaffIds: staffIds,
+          shiftGuardIds: [],
+        }),
       );
-      const allIds = new Set([...assignedIds, ...shiftGuardIds]);
-      result[post.id] = Array.from(allIds)
-        .map((id) => ({
-          guardId: id,
-          displayName:
-            gridGuardNames[id] ??
-            scheduledGuards.find((g) => g.guardId === id)?.displayName ??
-            "Неизвестный",
-          isAssigned: assignedIds.has(id),
-          status: gridGuardStatuses[id],
-        }))
-        .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
+      result[post.id] = allIds.map((id) => mapRow(id, assignedIds)).sort(byName);
     }
     return result;
-  }, [posts, monthlyPostGuardsByPostId, shifts, guardsForGrid, gridGuardNames, gridGuardStatuses, scheduledGuards, firstPostId]);
+  }, [
+    posts,
+    monthlyPostGuardsByPostId,
+    shifts,
+    gridGuardNames,
+    gridGuardStatuses,
+    scheduledGuards,
+    firstPostId,
+    viewYear,
+    viewMonth0,
+    object.guardIds,
+  ]);
 
   const pickerGuardList = pickerGuards ?? [];
 
@@ -1316,6 +1340,7 @@ export function ObjectDetailView({
             const fd = new FormData();
             fd.append("objectId", object.id);
             fd.append("guardIds", newIds.join(","));
+            fd.append("month", monthKey);
             await setObjectGuardsAction(fd);
           }}
         />
@@ -1879,8 +1904,7 @@ export function ObjectDetailView({
                     <div className="grid gap-2 sm:grid-cols-2">
                       <label className="grid gap-1 text-xs font-medium text-app-muted">
                         Дата (Хабаровск)
-                        <input
-                          type="date"
+                        <DateInput
                           name="workedDate"
                           required
                           defaultValue={incidentDraft.dateIso}

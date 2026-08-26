@@ -1,23 +1,17 @@
 import { notFound } from "next/navigation";
-import { GuardHistoryCard } from "../../../components/operations/guard-history-card";
+import { GuardProfileDeferredSections } from "../../../components/operations/guard-profile-deferred";
 import { GuardProfileEditor } from "../../../components/operations/guard-profile-editor";
 import { GuardReturnToWorkButton } from "../../../components/operations/guard-return-to-work-button";
-import { GuardServiceRecordSection } from "../../../components/operations/guard-service-record-section";
 import { GuardTraineeSection } from "../../../components/operations/guard-trainee-section";
-import { GuardScheduleSection } from "../../../components/operations/guard-schedule-section";
+import { GuardUniformReturnControl } from "../../../components/operations/guard-uniform-return-control";
 import { ButtonLink } from "../../../components/ui/button";
 import { assertPermission } from "../../../lib/auth/rbac";
 import { requireSession } from "../../../lib/auth/session";
-import {
-  getGuardDetails,
-  listGuardServiceHistory,
-  listGuardShiftHistory,
-} from "../../../lib/operations/guards-repository";
+import { getGuardDetails } from "../../../lib/operations/guards-repository";
 import { listGuardProfilePeriods } from "../../../lib/operations/guard-profile-periods-repository";
 import { resolveGuardProfileFromPeriods } from "../../../lib/guards/profile-periods";
 import { canReturnGuardToWork } from "../../../lib/guards/return-to-work";
 import type { Guard } from "../../../lib/scheduling/types";
-import { listObjectsForAssignment } from "../../../lib/operations/objects-repository";
 import {
   guardEmploymentLabels,
   guardLicenseLabels,
@@ -26,21 +20,15 @@ import {
 } from "../../../lib/operations/status-labels";
 import { designTokens } from "../../../lib/design-tokens";
 import {
+  formatTshirtStatusDisplay,
   formatUniformConditionLabel,
   formatUniformSizeDisplay,
   hasGuardUniform,
 } from "../../../lib/format/uniform";
-import { calculateShiftHours } from "../../../lib/scheduling/hour-calculator";
 import {
   formatDisplayDateFromIso,
   formatDisplayDateLocal,
-  formatMonthYearLongRu,
-  getKhabarovskComponents,
-  intervalOverlaps,
-  khabarovskMonthRangeContaining,
-  khabarovskWeekRangeContaining,
   toDateIsoKhabarovsk,
-  addDaysToIsoDate,
 } from "../../../lib/format/display-date";
 import { Phone, ShieldCheck, Car, Briefcase } from "lucide-react";
 
@@ -56,12 +44,10 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
   const { guardId } = await params;
   const { date } = (await searchParams) ?? {};
 
-  const [guard, history, serviceHistory, profilePeriods, objects] = await Promise.all([
+  // Только лёгкие данные — shell стримится сразу; смены/история — в Suspense.
+  const [guard, profilePeriods] = await Promise.all([
     getGuardDetails(guardId),
-    listGuardShiftHistory(guardId),
-    listGuardServiceHistory(guardId),
     listGuardProfilePeriods(guardId),
-    listObjectsForAssignment(),
   ]);
   if (!guard) notFound();
 
@@ -90,15 +76,6 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
     .filter((p) => p.periodKind === "position")
     .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
 
-  const weekRange = khabarovskWeekRangeContaining(initialDate);
-  const monthRange = khabarovskMonthRangeContaining(initialDate);
-  const weekStats = sumHours(history.filter((shift) => intervalOverlaps(shift, weekRange)));
-  const monthStats = sumHours(history.filter((shift) => intervalOverlaps(shift, monthRange)));
-  const weekEndIso = addDaysToIsoDate(toDateIsoKhabarovsk(weekRange.start), 6);
-  const weekCardTitle = `За неделю (${formatDayMonthShort(toDateIsoKhabarovsk(weekRange.start))}–${formatDayMonthShort(weekEndIso)})`;
-  const monthKh = getKhabarovskComponents(new Date(`${initialDate}T12:00:00+10:00`));
-  const monthCardTitle = `За месяц (${formatMonthYearLongRu(monthKh.year, monthKh.month0).replace(/\s*г\.?\s*$/, "").toLowerCase()})`;
-
   const statusLabel = guardStatusLabels[guard.status];
   const statusColors = {
     Active: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
@@ -117,7 +94,6 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
       }}
     >
       <section className="flex flex-col gap-4 rounded-card border border-app-border bg-app-surface p-3 shadow-glow sm:gap-6 sm:p-6">
-        {/* Заголовок страницы */}
         <div className="flex flex-col gap-3 border-b border-app-border/40 pb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pb-5">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent-primary sm:text-xs">
@@ -127,7 +103,9 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
               <span className="min-w-0">
                 {[guard.lastName, guard.firstName, guard.middleName].filter(Boolean).join(" ")}
               </span>
-              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase sm:text-xs ${statusColors}`}>
+              <span
+                className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase sm:text-xs ${statusColors}`}
+              >
                 {statusLabel}
               </span>
             </h1>
@@ -142,15 +120,13 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
           </div>
         </div>
 
-        {/* 1. Вся информация в удобном читаемом виде */}
         <div className="grid items-start gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-          {/* Блок: Основные данные */}
           <article className="flex flex-col gap-3 rounded-button border border-app-border bg-app-elevated p-3 shadow-sm sm:gap-4 sm:p-5">
             <div className="flex items-center gap-2 border-b border-app-border/40 pb-2.5">
               <Briefcase className="size-4 text-accent-primary" />
-              <h3 className="font-bold text-sm text-app-text uppercase tracking-wider">Основные данные</h3>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-app-text">Основные данные</h3>
             </div>
-            <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-sm">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm">
               <span className="text-app-muted">Должность:</span>
               <span className="font-semibold text-app-text">{guardPositionLabels[guard.position]}</span>
 
@@ -160,7 +136,9 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
               </span>
 
               <span className="text-app-muted">Занятость:</span>
-              <span className="font-semibold text-app-text">{guardEmploymentLabels[guard.employmentType]}</span>
+              <span className="font-semibold text-app-text">
+                {guardEmploymentLabels[guard.employmentType]}
+              </span>
 
               <span className="text-app-muted">Дата оф. труд.:</span>
               <span className="font-semibold text-app-text">
@@ -173,26 +151,26 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
               </span>
             </div>
 
-            {/* Послужной список (Timeline) */}
             {positionPeriods.length > 0 && (
               <div className="mt-2 border-t border-app-border/40 pt-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-app-muted mb-3">Послужной список</h4>
-                <div className="relative border-l border-app-border/60 pl-4 ml-2 space-y-4">
+                <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-app-muted">
+                  Послужной список
+                </h4>
+                <div className="relative ml-2 space-y-4 border-l border-app-border/60 pl-4">
                   {positionPeriods.map((period) => (
                     <div key={period.id} className="relative">
-                      {/* Маркер на таймлайне */}
                       <div className="absolute -left-[20.5px] top-1.5 size-2 rounded-full border border-app-surface bg-accent-primary" />
                       <div className="flex flex-col gap-1 text-xs sm:flex-row sm:items-start sm:justify-between sm:gap-2">
                         <span className="font-bold text-app-text">
                           {guardPositionLabels[period.position || "Guard"]}
                         </span>
-                        <span className="shrink-0 text-app-muted tabular-nums">
+                        <span className="shrink-0 tabular-nums text-app-muted">
                           {formatDisplayDateFromIso(period.effectiveFrom)} —{" "}
                           {period.effectiveTo ? formatDisplayDateFromIso(period.effectiveTo) : "…"}
                         </span>
                       </div>
                       {period.note ? (
-                        <p className="mt-0.5 text-app-muted italic">{period.note}</p>
+                        <p className="mt-0.5 italic text-app-muted">{period.note}</p>
                       ) : null}
                     </div>
                   ))}
@@ -201,13 +179,12 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
             )}
           </article>
 
-          {/* Блок: Связь и логистика */}
           <article className="flex flex-col gap-3 rounded-button border border-app-border bg-app-elevated p-3 shadow-sm sm:gap-4 sm:p-5">
             <div className="flex items-center gap-2 border-b border-app-border/40 pb-2.5">
               <Phone className="size-4 text-accent-primary" />
               <h3 className="text-sm font-bold uppercase tracking-wider text-app-text">Связь и логистика</h3>
             </div>
-            <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-sm">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm">
               <span className="text-app-muted">Телефон:</span>
               <span className="font-bold text-app-text">{guard.phone || "—"}</span>
 
@@ -215,7 +192,7 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
               <span className="font-semibold text-app-text">{guard.contactPhone || "—"}</span>
 
               <span className="text-app-muted">Личное авто:</span>
-              <span className="font-semibold text-app-text flex items-center gap-1">
+              <span className="flex items-center gap-1 font-semibold text-app-text">
                 {guard.hasCar ? (
                   <>
                     <Car className="size-4 text-status-active" />
@@ -238,9 +215,7 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                 {guard.uniformIssued
                   ? [
                       "Да",
-                      guard.uniformIssuedOn
-                        ? formatDisplayDateFromIso(guard.uniformIssuedOn)
-                        : null,
+                      guard.uniformIssuedOn ? formatDisplayDateFromIso(guard.uniformIssuedOn) : null,
                       guard.uniformCondition
                         ? formatUniformConditionLabel(guard.uniformCondition)
                         : null,
@@ -248,18 +223,37 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                     ]
                       .filter(Boolean)
                       .join(" · ")
-                  : "Нет"}
+                  : guard.uniformReturnedOn
+                    ? `Нет · сдана ${formatDisplayDateFromIso(guard.uniformReturnedOn)}`
+                    : "Нет"}
               </span>
+              <span className="text-app-muted">Выдана футболка:</span>
+              <span className="font-semibold text-app-text">
+                {formatTshirtStatusDisplay({
+                  issued: guard.tshirtIssued,
+                  size: guard.tshirtSize,
+                  issuedOn: guard.tshirtIssuedOn,
+                  returnedOn: guard.tshirtReturnedOn,
+                })}
+              </span>
+              {guard.uniformIssued || guard.tshirtIssued ? (
+                <GuardUniformReturnControl
+                  guardId={guard.id}
+                  uniformIssued={guard.uniformIssued}
+                  uniformIssuedOn={guard.uniformIssuedOn}
+                  tshirtIssued={guard.tshirtIssued}
+                  tshirtIssuedOn={guard.tshirtIssuedOn}
+                />
+              ) : null}
             </div>
           </article>
 
-          {/* Блок: Документы и допуски */}
           <article className="flex flex-col gap-3 rounded-button border border-app-border bg-app-elevated p-3 shadow-sm sm:col-span-2 sm:gap-4 sm:p-5 lg:col-span-1">
             <div className="flex items-center gap-2 border-b border-app-border/40 pb-2.5">
               <ShieldCheck className="size-4 text-accent-primary" />
               <h3 className="text-sm font-bold uppercase tracking-wider text-app-text">Документы и допуски</h3>
             </div>
-            <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-sm">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm">
               <span className="text-app-muted">Удостоверение:</span>
               <span className="font-semibold text-app-text">
                 {guardLicenseLabels[guard.licenseType ?? "None"]}
@@ -282,7 +276,7 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                 {guard.medicalCommissionPassedOn ? (
                   formatDisplayDateFromIso(guard.medicalCommissionPassedOn)
                 ) : (
-                  <span className="text-accent-danger font-bold">Не пройдена</span>
+                  <span className="font-bold text-accent-danger">Не пройдена</span>
                 )}
               </span>
 
@@ -291,23 +285,21 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                 {guard.periodicCheckPassedOn ? (
                   formatDisplayDateFromIso(guard.periodicCheckPassedOn)
                 ) : (
-                  <span className="text-accent-warning font-bold">Не пройдена</span>
+                  <span className="font-bold text-accent-warning">Не пройдена</span>
                 )}
               </span>
 
               <span className="text-app-muted">Личная карточка:</span>
               <span className="font-semibold text-app-text">
-                {guard.personalCardAssignedOn ? (
-                  formatDisplayDateFromIso(guard.personalCardAssignedOn)
-                ) : (
-                  "Нет"
-                )}
+                {guard.personalCardAssignedOn
+                  ? formatDisplayDateFromIso(guard.personalCardAssignedOn)
+                  : "Нет"}
               </span>
 
               <span className="text-app-muted">Стажёр:</span>
               <div className="flex flex-col items-start">
                 <span
-                  className={`font-bold flex items-center gap-1 ${resolvedGuard.isTrainee ? "" : "text-app-muted"}`}
+                  className={`flex items-center gap-1 font-bold ${resolvedGuard.isTrainee ? "" : "text-app-muted"}`}
                   style={
                     resolvedGuard.isTrainee
                       ? {
@@ -343,62 +335,14 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
           </article>
         </div>
 
-        {/* 2. Скрытая по умолчанию форма редактирования */}
-        <GuardProfileEditor guard={guard} objects={objects} />
+        <GuardProfileEditor guard={guard} />
 
-        {/* Сводные показатели по часам */}
-        <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
-          <article className="rounded-button border border-app-border bg-app-elevated p-3 shadow-sm sm:p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-app-muted">Закрепленные объекты</h2>
-            <ul className="mt-2 space-y-1 text-sm font-semibold text-app-text sm:mt-3">
-              {guard.objects.length > 0 ? (
-                guard.objects.map((object) => <li key={object.id} className="list-disc list-inside">{object.name}</li>)
-              ) : (
-                <li className="text-app-muted font-normal">Нет закрепленных объектов</li>
-              )}
-            </ul>
-          </article>
-          <article className="rounded-button border border-app-border bg-app-elevated p-3 shadow-sm sm:p-5">
-            <h2 className="text-xs font-semibold text-app-muted">{weekCardTitle}</h2>
-            <p className="mt-2 text-2xl font-extrabold text-accent-primary sm:mt-3 sm:text-3xl">{weekStats.totalHours} ч</p>
-          </article>
-          <article className="rounded-button border border-app-border bg-app-elevated p-3 shadow-sm sm:p-5">
-            <h2 className="text-xs font-semibold text-app-muted">{monthCardTitle}</h2>
-            <p className="mt-2 text-2xl font-extrabold text-accent-primary sm:mt-3 sm:text-3xl">{monthStats.totalHours} ч</p>
-          </article>
-        </div>
-
-        <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <GuardHistoryCard entries={serviceHistory} />
-          </div>
-          <div>
-            <GuardServiceRecordSection guardId={guard.id} />
-          </div>
-        </div>
-
-        <GuardScheduleSection
+        <GuardProfileDeferredSections
           guardId={guard.id}
-          history={history}
           assignedObjects={guard.objects}
           initialDate={initialDate}
         />
       </section>
     </main>
   );
-}
-
-function formatDayMonthShort(isoDate: string): string {
-  const formatted = formatDisplayDateFromIso(isoDate);
-  const parts = formatted.split(".");
-  if (parts.length < 2) return formatted;
-  return `${parts[0]}.${parts[1]}`;
-}
-
-function sumHours(shifts: Array<{ startsAt: Date; endsAt: Date }>) {
-  const totalHours = shifts.reduce((sum, shift) => {
-    const hours = calculateShiftHours({ startsAt: shift.startsAt, endsAt: shift.endsAt });
-    return sum + hours.totalHours;
-  }, 0);
-  return { totalHours: Math.round(totalHours * 100) / 100 };
 }

@@ -2,6 +2,7 @@ import { Plus, Star, Trash2 } from "lucide-react";
 import { addObjectHolidayAction, deleteObjectHolidayAction } from "../../app/objects/actions";
 import type { ObjectHolidayRecord } from "../../lib/operations/object-holidays-repository";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 
 type ObjectHolidaysSectionProps = {
   objectId: string;
@@ -22,8 +23,7 @@ export function ObjectHolidaysSection({ objectId, holidays }: ObjectHolidaysSect
           <h3 className="mb-3 text-sm font-medium">Добавить праздник</h3>
           <form action={addObjectHolidayAction} className="grid gap-2">
             <input type="hidden" name="objectId" value={objectId} />
-            <input
-              type="date"
+            <DateInput
               name="date"
               required
               className="rounded-button border border-app-border bg-app-bg px-2 py-1.5 text-sm outline-none focus:border-accent-primary"

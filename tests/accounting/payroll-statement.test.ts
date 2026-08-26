@@ -84,7 +84,7 @@ describe("buildPayrollStatementSheets", () => {
       year: 2026,
       monthIndex0: 4,
       guardIdByName: new Map([["Иванов Иван", "g1"]]),
-      advancesByGuardId: new Map([["g1", { firstHalfRub: 500, secondHalfRub: 0 }]]),
+      advancesByGuardObject: new Map([["g1:o1", { firstHalfRub: 500, secondHalfRub: 0 }]]),
     });
     expect(sheets).toHaveLength(1);
     expect(sheets[0]?.rows[0]).toMatchObject({
@@ -113,7 +113,7 @@ describe("buildPayrollStatementSheets", () => {
       year: 2026,
       monthIndex0: 4,
       guardIdByName: new Map([["Иванов Иван", "g1"]]),
-      advancesByGuardId: new Map([["g1", { firstHalfRub: 200, secondHalfRub: 0 }]]),
+      advancesByGuardObject: new Map([["g1:o1", { firstHalfRub: 200, secondHalfRub: 0 }]]),
     });
     expect(sheets).toHaveLength(1);
     expect(sheets[0]?.rows[0]).toMatchObject({
@@ -121,6 +121,34 @@ describe("buildPayrollStatementSheets", () => {
       advanceRub: 200,
       toPayRub: 1800.04,
     });
+  });
+
+  it("ставит аванс только на объект, к которому он привязан", () => {
+    const sheets = buildPayrollStatementSheets({
+      rows: [
+        baseRow({ objectId: "o1", objectName: "Объект А", guardAmountCents: 100_000 }),
+        baseRow({
+          objectId: "o2",
+          objectName: "Объект Б",
+          startsAt: "2026-05-03T04:00:00.000Z",
+          endsAt: "2026-05-03T12:00:00.000Z",
+          guardAmountCents: 200_000,
+        }),
+      ],
+      objects: [
+        { id: "o1", name: "Объект А", address: "ул. Тест, 1" },
+        { id: "o2", name: "Объект Б", address: "ул. Тест, 2" },
+      ],
+      half: "first",
+      year: 2026,
+      monthIndex0: 4,
+      guardIdByName: new Map([["Иванов Иван", "g1"]]),
+      advancesByGuardObject: new Map([["g1:o1", { firstHalfRub: 500, secondHalfRub: 0 }]]),
+    });
+    const sheetA = sheets.find((s) => s.objectId === "o1");
+    const sheetB = sheets.find((s) => s.objectId === "o2");
+    expect(sheetA?.rows[0]).toMatchObject({ advanceRub: 500, toPayRub: 500 });
+    expect(sheetB?.rows[0]).toMatchObject({ advanceRub: 0, toPayRub: 2000 });
   });
 
   it("не заполняет итого к выдаче при инцидентах", () => {
@@ -131,7 +159,7 @@ describe("buildPayrollStatementSheets", () => {
       year: 2026,
       monthIndex0: 4,
       guardIdByName: new Map([["Иванов Иван", "g1"]]),
-      advancesByGuardId: new Map(),
+      advancesByGuardObject: new Map(),
     });
     expect(sheets[0]?.rows[0]?.fineCount).toBe(2);
     expect(sheets[0]?.rows[0]?.toPayRub).toBeNull();

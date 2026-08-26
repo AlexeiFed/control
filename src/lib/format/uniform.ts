@@ -112,6 +112,7 @@ export type UniformIssuedNormalized = {
   uniformIssuedOn: string | null;
   uniformCondition: UniformCondition | null;
   uniformNote: string | null;
+  uniformReturnedOn: string | null;
 };
 
 export function normalizeUniformIssuedFields(input: {
@@ -126,6 +127,7 @@ export function normalizeUniformIssuedFields(input: {
       uniformIssuedOn: null,
       uniformCondition: null,
       uniformNote: null,
+      uniformReturnedOn: null,
     };
   }
   const issuedOn = typeof input.issuedOn === "string" ? input.issuedOn.trim() : "";
@@ -141,6 +143,23 @@ export function normalizeUniformIssuedFields(input: {
     uniformIssuedOn: issuedOn,
     uniformCondition: input.condition,
     uniformNote: noteRaw || null,
+    uniformReturnedOn: null,
+  };
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function normalizeUniformReturn(input: { returnedOn: string }): UniformIssuedNormalized {
+  const returnedOn = input.returnedOn.trim();
+  if (!returnedOn || !ISO_DATE_RE.test(returnedOn)) {
+    throw new Error("Укажите дату сдачи формы");
+  }
+  return {
+    uniformIssued: false,
+    uniformIssuedOn: null,
+    uniformCondition: null,
+    uniformNote: null,
+    uniformReturnedOn: returnedOn,
   };
 }
 
@@ -155,4 +174,82 @@ export function formatUniformIssuedTooltip(input: {
   ];
   if (input.note) parts.push(`Примечание: ${input.note}`);
   return parts.join(", ");
+}
+
+export function parseTshirtIssuedFromForm(formData: FormData): boolean {
+  return formData.get("tshirtIssued") === "on";
+}
+
+export function formatTshirtIssuedTooltip(input: { size: number; issuedOn: string }): string {
+  return `Размер: ${formatUniformSizeDisplay(input.size)}, дата: ${formatDisplayDateFromIso(input.issuedOn)}`;
+}
+
+export function formatTshirtStatusDisplay(input: {
+  issued: boolean;
+  size: number | null;
+  issuedOn: string | null;
+  returnedOn: string | null;
+}): string {
+  if (input.issued) {
+    return (
+      [
+        input.size != null ? formatUniformSizeDisplay(input.size) : null,
+        input.issuedOn ? formatDisplayDateFromIso(input.issuedOn) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || "Да"
+    );
+  }
+  if (input.returnedOn) {
+    return `Нет · сдана ${formatDisplayDateFromIso(input.returnedOn)}`;
+  }
+  return "Нет";
+}
+
+export type TshirtIssuedNormalized = {
+  tshirtIssued: boolean;
+  tshirtSize: number | null;
+  tshirtIssuedOn: string | null;
+  tshirtReturnedOn: string | null;
+};
+
+export function normalizeTshirtIssuedFields(input: {
+  issued: boolean;
+  size: number | null | undefined;
+  issuedOn: string | null | undefined;
+}): TshirtIssuedNormalized {
+  if (!input.issued) {
+    return {
+      tshirtIssued: false,
+      tshirtSize: null,
+      tshirtIssuedOn: null,
+      tshirtReturnedOn: null,
+    };
+  }
+  if (input.size == null || !isValidUniformSizeStored(input.size)) {
+    throw new Error("Укажите размер футболки");
+  }
+  const issuedOn = typeof input.issuedOn === "string" ? input.issuedOn.trim() : "";
+  if (!issuedOn) {
+    throw new Error("Укажите дату выдачи футболки");
+  }
+  return {
+    tshirtIssued: true,
+    tshirtSize: input.size,
+    tshirtIssuedOn: issuedOn,
+    tshirtReturnedOn: null,
+  };
+}
+
+export function normalizeTshirtReturn(input: { returnedOn: string }): TshirtIssuedNormalized {
+  const returnedOn = input.returnedOn.trim();
+  if (!returnedOn || !ISO_DATE_RE.test(returnedOn)) {
+    throw new Error("Укажите дату сдачи футболки");
+  }
+  return {
+    tshirtIssued: false,
+    tshirtSize: null,
+    tshirtIssuedOn: null,
+    tshirtReturnedOn: returnedOn,
+  };
 }

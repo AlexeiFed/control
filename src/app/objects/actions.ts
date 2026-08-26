@@ -42,6 +42,9 @@ import {
   updateObjectPost,
 } from "../../lib/operations/object-posts-repository";
 import { replaceMonthlyPostGuards } from "../../lib/operations/object-monthly-post-guards-repository";
+import { syncObjectGuardsToMonthStaff } from "../../lib/operations/object-posts-repository";
+import { removeGuardFromObjectMonthSchedule } from "../../lib/operations/scheduler-repository";
+import { isKhabarovskMonthPast } from "../../lib/scheduling/schedule-month-guards";
 
 const createObjectSchema = z.object({
   name: z.string().trim().min(1),
@@ -227,6 +230,17 @@ export async function setObjectGuardsAction(formData: FormData) {
     .filter(Boolean);
 
   await setObjectGuards(input.objectId, guardIds);
+
+  // Снимок пула только в текущий/будущий месяц — прошлые месяцы не трогаем.
+  const monthRaw = formData.get("month");
+  const month = typeof monthRaw === "string" ? monthRaw.trim() : "";
+  if (/^\d{4}-\d{2}$/.test(month)) {
+    const [y, m] = month.split("-").map(Number);
+    if (!isKhabarovskMonthPast(y!, m! - 1)) {
+      await syncObjectGuardsToMonthStaff(input.objectId, month, guardIds);
+    }
+  }
+
   revalidatePath("/objects");
   revalidatePath(`/objects/${input.objectId}`);
 }
@@ -865,4 +879,56 @@ export async function replaceMonthlyPostGuardsAction(formData: FormData) {
     input.guardIds,
   );
   revalidatePath(`/objects/${input.objectId}`);
+}
+
+const removeGuardFromObjectMonthScheduleSchema = z.object({
+  objectId: z.string().uuid(),
+  guardId: z.string().uuid(),
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+});
+
+export async function removeGuardFromObjectMonthScheduleAction(formData: FormData) {
+  const session = await requireSession();
+  assertPermission(session.user.role, "schedule:write");
+  if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
+    return { ok: false as const, error: "Недостаточно прав" };
+  }
+
+  let input: z.infer<typeof removeGuardFromObjectMonthScheduleSchema>;
+  try {
+    input = removeGuardFromObjectMonthScheduleSchema.parse({
+      objectId: formData.get("objectId"),
+      guardId: formData.get("guardId"),
+      month: formData.get("month"),
+    });
+  } catch {
+    return { ok: false as const, error: "Некорректные параметры" };
+  }
+
+  const [y, m] = input.month.split("-").map(Number);
+  const year = y!;
+  const monthIndex0 = m! - 1;
+
+  try {
+    const { deletedShifts } = await removeGuardFromObjectMonthSchedule(
+      input.objectId,
+      input.guardId,
+      year,
+      monthIndex0,
+    );
+    revalidateAfterShiftMutation([
+      "/scheduler",
+      "/admin/curators",
+      "/accounting/timesheet",
+      "/dashboard",
+      "/",
+      `/objects/${input.objectId}`,
+    ]);
+    return { ok: true as const, deletedShifts };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Не удалось убрать охранника из графика",
+    };
+  }
 }

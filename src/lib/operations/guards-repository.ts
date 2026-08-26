@@ -15,6 +15,7 @@ import { isIncidentCompanionShiftLog } from "../scheduling/guard-service-history
 import { normalizeGuardFilters, type GuardFilterInput } from "./guard-filters";
 import { toDateIsoKhabarovsk } from "../format/display-date";
 import type { UniformCondition } from "../format/uniform";
+import { normalizeTshirtReturn, normalizeUniformReturn } from "../format/uniform";
 
 /** Кэш наличия колонки `guards.phone` (старые локальные БД без миграций). */
 let guardsHasPhoneColumnCache: boolean | undefined;
@@ -141,17 +142,25 @@ export async function getGuardsUniformHeightSelect(
   return mode === "aliased" ? "g.uniform_height" : "uniform_height";
 }
 
-/** Фрагмент SELECT для выдачи формы (4 колонки); при отсутствии колонок — безопасные дефолты. */
+/** Фрагмент SELECT для выдачи формы (5 колонок); при отсутствии колонок — безопасные дефолты. */
 export async function getGuardsUniformIssuedSelect(
   mode: GuardsPhoneSelectMode = "aliased",
 ): Promise<string> {
   const has = await resolveGuardsOptionalColumn("uniform_issued");
+  const hasReturned = await resolveGuardsOptionalColumn("uniform_returned_on");
+  const returnedSel =
+    !has || !hasReturned
+      ? "NULL::date AS uniform_returned_on"
+      : mode === "aliased"
+        ? "g.uniform_returned_on::text AS uniform_returned_on"
+        : "uniform_returned_on::text AS uniform_returned_on";
   if (!has) {
     return [
       "false AS uniform_issued",
       "NULL::date AS uniform_issued_on",
       "NULL::text AS uniform_condition",
       "NULL::text AS uniform_note",
+      returnedSel,
     ].join(",\n          ");
   }
   if (mode === "aliased") {
@@ -160,6 +169,7 @@ export async function getGuardsUniformIssuedSelect(
       "g.uniform_issued_on::text AS uniform_issued_on",
       "g.uniform_condition",
       "g.uniform_note",
+      returnedSel,
     ].join(",\n          ");
   }
   return [
@@ -167,6 +177,35 @@ export async function getGuardsUniformIssuedSelect(
     "uniform_issued_on::text AS uniform_issued_on",
     "uniform_condition",
     "uniform_note",
+    returnedSel,
+  ].join(",\n          ");
+}
+
+export async function getGuardsTshirtIssuedSelect(
+  mode: GuardsPhoneSelectMode = "aliased",
+): Promise<string> {
+  const has = await resolveGuardsOptionalColumn("tshirt_issued");
+  if (!has) {
+    return [
+      "false AS tshirt_issued",
+      "NULL::smallint AS tshirt_size",
+      "NULL::date AS tshirt_issued_on",
+      "NULL::date AS tshirt_returned_on",
+    ].join(",\n          ");
+  }
+  if (mode === "aliased") {
+    return [
+      "g.tshirt_issued",
+      "g.tshirt_size",
+      "g.tshirt_issued_on::text AS tshirt_issued_on",
+      "g.tshirt_returned_on::text AS tshirt_returned_on",
+    ].join(",\n          ");
+  }
+  return [
+    "tshirt_issued",
+    "tshirt_size",
+    "tshirt_issued_on::text AS tshirt_issued_on",
+    "tshirt_returned_on::text AS tshirt_returned_on",
   ].join(",\n          ");
 }
 
@@ -202,6 +241,11 @@ export type GuardListRow = {
   uniformIssuedOn: string | null;
   uniformCondition: UniformCondition | null;
   uniformNote: string | null;
+  uniformReturnedOn: string | null;
+  tshirtIssued: boolean;
+  tshirtSize: number | null;
+  tshirtIssuedOn: string | null;
+  tshirtReturnedOn: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   licenseGrade: number | null;
@@ -238,6 +282,11 @@ type GuardRow = {
   uniform_issued_on: string | null;
   uniform_condition: string | null;
   uniform_note: string | null;
+  uniform_returned_on: string | null;
+  tshirt_issued: boolean;
+  tshirt_size: number | null;
+  tshirt_issued_on: string | null;
+  tshirt_returned_on: string | null;
   position: GuardPosition;
   license_type: string | null;
   license_grade: number | null;
@@ -288,6 +337,9 @@ export type CreateGuardInput = {
   uniformIssuedOn: string | null;
   uniformCondition: UniformCondition | null;
   uniformNote: string | null;
+  tshirtIssued?: boolean;
+  tshirtSize?: number | null;
+  tshirtIssuedOn?: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -312,6 +364,9 @@ export type UpdateGuardProfileInput = {
   uniformIssuedOn: string | null;
   uniformCondition: UniformCondition | null;
   uniformNote: string | null;
+  tshirtIssued?: boolean;
+  tshirtSize?: number | null;
+  tshirtIssuedOn?: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -362,10 +417,33 @@ async function saveGuardUniformIssuedFields(
     uniformIssuedOn: string | null;
     uniformCondition: UniformCondition | null;
     uniformNote: string | null;
+    uniformReturnedOn?: string | null;
   },
 ): Promise<void> {
   const has = await resolveGuardsOptionalColumn("uniform_issued");
   if (!has) return;
+  const hasReturned = await resolveGuardsOptionalColumn("uniform_returned_on");
+  if (!hasReturned) {
+    await query(
+      `
+        UPDATE guards
+        SET
+          uniform_issued = $2,
+          uniform_issued_on = $3::date,
+          uniform_condition = $4,
+          uniform_note = $5
+        WHERE id = $1
+      `,
+      [
+        guardId,
+        input.uniformIssued,
+        input.uniformIssuedOn,
+        input.uniformCondition,
+        input.uniformNote,
+      ],
+    );
+    return;
+  }
   await query(
     `
       UPDATE guards
@@ -373,7 +451,12 @@ async function saveGuardUniformIssuedFields(
         uniform_issued = $2,
         uniform_issued_on = $3::date,
         uniform_condition = $4,
-        uniform_note = $5
+        uniform_note = $5,
+        uniform_returned_on = CASE
+          WHEN $2::boolean THEN NULL
+          WHEN $6::date IS NOT NULL THEN $6::date
+          ELSE uniform_returned_on
+        END
       WHERE id = $1
     `,
     [
@@ -382,8 +465,66 @@ async function saveGuardUniformIssuedFields(
       input.uniformIssuedOn,
       input.uniformCondition,
       input.uniformNote,
+      input.uniformReturnedOn ?? null,
     ],
   );
+}
+
+export async function returnGuardUniform(guardId: string, returnedOn: string): Promise<void> {
+  const details = await getGuardDetails(guardId);
+  if (!details) throw new Error("Охранник не найден");
+  if (!details.uniformIssued) throw new Error("Форма не выдана");
+  const fields = normalizeUniformReturn({ returnedOn });
+  if (details.uniformIssuedOn && fields.uniformReturnedOn && fields.uniformReturnedOn < details.uniformIssuedOn) {
+    throw new Error("Дата сдачи не может быть раньше даты выдачи");
+  }
+  await saveGuardUniformIssuedFields(guardId, fields);
+}
+
+async function saveGuardTshirtIssuedFields(
+  guardId: string,
+  input: {
+    tshirtIssued: boolean;
+    tshirtSize: number | null;
+    tshirtIssuedOn: string | null;
+    tshirtReturnedOn?: string | null;
+  },
+): Promise<void> {
+  const has = await resolveGuardsOptionalColumn("tshirt_issued");
+  if (!has) return;
+  await query(
+    `
+      UPDATE guards
+      SET
+        tshirt_issued = $2,
+        tshirt_size = $3,
+        tshirt_issued_on = $4::date,
+        tshirt_returned_on = CASE
+          WHEN $2::boolean THEN NULL
+          WHEN $5::date IS NOT NULL THEN $5::date
+          ELSE tshirt_returned_on
+        END
+      WHERE id = $1
+    `,
+    [
+      guardId,
+      input.tshirtIssued,
+      input.tshirtSize,
+      input.tshirtIssuedOn,
+      input.tshirtReturnedOn ?? null,
+    ],
+  );
+}
+
+export async function returnGuardTshirt(guardId: string, returnedOn: string): Promise<void> {
+  const details = await getGuardDetails(guardId);
+  if (!details) throw new Error("Охранник не найден");
+  if (!details.tshirtIssued) throw new Error("Футболка не выдана");
+  const fields = normalizeTshirtReturn({ returnedOn });
+  if (details.tshirtIssuedOn && fields.tshirtReturnedOn && fields.tshirtReturnedOn < details.tshirtIssuedOn) {
+    throw new Error("Дата сдачи не может быть раньше даты выдачи");
+  }
+  await saveGuardTshirtIssuedFields(guardId, fields);
 }
 
 async function saveGuardComplianceFields(
@@ -818,6 +959,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
   const uniformSizeSel = await getGuardsUniformSizeSelect("aliased");
   const uniformHeightSel = await getGuardsUniformHeightSelect("aliased");
   const uniformIssuedSel = await getGuardsUniformIssuedSelect("aliased");
+  const tshirtIssuedSel = await getGuardsTshirtIssuedSelect("aliased");
   const birthDateSel = await getGuardsBirthDateSelect("aliased");
   const middleNameSel = await getGuardsMiddleNameSelect("aliased");
   const hasCarSel = await getGuardsHasCarSelect("aliased");
@@ -885,6 +1027,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${uniformSizeSel},
           ${uniformHeightSel},
           ${uniformIssuedSel},
+          ${tshirtIssuedSel},
           g.position,
           g.license_type,
           ${licenseGradeSel},
@@ -936,6 +1079,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${uniformSizeSel},
           ${uniformHeightSel},
           ${uniformIssuedSel},
+          ${tshirtIssuedSel},
           g.position,
           g.license_type,
           ${licenseGradeSel},
@@ -1323,6 +1467,11 @@ export async function createGuard(input: CreateGuardInput): Promise<string> {
     uniformCondition: input.uniformCondition,
     uniformNote: input.uniformNote,
   });
+  await saveGuardTshirtIssuedFields(guardId, {
+    tshirtIssued: input.tshirtIssued ?? false,
+    tshirtSize: input.tshirtSize ?? null,
+    tshirtIssuedOn: input.tshirtIssuedOn ?? null,
+  });
 
   const dismissedOn = input.dismissedOn ?? null;
   if (input.status === "Dismissed" && dismissedOn) {
@@ -1668,6 +1817,11 @@ export async function updateGuardProfile(input: UpdateGuardProfileInput): Promis
     uniformCondition: input.uniformCondition,
     uniformNote: input.uniformNote,
   });
+  await saveGuardTshirtIssuedFields(input.guardId, {
+    tshirtIssued: input.tshirtIssued ?? false,
+    tshirtSize: input.tshirtSize ?? null,
+    tshirtIssuedOn: input.tshirtIssuedOn ?? null,
+  });
 }
 
 export async function deleteGuard(guardId: string): Promise<void> {
@@ -1794,6 +1948,11 @@ export type GuardDetails = {
   uniformIssuedOn: string | null;
   uniformCondition: UniformCondition | null;
   uniformNote: string | null;
+  uniformReturnedOn: string | null;
+  tshirtIssued: boolean;
+  tshirtSize: number | null;
+  tshirtIssuedOn: string | null;
+  tshirtReturnedOn: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -1817,6 +1976,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     uniformSizeSel,
     uniformHeightSel,
     uniformIssuedSel,
+    tshirtIssuedSel,
     birthDateSel,
     middleNameSel,
     hasCarSel,
@@ -1828,6 +1988,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     getGuardsUniformSizeSelect("aliased"),
     getGuardsUniformHeightSelect("aliased"),
     getGuardsUniformIssuedSelect("aliased"),
+    getGuardsTshirtIssuedSelect("aliased"),
     getGuardsBirthDateSelect("aliased"),
     getGuardsMiddleNameSelect("aliased"),
     getGuardsHasCarSelect("aliased"),
@@ -1871,6 +2032,11 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     uniform_issued_on: string | null;
     uniform_condition: string | null;
     uniform_note: string | null;
+    uniform_returned_on: string | null;
+    tshirt_issued: boolean;
+    tshirt_size: number | null;
+    tshirt_issued_on: string | null;
+    tshirt_returned_on: string | null;
     position: GuardPosition;
     license_type: string | null;
     employment_type: GuardEmploymentType;
@@ -1900,6 +2066,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
         ${uniformSizeSel},
         ${uniformHeightSel},
         ${uniformIssuedSel},
+        ${tshirtIssuedSel},
         g.position,
         g.license_type,
         g.employment_type,
@@ -1946,6 +2113,11 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
         ? first.uniform_condition
         : null,
     uniformNote: first.uniform_note ?? null,
+    uniformReturnedOn: first.uniform_returned_on ?? null,
+    tshirtIssued: first.tshirt_issued ?? false,
+    tshirtSize: first.tshirt_size ?? null,
+    tshirtIssuedOn: first.tshirt_issued_on ?? null,
+    tshirtReturnedOn: first.tshirt_returned_on ?? null,
     position: first.position ?? "Guard",
     licenseType: (first.license_type as GuardLicenseType | null) ?? null,
     employmentType: first.employment_type ?? "Unemployed",
@@ -1965,43 +2137,20 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
   };
 }
 
-export async function listGuardShiftHistory(guardId: string, limit = 240): Promise<GuardShiftHistoryRow[]> {
-  const hasIncidentCols = await shiftsHaveIncidentColumns();
-  const rows = await query<{
-    id: string;
-    object_id: string;
-    object_name: string;
-    starts_at: string;
-    ends_at: string;
-    shift_kind: string | null;
-    is_no_show: boolean | null;
-    incident_category: string | null;
-    incident_recorded_at: string | null;
-  }>(
-    `
-      SELECT
-        s.id,
-        s.object_id,
-        so.name AS object_name,
-        s.starts_at,
-        s.ends_at,
-        s.shift_kind,
-        s.is_no_show,
-        ${
-          hasIncidentCols
-            ? "s.incident_category, s.incident_recorded_at"
-            : "NULL::text AS incident_category, NULL::timestamptz AS incident_recorded_at"
-        }
-      FROM shifts s
-      JOIN security_objects so ON so.id = s.object_id
-      WHERE s.guard_id = $1
-      ORDER BY s.starts_at DESC
-      LIMIT $2
-    `,
-    [guardId, limit],
-  );
+type GuardShiftHistoryDbRow = {
+  id: string;
+  object_id: string;
+  object_name: string;
+  starts_at: string;
+  ends_at: string;
+  shift_kind: string | null;
+  is_no_show: boolean | null;
+  incident_category: string | null;
+  incident_recorded_at: string | null;
+};
 
-  return rows.map((row) => ({
+function mapGuardShiftHistoryRow(row: GuardShiftHistoryDbRow): GuardShiftHistoryRow {
+  return {
     id: row.id,
     objectId: row.object_id,
     objectName: row.object_name,
@@ -2011,7 +2160,94 @@ export async function listGuardShiftHistory(guardId: string, limit = 240): Promi
     isNoShow: row.is_no_show === true,
     incidentCategory: (row.incident_category as IncidentCategory | null) ?? null,
     incidentRecordedAt: row.incident_recorded_at ? new Date(row.incident_recorded_at) : null,
-  }));
+  };
+}
+
+async function selectGuardShiftHistoryRows(
+  guardId: string,
+  opts: { limit?: number; rangeStart?: Date; rangeEnd?: Date },
+): Promise<GuardShiftHistoryRow[]> {
+  const hasIncidentCols = await shiftsHaveIncidentColumns();
+  const incidentSelect = hasIncidentCols
+    ? "s.incident_category, s.incident_recorded_at"
+    : "NULL::text AS incident_category, NULL::timestamptz AS incident_recorded_at";
+
+  if (opts.rangeStart && opts.rangeEnd) {
+    const rows = await query<GuardShiftHistoryDbRow>(
+      `
+        SELECT
+          s.id,
+          s.object_id,
+          so.name AS object_name,
+          s.starts_at,
+          s.ends_at,
+          s.shift_kind,
+          s.is_no_show,
+          ${incidentSelect}
+        FROM shifts s
+        JOIN security_objects so ON so.id = s.object_id
+        WHERE s.guard_id = $1
+          AND s.ends_at > $2
+          AND s.starts_at < $3
+        ORDER BY s.starts_at DESC
+      `,
+      [guardId, opts.rangeStart.toISOString(), opts.rangeEnd.toISOString()],
+    );
+    return rows.map(mapGuardShiftHistoryRow);
+  }
+
+  const limit = opts.limit ?? 240;
+  const rows = await query<GuardShiftHistoryDbRow>(
+    `
+      SELECT
+        s.id,
+        s.object_id,
+        so.name AS object_name,
+        s.starts_at,
+        s.ends_at,
+        s.shift_kind,
+        s.is_no_show,
+        ${incidentSelect}
+      FROM shifts s
+      JOIN security_objects so ON so.id = s.object_id
+      WHERE s.guard_id = $1
+      ORDER BY s.starts_at DESC
+      LIMIT $2
+    `,
+    [guardId, limit],
+  );
+  return rows.map(mapGuardShiftHistoryRow);
+}
+
+export async function listGuardShiftHistory(guardId: string, limit = 240): Promise<GuardShiftHistoryRow[]> {
+  return selectGuardShiftHistoryRows(guardId, { limit });
+}
+
+/** Смены охранника, пересекающие интервал (для карточек часов). */
+export async function listGuardShiftHistoryInRange(
+  guardId: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+): Promise<GuardShiftHistoryRow[]> {
+  return selectGuardShiftHistoryRows(guardId, { rangeStart, rangeEnd });
+}
+
+/** Смены охранника за календарный месяц (Хабаровск, month0 = 0..11). */
+export async function listGuardShiftHistoryForMonth(
+  guardId: string,
+  year: number,
+  month0: number,
+): Promise<GuardShiftHistoryRow[]> {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const rangeStart = new Date(`${year}-${pad(month0 + 1)}-01T00:00:00+10:00`);
+  let nextYear = year;
+  let nextMonth = month0 + 1;
+  if (nextMonth > 11) {
+    nextMonth = 0;
+    nextYear += 1;
+  }
+  const rangeEnd = new Date(`${nextYear}-${pad(nextMonth + 1)}-01T00:00:00+10:00`);
+  return selectGuardShiftHistoryRows(guardId, { rangeStart, rangeEnd });
 }
 
 function mapGuardRow(row: GuardRow): GuardListRow {
@@ -2035,6 +2271,11 @@ function mapGuardRow(row: GuardRow): GuardListRow {
         ? row.uniform_condition
         : null,
     uniformNote: row.uniform_note ?? null,
+    uniformReturnedOn: row.uniform_returned_on ?? null,
+    tshirtIssued: row.tshirt_issued ?? false,
+    tshirtSize: row.tshirt_size ?? null,
+    tshirtIssuedOn: row.tshirt_issued_on ?? null,
+    tshirtReturnedOn: row.tshirt_returned_on ?? null,
     position: row.position ?? "Guard",
     licenseType: (row.license_type as GuardLicenseType | null) ?? null,
     licenseGrade: row.license_grade ?? null,

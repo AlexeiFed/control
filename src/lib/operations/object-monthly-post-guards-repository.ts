@@ -50,3 +50,15 @@ export async function replaceMonthlyPostGuards(
     params,
   );
 }
+
+export async function deleteGuardFromObjectMonthStaff(
+  objectId: string,
+  guardId: string,
+  month: string,
+): Promise<void> {
+  await query(
+    `DELETE FROM object_monthly_post_guards
+     WHERE object_id = $1 AND guard_id = $2 AND month = $3`,
+    [objectId, guardId, month],
+  );
+}

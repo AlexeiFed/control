@@ -7,7 +7,7 @@ import {
 import { buildPayrollStatementSheets } from "../../../../../lib/accounting/payroll-statement";
 import { buildPayrollStatementWorkbook } from "../../../../../lib/accounting/payroll-statement-xlsx";
 import { padTimesheetQueryRange } from "../../../../../lib/accounting/timesheet-operational-day";
-import { sumAdvancesByGuardForMonth } from "../../../../../lib/operations/advances-repository";
+import { sumAdvancesByGuardObjectForMonth } from "../../../../../lib/operations/advances-repository";
 import { getTimesheetSnapshot } from "../../../../../lib/operations/scheduler-repository";
 import type { PayrollHalf } from "../../../../../lib/payroll/advance-period";
 import { PAYROLL_HALVES } from "../../../../../lib/payroll/advance-period";
@@ -30,13 +30,13 @@ export async function GET(request: Request) {
   }
 
   const snapshotRange = padTimesheetQueryRange(parsed.rangeStart, parsed.rangeEnd);
-  const [{ rows, resolveOperationalDateIso }, snapshot, advancesByGuardId] = await Promise.all([
+  const [{ rows, resolveOperationalDateIso }, snapshot, advancesByGuardObject] = await Promise.all([
     getTimesheetRowsForExport(parsed),
     getTimesheetSnapshot(snapshotRange.start, snapshotRange.end, {
       guardId: parsed.guardId || undefined,
       objectId: parsed.objectId || undefined,
     }),
-    sumAdvancesByGuardForMonth(parsed.month.year, parsed.month.monthIndex),
+    sumAdvancesByGuardObjectForMonth(parsed.month.year, parsed.month.monthIndex),
   ]);
 
   if (!resolveOperationalDateIso) {
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
     year: parsed.month.year,
     monthIndex0: parsed.month.monthIndex,
     guardIdByName,
-    advancesByGuardId,
+    advancesByGuardObject,
     objectIdFilter: parsed.objectId || undefined,
     resolveOperationalDateIso,
   });

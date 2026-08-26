@@ -13,6 +13,7 @@ import { guardStatusLabels, guardStatusOptions } from "../../lib/operations/stat
 import type { GuardStatus } from "../../lib/scheduling/types";
 import { toast } from "../../store/toast-store";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 
 const MENU_WIDTH = 208;
 const statusClass = {
@@ -149,12 +150,11 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
           </p>
           <label className="flex flex-col gap-1 text-xs text-app-muted">
             <span>Дата возврата</span>
-            <input
-              type="date"
+            <DateInput
               required
               value={returnDate}
               min={guard.dismissedOn ?? undefined}
-              onChange={(e) => setReturnDate(e.target.value)}
+              onChange={setReturnDate}
               disabled={isPending}
               className="h-8 w-full rounded-button border border-app-border bg-app-bg px-2 text-xs outline-none focus:border-accent-primary disabled:opacity-60"
             />
@@ -185,11 +185,10 @@ export function GuardStatusCell({ guard, openMenu, setOpenMenu }: GuardStatusCel
           <p className={`text-xs font-medium ${statusClass.Dismissed}`}>Уволен</p>
           <label className="flex flex-col gap-1 text-xs text-app-muted">
             <span>Дата увольнения</span>
-            <input
-              type="date"
+            <DateInput
               required
               value={dismissedDate}
-              onChange={(e) => setDismissedDate(e.target.value)}
+              onChange={setDismissedDate}
               disabled={isPending}
               className="h-8 w-full rounded-button border border-app-border bg-app-bg px-2 text-xs outline-none focus:border-accent-primary disabled:opacity-60"
             />

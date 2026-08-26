@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GripVertical, Trash2, Settings } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../ui/button";
@@ -34,11 +34,10 @@ import { isGuardComplianceReminderRow } from "../../lib/guards/periodic-check";
 import type { GuardListRow } from "../../lib/operations/guards-repository";
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import {
-  guardEmploymentLabels,
   guardLicenseLabels,
   guardPositionLabels,
 } from "../../lib/operations/status-labels";
-import { formatUniformIssuedTooltip } from "../../lib/format/uniform";
+import { formatTshirtIssuedTooltip, formatUniformIssuedTooltip } from "../../lib/format/uniform";
 import { GuardStatusCell } from "./guard-status-cell";
 import { GuardTableObjectsCell } from "./guard-table-objects-cell";
 import { StickyHorizontalScroll } from "../ui/sticky-horizontal-scroll";
@@ -54,6 +53,279 @@ type GuardRegistryTableProps = {
   onDeleteGuard: (target: { id: string; name: string }) => void;
 };
 
+type RowCtx = {
+  objects: ObjectListRow[];
+  openMenu: string | null;
+  setOpenMenu: GuardRegistryTableProps["setOpenMenu"];
+  rowObjectSearch: string;
+  setRowObjectSearch: (value: string) => void;
+  onDeleteGuard: GuardRegistryTableProps["onDeleteGuard"];
+};
+
+function renderCell(
+  columnId: GuardRegistryColumnId,
+  guard: GuardListRow,
+  index: number,
+  ctx: RowCtx,
+) {
+  switch (columnId) {
+    case "index":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} tabular-nums text-app-muted`}>
+          {index + 1}
+        </td>
+      );
+    case "lastName":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          <span className={guardRegistryLastNameClass(guard)}>{guard.lastName}</span>
+        </td>
+      );
+    case "firstName":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.firstName}
+        </td>
+      );
+    case "middleName":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.middleName || "—"}
+        </td>
+      );
+    case "birthDate":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {formatGuardTableDate(guard.birthDate)}
+        </td>
+      );
+    case "phone":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {guard.phone || "—"}
+        </td>
+      );
+    case "contactPhone":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {guard.contactPhone || "—"}
+        </td>
+      );
+    case "position":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guardPositionLabels[guard.position]}
+        </td>
+      );
+    case "license":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {guard.licenseType === "Licensed" ? (
+            <span className="cursor-default" title={guardLicenseCellTooltip(guard)}>
+              {guardLicenseLabels.Licensed}
+            </span>
+          ) : guard.licenseType ? (
+            guardLicenseLabels[guard.licenseType]
+          ) : (
+            "—"
+          )}
+        </td>
+      );
+    case "grade":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} tabular-nums text-app-muted`}>
+          {guardTableLicenseGrade(guard)}
+        </td>
+      );
+    case "licenseValid":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {guardTableLicenseValidUntil(guard)}
+        </td>
+      );
+    case "employment":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.employmentType === "Employed" ? (
+            <span className="cursor-default text-status-active" title={guardEmploymentCellTooltip(guard)}>
+              да
+            </span>
+          ) : (
+            <span className="text-app-muted">—</span>
+          )}
+        </td>
+      );
+    case "employedOn":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {formatGuardTableDate(guard.employedOn)}
+        </td>
+      );
+    case "medical":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {formatGuardTableDate(guard.medicalCommissionPassedOn)}
+        </td>
+      );
+    case "periodic":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {formatGuardTableDate(guard.periodicCheckPassedOn)}
+        </td>
+      );
+    case "personalCard":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {formatGuardTableDate(guard.personalCardAssignedOn)}
+        </td>
+      );
+    case "car":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.hasCar ? (
+            <span className="text-status-active">да</span>
+          ) : (
+            <span className="text-app-muted">нет</span>
+          )}
+        </td>
+      );
+    case "uniform":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.uniformIssued ? (
+            <span
+              className="cursor-default text-status-active"
+              title={
+                guard.uniformIssuedOn && guard.uniformCondition
+                  ? formatUniformIssuedTooltip({
+                      issuedOn: guard.uniformIssuedOn,
+                      condition: guard.uniformCondition,
+                      note: guard.uniformNote,
+                    })
+                  : undefined
+              }
+            >
+              да
+            </span>
+          ) : (
+            <span className="text-app-muted">нет</span>
+          )}
+        </td>
+      );
+    case "tshirt":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.tshirtIssued ? (
+            <span
+              className="cursor-default text-status-active"
+              title={
+                guard.tshirtSize != null && guard.tshirtIssuedOn
+                  ? formatTshirtIssuedTooltip({
+                      size: guard.tshirtSize,
+                      issuedOn: guard.tshirtIssuedOn,
+                    })
+                  : undefined
+              }
+            >
+              да
+            </span>
+          ) : (
+            <span className="text-app-muted">нет</span>
+          )}
+        </td>
+      );
+    case "objects":
+      return (
+        <td key={columnId} className={guardTableTdClass} onClick={(event) => event.stopPropagation()}>
+          <div className="mx-auto flex max-w-[14rem] justify-center">
+            <GuardTableObjectsCell
+              guardId={guard.id}
+              objectIds={guard.objectIds}
+              objectNames={guard.objectNames}
+              objects={ctx.objects}
+              openMenu={ctx.openMenu}
+              setOpenMenu={ctx.setOpenMenu}
+              rowObjectSearch={ctx.rowObjectSearch}
+              setRowObjectSearch={ctx.setRowObjectSearch}
+            />
+          </div>
+        </td>
+      );
+    case "status":
+      return (
+        <td key={columnId} className={guardTableTdClass} onClick={(event) => event.stopPropagation()}>
+          <GuardStatusCell guard={guard} openMenu={ctx.openMenu} setOpenMenu={ctx.setOpenMenu} />
+        </td>
+      );
+    case "dismissedOn":
+      return (
+        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
+          {formatGuardTableDate(guard.dismissedOn)}
+        </td>
+      );
+    case "actions":
+      return (
+        <td key={columnId} className={guardTableTdClass} onClick={(event) => event.stopPropagation()}>
+          <Button
+            type="button"
+            variant="icon"
+            size="icon"
+            className="text-accent-danger hover:bg-accent-danger/10"
+            aria-label="Удалить охранника"
+            onClick={() =>
+              ctx.onDeleteGuard({
+                id: guard.id,
+                name: `${guard.lastName} ${guard.firstName}`.trim(),
+              })
+            }
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </td>
+      );
+    default:
+      return null;
+  }
+}
+
+type GuardRegistryRowProps = {
+  guard: GuardListRow;
+  index: number;
+  visibleColumns: GuardRegistryColumnId[];
+  ctx: RowCtx;
+  isPending: boolean;
+  onOpen: (guardId: string, href: string) => void;
+};
+
+const GuardRegistryRow = memo(function GuardRegistryRow({
+  guard,
+  index,
+  visibleColumns,
+  ctx,
+  isPending,
+  onOpen,
+}: GuardRegistryRowProps) {
+  const router = useRouter();
+  const href = `/guards/${guard.id}`;
+  const complianceReminderRow = isGuardComplianceReminderRow(guard);
+
+  return (
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-app-border last:border-b-0",
+        complianceReminderRow && guardRegistryReminderRowClass,
+        complianceReminderRow ? "hover:brightness-95" : "hover:bg-app-elevated/50",
+        isPending && "opacity-60",
+      )}
+      style={guardRegistryReminderRowStyle(complianceReminderRow)}
+      onMouseEnter={() => router.prefetch(href)}
+      onClick={() => onOpen(guard.id, href)}
+    >
+      {visibleColumns.map((columnId) => renderCell(columnId, guard, index, ctx))}
+    </tr>
+  );
+});
+
 export function GuardRegistryTable({
   userId,
   guards,
@@ -66,6 +338,7 @@ export function GuardRegistryTable({
 }: GuardRegistryTableProps) {
   const router = useRouter();
   const prefsUserRef = useRef<string | null>(null);
+  const [pendingGuardId, setPendingGuardId] = useState<string | null>(null);
   const [columnOrder, setColumnOrder] = useState<GuardRegistryColumnId[]>(
     () => [...DEFAULT_GUARD_REGISTRY_COLUMN_ORDER],
   );
@@ -91,9 +364,8 @@ export function GuardRegistryTable({
     setHiddenColumnIds((current) => {
       if (current.includes(columnId)) {
         return current.filter((id) => id !== columnId);
-      } else {
-        return [...current, columnId];
       }
+      return [...current, columnId];
     });
   }, []);
 
@@ -121,6 +393,28 @@ export function GuardRegistryTable({
       return normalizeGuardRegistryColumnOrder(next);
     });
   }, []);
+
+  /** Сначала push (навигация), потом лёгкий overlay — без useTransition и без ре-рендера всех ячеек до push. */
+  const onOpen = useCallback(
+    (guardId: string, href: string) => {
+      router.prefetch(href);
+      router.push(href);
+      setPendingGuardId(guardId);
+    },
+    [router],
+  );
+
+  const rowCtx = useMemo<RowCtx>(
+    () => ({
+      objects,
+      openMenu,
+      setOpenMenu,
+      rowObjectSearch,
+      setRowObjectSearch,
+      onDeleteGuard,
+    }),
+    [objects, openMenu, setOpenMenu, rowObjectSearch, setRowObjectSearch, onDeleteGuard],
+  );
 
   const columnCount = visibleColumns.length;
 
@@ -188,212 +482,12 @@ export function GuardRegistryTable({
     [visibleColumns, dragColumnId, dragOverColumnId, reorderColumns],
   );
 
-  function renderCell(columnId: GuardRegistryColumnId, guard: GuardListRow, index: number) {
-    switch (columnId) {
-      case "index":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} tabular-nums text-app-muted`}>
-            {index + 1}
-          </td>
-        );
-      case "lastName":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            <span className={guardRegistryLastNameClass(guard)}>
-              {guard.lastName}
-            </span>
-          </td>
-        );
-      case "firstName":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            {guard.firstName}
-          </td>
-        );
-      case "middleName":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            {guard.middleName || "—"}
-          </td>
-        );
-      case "birthDate":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {formatGuardTableDate(guard.birthDate)}
-          </td>
-        );
-      case "phone":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {guard.phone || "—"}
-          </td>
-        );
-      case "contactPhone":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {guard.contactPhone || "—"}
-          </td>
-        );
-      case "position":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            {guardPositionLabels[guard.position]}
-          </td>
-        );
-      case "license":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {guard.licenseType === "Licensed" ? (
-              <span className="cursor-default" title={guardLicenseCellTooltip(guard)}>
-                {guardLicenseLabels.Licensed}
-              </span>
-            ) : guard.licenseType ? (
-              guardLicenseLabels[guard.licenseType]
-            ) : (
-              "—"
-            )}
-          </td>
-        );
-      case "grade":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} tabular-nums text-app-muted`}>
-            {guardTableLicenseGrade(guard)}
-          </td>
-        );
-      case "licenseValid":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {guardTableLicenseValidUntil(guard)}
-          </td>
-        );
-      case "employment":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            {guard.employmentType === "Employed" ? (
-              <span className="cursor-default text-status-active" title={guardEmploymentCellTooltip(guard)}>
-                да
-              </span>
-            ) : (
-              <span className="text-app-muted">—</span>
-            )}
-          </td>
-        );
-      case "employedOn":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {formatGuardTableDate(guard.employedOn)}
-          </td>
-        );
-      case "medical":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {formatGuardTableDate(guard.medicalCommissionPassedOn)}
-          </td>
-        );
-      case "periodic":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {formatGuardTableDate(guard.periodicCheckPassedOn)}
-          </td>
-        );
-      case "personalCard":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {formatGuardTableDate(guard.personalCardAssignedOn)}
-          </td>
-        );
-      case "car":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            {guard.hasCar ? (
-              <span className="text-status-active">да</span>
-            ) : (
-              <span className="text-app-muted">нет</span>
-            )}
-          </td>
-        );
-      case "uniform":
-        return (
-          <td key={columnId} className={guardTableTdClass}>
-            {guard.uniformIssued ? (
-              <span
-                className="cursor-default text-status-active"
-                title={
-                  guard.uniformIssuedOn && guard.uniformCondition
-                    ? formatUniformIssuedTooltip({
-                        issuedOn: guard.uniformIssuedOn,
-                        condition: guard.uniformCondition,
-                        note: guard.uniformNote,
-                      })
-                    : undefined
-                }
-              >
-                да
-              </span>
-            ) : (
-              <span className="text-app-muted">нет</span>
-            )}
-          </td>
-        );
-      case "objects":
-        return (
-          <td key={columnId} className={guardTableTdClass} onClick={(event) => event.stopPropagation()}>
-            <div className="mx-auto flex max-w-[14rem] justify-center">
-              <GuardTableObjectsCell
-                guardId={guard.id}
-                objectIds={guard.objectIds}
-                objectNames={guard.objectNames}
-                objects={objects}
-                openMenu={openMenu}
-                setOpenMenu={setOpenMenu}
-                rowObjectSearch={rowObjectSearch}
-                setRowObjectSearch={setRowObjectSearch}
-              />
-            </div>
-          </td>
-        );
-      case "status":
-        return (
-          <td key={columnId} className={guardTableTdClass} onClick={(event) => event.stopPropagation()}>
-            <GuardStatusCell guard={guard} openMenu={openMenu} setOpenMenu={setOpenMenu} />
-          </td>
-        );
-      case "dismissedOn":
-        return (
-          <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-            {formatGuardTableDate(guard.dismissedOn)}
-          </td>
-        );
-      case "actions":
-        return (
-          <td key={columnId} className={guardTableTdClass} onClick={(event) => event.stopPropagation()}>
-            <Button
-              type="button"
-              variant="icon"
-              size="icon"
-              className="text-accent-danger hover:bg-accent-danger/10"
-              aria-label="Удалить охранника"
-              onClick={() =>
-                onDeleteGuard({
-                  id: guard.id,
-                  name: `${guard.lastName} ${guard.firstName}`.trim(),
-                })
-              }
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </td>
-        );
-      default:
-        return null;
-    }
-  }
-
   return (
     <div className="mt-4 min-w-0 overflow-x-clip rounded-card border border-app-border bg-app-surface">
-      <div className="flex flex-col gap-2 border-b border-app-border px-3 py-1.5 md:flex-row md:items-center md:justify-between bg-app-elevated/40">
+      <div className="flex flex-col gap-2 border-b border-app-border bg-app-elevated/40 px-3 py-1.5 md:flex-row md:items-center md:justify-between">
         <p className="text-xs text-app-muted">
-          Перетащите заголовок колонки (иконка ≡) для изменения порядка. Порядок и видимость сохраняются отдельно для каждого пользователя.
+          Перетащите заголовок колонки (иконка ≡) для изменения порядка. Порядок и видимость сохраняются
+          отдельно для каждого пользователя.
         </p>
         <button
           type="button"
@@ -414,7 +508,10 @@ export function GuardRegistryTable({
               .map((col) => {
                 const isVisible = !hiddenColumnIds.includes(col.id);
                 return (
-                  <label key={col.id} className="inline-flex cursor-pointer items-center gap-1.5 select-none text-app-muted hover:text-app-text">
+                  <label
+                    key={col.id}
+                    className="inline-flex cursor-pointer select-none items-center gap-1.5 text-app-muted hover:text-app-text"
+                  >
                     <input
                       type="checkbox"
                       checked={isVisible}
@@ -429,29 +526,34 @@ export function GuardRegistryTable({
         </div>
       )}
 
+      {pendingGuardId ? (
+        <div
+          className="pointer-events-none fixed inset-0 z-[80] flex items-start justify-center bg-app-bg/40 pt-[20vh] backdrop-blur-[1px]"
+          aria-live="polite"
+        >
+          <div className="rounded-card border border-app-border bg-app-surface px-4 py-3 text-sm font-semibold text-app-text shadow-glow">
+            Открываем карточку…
+          </div>
+        </div>
+      ) : null}
+
       <StickyHorizontalScroll>
         <table className="w-max min-w-full border-collapse text-center text-sm">
           <thead className="bg-app-elevated">
             <tr>{headerCells}</tr>
           </thead>
           <tbody>
-            {guards.map((guard, index) => {
-              const complianceReminderRow = isGuardComplianceReminderRow(guard);
-              return (
-                <tr
-                  key={guard.id}
-                  className={cn(
-                    "cursor-pointer border-b border-app-border last:border-b-0",
-                    complianceReminderRow && guardRegistryReminderRowClass,
-                    complianceReminderRow ? "hover:brightness-95" : "hover:bg-app-elevated/50",
-                  )}
-                  style={guardRegistryReminderRowStyle(complianceReminderRow)}
-                  onClick={() => router.push(`/guards/${guard.id}`)}
-                >
-                  {visibleColumns.map((columnId) => renderCell(columnId, guard, index))}
-                </tr>
-              );
-            })}
+            {guards.map((guard, index) => (
+              <GuardRegistryRow
+                key={guard.id}
+                guard={guard}
+                index={index}
+                visibleColumns={visibleColumns}
+                ctx={rowCtx}
+                isPending={pendingGuardId === guard.id}
+                onOpen={onOpen}
+              />
+            ))}
             {guards.length === 0 ? (
               <tr>
                 <td className="px-3 py-6 text-app-muted" colSpan={columnCount}>

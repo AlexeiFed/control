@@ -228,3 +228,52 @@ export function isoDateFromDateOrNull(date: Date | null | undefined): string | n
   if (!date || Number.isNaN(date.getTime())) return null;
   return date.toISOString().slice(0, 10);
 }
+
+/** Placeholder для ручного ввода даты в UI. */
+export const DISPLAY_DATE_PLACEHOLDER = `дд${DISPLAY_DATE_PART_SEPARATOR}мм${DISPLAY_DATE_PART_SEPARATOR}гггг`;
+
+/** Цифры из строки даты (макс. 8: ДДММГГГГ). */
+export function extractDisplayDateDigits(value: string): string {
+  return String(value ?? "").replace(/\D/g, "").slice(0, 8);
+}
+
+/** Маска ввода: `02082026` → `02.08.2026`. */
+export function formatDisplayDateFromDigits(digits: string): string {
+  const d = extractDisplayDateDigits(digits);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, 2)}${DISPLAY_DATE_PART_SEPARATOR}${d.slice(2)}`;
+  return `${d.slice(0, 2)}${DISPLAY_DATE_PART_SEPARATOR}${d.slice(2, 4)}${DISPLAY_DATE_PART_SEPARATOR}${d.slice(4)}`;
+}
+
+/**
+ * `дд.мм.гггг` / `д.м.гггг` → `YYYY-MM-DD`, иначе `null`.
+ * Принимает также уже ISO `YYYY-MM-DD`.
+ */
+export function parseDisplayDateToIso(displayOrIso: string | null | undefined): string | null {
+  if (displayOrIso == null) return null;
+  const raw = String(displayOrIso).trim();
+  if (!raw) return null;
+  if (ISO_DATE_RE.test(raw)) {
+    return parseIsoDateKhabarovskOrNull(raw) ? raw : null;
+  }
+  const m = /^(\d{1,2})[./](\d{1,2})[./](\d{4})$/.exec(raw);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  if (!Number.isFinite(day) || !Number.isFinite(month) || !Number.isFinite(year)) return null;
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const iso = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const parsed = parseIsoDateKhabarovskOrNull(iso);
+  if (!parsed) return null;
+  // отсекаем 31.02 → сдвиг календаря
+  const check = toDateIsoKhabarovsk(parsed);
+  return check === iso ? iso : null;
+}
+
+/** ISO → маска `дд.мм.гггг` (пусто, если ISO битый). */
+export function isoToDisplayDateInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const formatted = formatDisplayDateFromIso(iso);
+  return parseDisplayDateToIso(formatted) ? formatted : "";
+}

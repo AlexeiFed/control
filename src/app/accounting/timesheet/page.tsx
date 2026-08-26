@@ -111,7 +111,7 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
   let objectPayrollHalves: ReturnType<typeof buildObjectPayrollHalfSummaries> | undefined;
   let guardPeriodByName: ReturnType<typeof buildGuardPeriodBreakdownByName> | undefined;
   if (showPayrollHalves && month && monthCtx) {
-    const advancesByGuardId = await sumAdvancesByGuardForMonth(month.year, month.monthIndex);
+    const advancesByGuardId = await sumAdvancesByGuardForMonth(month.year, month.monthIndex, objectId);
     const guardIdByName = new Map(filterOptions.guards.map((g) => [g.name, g.id] as const));
     const payrollRows = unpricedOnly ? rows : rowsRaw;
     const summaries = buildGuardPayrollHalfSummaries({

@@ -12,6 +12,7 @@ import {
   type ActiveShiftsSequenceResult,
 } from "../../lib/scheduling/object-shift-templates";
 import { toast } from "../../store/toast-store";
+import { DateInput } from "../ui/date-input";
 import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 
 const weekdayShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -226,10 +227,11 @@ export function ObjectShiftTemplateSection({
         >
           <label className="grid max-w-xs gap-1 text-sm">
             <span className="text-app-muted">Применять сменность с даты</span>
-            <input
-              type="date"
+            <DateInput
               value={templateDraft.effectiveFrom}
-              onChange={(e) => void reloadTemplateDraftForEffectiveFrom(e.target.value)}
+              onChange={(iso) => {
+                if (iso) void reloadTemplateDraftForEffectiveFrom(iso);
+              }}
               disabled={isLoadingTemplateBaseline || isSavingTemplate}
               className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-app-text outline-none focus:border-accent-primary disabled:opacity-60"
               required

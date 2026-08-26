@@ -6,6 +6,7 @@ import { assignGuardProfilePeriodAction } from "../../app/guards/actions";
 import { designTokens } from "../../lib/design-tokens";
 import { guardPositionLabels } from "../../lib/operations/status-labels";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import { ClipboardList } from "lucide-react";
 
 type GuardServiceRecordSectionProps = {
@@ -67,8 +68,7 @@ export function GuardServiceRecordSection({ guardId }: GuardServiceRecordSection
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">С даты</span>
-          <input
-            type="date"
+          <DateInput
             name="effectiveFrom"
             required
             className="rounded-button border border-app-border bg-app-bg px-3 py-2 outline-none focus:border-accent-primary"
@@ -77,8 +77,7 @@ export function GuardServiceRecordSection({ guardId }: GuardServiceRecordSection
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">По дату (пусто — бессрочно)</span>
-          <input
-            type="date"
+          <DateInput
             name="effectiveTo"
             className="rounded-button border border-app-border bg-app-bg px-3 py-2 outline-none focus:border-accent-primary"
           />

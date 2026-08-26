@@ -3,9 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { dispatchGuardComplianceRemindersRefresh } from "../../lib/guards/compliance-reminders-refresh";
-import { updateGuardProfileAction } from "../../app/guards/actions";
+import {
+  listObjectsForGuardEditorAction,
+  updateGuardProfileAction,
+} from "../../app/guards/actions";
 import { toast } from "../../store/toast-store";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import { PhoneInput } from "../ui/phone-input";
 import type { GuardDetails } from "../../lib/operations/guards-repository";
 import { designTokens } from "../../lib/design-tokens";
@@ -31,31 +35,56 @@ const fieldClass =
 
 type GuardProfileEditorProps = {
   guard: GuardDetails;
-  objects: ObjectListRow[];
 };
 
-export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) {
+export function GuardProfileEditor({ guard }: GuardProfileEditorProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, startSave] = useTransition();
+  const [isLoadingObjects, startLoadObjects] = useTransition();
+  const [objects, setObjects] = useState<ObjectListRow[] | null>(null);
   const [employmentType, setEmploymentType] = useState<GuardEmploymentType>(guard.employmentType);
   const [licenseType, setLicenseType] = useState<GuardLicenseType>(guard.licenseType ?? "None");
+
+  const openEditor = () => {
+    if (objects) {
+      setIsEditing(true);
+      return;
+    }
+    startLoadObjects(async () => {
+      const result = await listObjectsForGuardEditorAction();
+      if (!result.ok) {
+        toast({
+          title: "Не удалось открыть редактор",
+          message: result.error,
+          variant: "error",
+          durationMs: 5000,
+        });
+        return;
+      }
+      setObjects(result.objects);
+      setIsEditing(true);
+    });
+  };
 
   if (!isEditing) {
     return (
       <div className="mt-4 flex items-center justify-end">
         <Button
           type="button"
-          onClick={() => setIsEditing(true)}
+          onClick={openEditor}
+          disabled={isLoadingObjects}
           className="flex w-full items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold transition-all duration-200 sm:w-auto"
           variant="outline"
         >
           <Pencil className="size-4 text-accent-primary" />
-          Редактировать профиль
+          {isLoadingObjects ? "Загрузка…" : "Редактировать профиль"}
         </Button>
       </div>
     );
   }
+
+  if (!objects) return null;
 
   return (
     <div className="mt-4 animate-fadeIn rounded-card border border-app-border bg-app-elevated p-3 shadow-glow sm:mt-6 sm:p-5">
@@ -119,7 +148,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Дата рождения</span>
-          <input type="date" name="birthDate" defaultValue={guard.birthDate ?? ""} className={fieldClass} />
+          <DateInput name="birthDate" defaultValue={guard.birthDate ?? ""} className={fieldClass} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Телефон</span>
@@ -170,6 +199,9 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
           defaultIssuedOn={guard.uniformIssuedOn}
           defaultCondition={guard.uniformCondition}
           defaultNote={guard.uniformNote}
+          defaultTshirtIssued={guard.tshirtIssued}
+          defaultTshirtSize={guard.tshirtSize}
+          defaultTshirtIssuedOn={guard.tshirtIssuedOn}
           fieldClassName={fieldClass}
         />
 
@@ -187,7 +219,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Дата офиц. трудоустройства</span>
-          <input type="date" name="employedOn" defaultValue={guard.employedOn ?? ""} className={fieldClass} />
+          <DateInput name="employedOn" defaultValue={guard.employedOn ?? ""} className={fieldClass} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Удостоверение</span>
@@ -218,8 +250,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Удостоверение действует до</span>
-          <input
-            type="date"
+          <DateInput
             name="licenseValidUntil"
             defaultValue={guard.licenseValidUntil ?? ""}
             className={fieldClass}
@@ -228,8 +259,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Медкомиссия</span>
-          <input
-            type="date"
+          <DateInput
             name="medicalCommissionPassedOn"
             defaultValue={guard.medicalCommissionPassedOn ?? ""}
             className={fieldClass}
@@ -237,8 +267,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Периодическая проверка</span>
-          <input
-            type="date"
+          <DateInput
             name="periodicCheckPassedOn"
             defaultValue={guard.periodicCheckPassedOn ?? ""}
             className={fieldClass}
@@ -246,8 +275,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Личная карточка</span>
-          <input
-            type="date"
+          <DateInput
             name="personalCardAssignedOn"
             defaultValue={guard.personalCardAssignedOn ?? ""}
             className={fieldClass}
@@ -256,8 +284,7 @@ export function GuardProfileEditor({ guard, objects }: GuardProfileEditorProps) 
         {guard.dismissedOn ? (
           <label className="flex flex-col gap-1 text-sm md:col-span-2">
             <span className="text-app-muted font-medium">Дата увольнения</span>
-            <input
-              type="date"
+            <DateInput
               name="dismissedOnDisplay"
               defaultValue={guard.dismissedOn}
               disabled

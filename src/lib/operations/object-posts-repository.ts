@@ -35,6 +35,17 @@ export async function getObjectPosts(objectId: string, month: string): Promise<O
   }));
 }
 
+export async function syncObjectGuardsToMonthStaff(
+  objectId: string,
+  month: string,
+  guardIds: string[],
+): Promise<void> {
+  const posts = await getObjectPosts(objectId, month);
+  for (const post of posts) {
+    await replaceMonthlyPostGuards(objectId, post.id, month, guardIds);
+  }
+}
+
 export async function ensureMonthlyPostsInherited(objectId: string, month: string): Promise<void> {
   const existing = await getObjectPosts(objectId, month);
   if (existing.length > 0) return;

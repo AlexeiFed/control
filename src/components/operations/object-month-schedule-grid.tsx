@@ -15,7 +15,7 @@ import {
   NotebookPen,
 } from "lucide-react";
 import { deleteShiftAction } from "../../app/scheduler/actions";
-import { upsertObjectMonthlySettingAction } from "../../app/objects/actions";
+import { removeGuardFromObjectMonthScheduleAction, upsertObjectMonthlySettingAction } from "../../app/objects/actions";
 import { Button } from "../ui/button";
 import type { Shift, ShiftKind, GuardStatus } from "../../lib/scheduling/types";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
@@ -56,6 +56,7 @@ import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard
 import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
 import { ScheduleHoursShortageIcon } from "./schedule-hours-shortage-icon";
 import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
+import { dispatchIncidentReplacementsRefresh } from "./global-incident-replacements-banner";
 import {
   buildScheduleDayColumnStyle,
   mergeScheduleCellStyles,
@@ -207,6 +208,13 @@ export function ObjectMonthScheduleGrid({
   const router = useRouter();
   const [operationalDayDraft, setOperationalDayDraft] = useState(operationalDayStartTime);
   const [isSavingOperationalDay, setIsSavingOperationalDay] = useState(false);
+  const [removingGuardId, setRemovingGuardId] = useState<string | null>(null);
+  /** Скрываем строку сразу после 🗑, пока router.refresh подтянет штат месяца. */
+  const [hiddenGuardIds, setHiddenGuardIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    setHiddenGuardIds(new Set());
+  }, [objectId, viewYear, viewMonth0]);
 
   useEffect(() => {
     setOperationalDayDraft(operationalDayStartTime);
@@ -219,13 +227,14 @@ export function ObjectMonthScheduleGrid({
     const rows: ScheduleGridGuardRow[] = [];
     for (const section of Object.values(guardsByPost)) {
       for (const row of section) {
+        if (hiddenGuardIds.has(row.guardId)) continue;
         if (seen.has(row.guardId)) continue;
         seen.add(row.guardId);
         rows.push(row);
       }
     }
     return rows.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
-  }, [guardsByPost]);
+  }, [guardsByPost, hiddenGuardIds]);
 
   const firstPostId = posts[0]?.id ?? null;
 
@@ -257,6 +266,53 @@ export function ObjectMonthScheduleGrid({
       router.refresh();
     } finally {
       setIsSavingOperationalDay(false);
+    }
+  }
+
+  async function removeGuardFromMonth(sg: ScheduleGridGuardRow) {
+    if (!canWrite || removingGuardId) return;
+    const monthStr = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
+    const shiftCount = monthShifts.filter((s) => s.guardId === sg.guardId).length;
+    const ok = window.confirm(
+      `Убрать «${sg.displayName}» из графика за ${monthLabel}?\n\n` +
+        `Строка исчезнет из графика этого месяца. Будет удалено ${shiftCount} смен. ` +
+        `Табель и недоборы пересчитаются. Другие месяцы не изменятся.`,
+    );
+    if (!ok) return;
+
+    setRemovingGuardId(sg.guardId);
+    try {
+      const fd = new FormData();
+      fd.set("objectId", objectId);
+      fd.set("guardId", sg.guardId);
+      fd.set("month", monthStr);
+      const result = await removeGuardFromObjectMonthScheduleAction(fd);
+      if (!result.ok) {
+        toast({ title: "Не удалось убрать", message: result.error, variant: "error", durationMs: 6500 });
+        return;
+      }
+      setHiddenGuardIds((prev) => {
+        const next = new Set(prev);
+        next.add(sg.guardId);
+        return next;
+      });
+      toast({
+        title: "Охранник убран из графика",
+        message: `Удалено смен: ${result.deletedShifts}. ${monthLabel}`,
+        variant: "success",
+      });
+      window.dispatchEvent(new CustomEvent(SCHEDULE_SHORTAGE_REFRESH_EVENT));
+      dispatchIncidentReplacementsRefresh();
+      router.refresh();
+    } catch (err) {
+      toast({
+        title: "Не удалось убрать",
+        message: humanizeClientError(err, "Ошибка удаления из графика"),
+        variant: "error",
+        durationMs: 6500,
+      });
+    } finally {
+      setRemovingGuardId(null);
     }
   }
 
@@ -614,7 +670,9 @@ export function ObjectMonthScheduleGrid({
   }
 
   function renderGuardsRows(postId: string | null) {
-    const sectionGuards = guardsByPost[postId ?? ""] ?? [];
+    const sectionGuards = (guardsByPost[postId ?? ""] ?? []).filter(
+      (sg) => !hiddenGuardIds.has(sg.guardId),
+    );
     if (sectionGuards.length === 0) {
       return (
         <tr>
@@ -633,26 +691,45 @@ export function ObjectMonthScheduleGrid({
             scheduleGridRowHoverStyle(gridHover, sg.guardId),
           )}
         >
-          <div 
-            className="flex flex-col cursor-help"
-            onMouseEnter={(e) => {
-              const date = new Date(viewYear, viewMonth0, 1);
-              const dateIso = toDateIsoKhabarovsk(date);
-              onOpenGuardPreview(
-                {
-                  guardId: sg.guardId,
-                  anchorDateIso: dateIso,
-                  displayName: sg.displayName,
-                },
-                e.currentTarget
-              );
-            }}
-            onMouseLeave={onCloseGuardPreview}
-          >
-            <span>{sg.displayName}</span>
-            {!sg.isAssigned && (
-              <span className="text-[9px] text-accent-warning leading-none">Вне штата</span>
-            )}
+          <div className="flex items-start justify-between gap-1">
+            <div
+              className="flex min-w-0 flex-col cursor-help"
+              onMouseEnter={(e) => {
+                const date = new Date(viewYear, viewMonth0, 1);
+                const dateIso = toDateIsoKhabarovsk(date);
+                onOpenGuardPreview(
+                  {
+                    guardId: sg.guardId,
+                    anchorDateIso: dateIso,
+                    displayName: sg.displayName,
+                  },
+                  e.currentTarget,
+                );
+              }}
+              onMouseLeave={onCloseGuardPreview}
+            >
+              <span className="truncate">{sg.displayName}</span>
+              {!sg.isAssigned && (
+                <span className="text-[9px] text-accent-warning leading-none">Вне штата</span>
+              )}
+            </div>
+            {canWrite ? (
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-app-muted opacity-70 transition hover:bg-app-elevated hover:text-status-sick hover:opacity-100 disabled:opacity-40"
+                title="Убрать из графика месяца"
+                aria-label={`Убрать ${sg.displayName} из графика за ${monthLabel}`}
+                disabled={removingGuardId === sg.guardId}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  void removeGuardFromMonth(sg);
+                }}
+                onMouseEnter={(e) => e.stopPropagation()}
+              >
+                <Trash2 className="size-3.5" strokeWidth={2.25} />
+              </button>
+            ) : null}
           </div>
         </td>
         {days.map((d) => {

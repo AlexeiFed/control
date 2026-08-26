@@ -12,6 +12,7 @@ import {
   type ObjectRateRuleActionResult,
 } from "../../app/objects/actions";
 import { Button } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
 import { prioritiesForDisplayOrder, defaultRateRuleEffectiveFrom } from "../../lib/operations/object-rate-rules-priority";
 import {
@@ -187,19 +188,17 @@ function RateRuleFields({ rule, isCreate, defaultEffectiveFrom }: FieldsProps) {
         <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <label className={labelClass}>
             С даты
-            <input
+            <DateInput
               required
               name="effectiveFrom"
-              type="date"
               defaultValue={r?.effectiveFrom ?? defaultEffectiveFrom ?? ""}
               className={inputClass}
             />
           </label>
           <label className={labelClass}>
             По дату (пусто — бессрочно)
-            <input
+            <DateInput
               name="effectiveTo"
-              type="date"
               defaultValue={r?.effectiveTo ?? ""}
               className={inputClass}
             />
@@ -913,10 +912,9 @@ export function ObjectRateRulesPanel({
             <div className="mt-4 grid gap-3">
               <label className={labelClass}>
                 С какой даты
-                <input
+                <DateInput
                   required
                   name="versionFrom"
-                  type="date"
                   defaultValue={defaultVersionFromForRule(versionRuleTarget)}
                   min={getNextCivilDate(versionRuleTarget.effectiveFrom)}
                   max={versionRuleTarget.effectiveTo ?? undefined}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FileImage, FileSpreadsheet, Send, Download } from "lucide-react";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { DateInput } from "../ui/date-input";
 import { toast } from "../../store/toast-store";
 import { getDaysInMonth } from "../../lib/format/display-date";
 import type { Shift } from "../../lib/scheduling/types";
@@ -250,18 +251,16 @@ export function ScheduleExportDialog({
         <div className="mt-4 rounded-button border border-dashed border-app-border p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-app-muted">Свой период</p>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr_auto] sm:items-center">
-            <input
-              type="date"
+            <DateInput
               value={customStartDate}
-              onChange={(e) => setCustomStartDate(e.target.value)}
+              onChange={setCustomStartDate}
               className="h-9 rounded-button border border-app-border bg-app-bg px-2 text-sm"
               disabled={busy}
             />
             <span className="text-center text-app-muted">—</span>
-            <input
-              type="date"
+            <DateInput
               value={customEndDate}
-              onChange={(e) => setCustomEndDate(e.target.value)}
+              onChange={setCustomEndDate}
               className="h-9 rounded-button border border-app-border bg-app-bg px-2 text-sm"
               disabled={busy}
             />

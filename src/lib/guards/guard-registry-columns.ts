@@ -17,6 +17,7 @@ export type GuardRegistryColumnId =
   | "personalCard"
   | "car"
   | "uniform"
+  | "tshirt"
   | "objects"
   | "status"
   | "dismissedOn"
@@ -54,6 +55,7 @@ export const DEFAULT_GUARD_REGISTRY_COLUMN_ORDER: GuardRegistryColumnId[] = [
   "personalCard",
   "car",
   "uniform",
+  "tshirt",
   "objects",
   "status",
   "dismissedOn",
@@ -212,6 +214,7 @@ export const GUARD_REGISTRY_COLUMN_META: Record<GuardRegistryColumnId, GuardRegi
   personalCard: { id: "personalCard", label: "ЛК", title: "Личная карточка", draggable: true },
   car: { id: "car", label: "Авто", draggable: true },
   uniform: { id: "uniform", label: "Форма", draggable: true },
+  tshirt: { id: "tshirt", label: "Футболка", draggable: true },
   objects: { id: "objects", label: "Объекты", draggable: true },
   status: { id: "status", label: "Статус", draggable: true },
   dismissedOn: {

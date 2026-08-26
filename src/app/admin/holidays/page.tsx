@@ -1,6 +1,7 @@
 import { CalendarHeart } from "lucide-react";
 import { createHolidayAction, deleteHolidayAction } from "./actions";
 import { Button, ButtonLink } from "../../../components/ui/button";
+import { DateInput } from "../../../components/ui/date-input";
 import { assertPermission } from "../../../lib/auth/rbac";
 import { requireSession } from "../../../lib/auth/session";
 import { listAllHolidays } from "../../../lib/operations/holidays-repository";
@@ -34,9 +35,8 @@ export default async function AdminHolidaysPage() {
         <form action={createHolidayAction} className="mt-6 flex flex-wrap items-end gap-3 rounded-card border border-app-border bg-app-elevated p-4">
           <label className="grid gap-1 text-xs text-app-muted">
             Дата
-            <input
+            <DateInput
               required
-              type="date"
               name="holidayDate"
               className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"
             />

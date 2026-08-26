@@ -10,6 +10,7 @@ import {
   updateObjectStatusAction,
 } from "../../app/objects/actions";
 import { Button, ButtonLink } from "../ui/button";
+import { DateInput } from "../ui/date-input";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import type { GuardListRow } from "../../lib/operations/guards-repository";
 import type { ObjectRateRuleRecord } from "../../lib/operations/object-rate-rules-repository";
@@ -431,8 +432,7 @@ export function ObjectsTable({
                     <input type="hidden" name="objectId" value={object.id} />
                     <label className="grid gap-1 text-xs text-app-muted">
                       Применять с даты
-                      <input
-                        type="date"
+                      <DateInput
                         name="effectiveFrom"
                         defaultValue={templateEffectiveFrom}
                         className="h-11 rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"
@@ -728,8 +728,7 @@ export function ObjectsTable({
                       <input type="hidden" name="objectId" value={object.id} />
                       <label className="grid gap-1 md:col-span-8 md:max-w-xs">
                         <span className="text-[10px] text-app-muted uppercase font-bold">Применять с даты</span>
-                        <input
-                          type="date"
+                        <DateInput
                           name="effectiveFrom"
                           defaultValue={templateEffectiveFrom}
                           className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"

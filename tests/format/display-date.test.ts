@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   formatCompactClockLocal,
   formatCompactTimeRangeLocal,
+  formatDisplayDateFromDigits,
   formatDisplayDateFromIso,
   formatDisplayDateLocal,
   formatMonthYearLongRu,
   formatWeekdayDayLabel,
   intervalOverlaps,
+  isoToDisplayDateInput,
   khabarovskMonthRangeContaining,
   khabarovskWeekRangeContaining,
+  parseDisplayDateToIso,
   toDateIsoKhabarovsk,
 } from "../../src/lib/format/display-date";
 
@@ -63,5 +66,17 @@ describe("display-date", () => {
 
     const weekWithShift = khabarovskWeekRangeContaining("2026-06-29");
     expect(intervalOverlaps(juneShift, weekWithShift)).toBe(true);
+  });
+
+  it("parses and masks display dates for manual entry", () => {
+    expect(formatDisplayDateFromDigits("02082026")).toBe("02.08.2026");
+    expect(formatDisplayDateFromDigits("0208")).toBe("02.08");
+    expect(parseDisplayDateToIso("02.08.2026")).toBe("2026-08-02");
+    expect(parseDisplayDateToIso("2.8.2026")).toBe("2026-08-02");
+    expect(parseDisplayDateToIso("2026-08-02")).toBe("2026-08-02");
+    expect(parseDisplayDateToIso("31.02.2026")).toBeNull();
+    expect(parseDisplayDateToIso("02.08")).toBeNull();
+    expect(isoToDisplayDateInput("2026-08-02")).toBe("02.08.2026");
+    expect(isoToDisplayDateInput("")).toBe("");
   });
 });

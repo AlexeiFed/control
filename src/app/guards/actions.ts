@@ -11,6 +11,8 @@ import { isValidRuPhone, normalizeRuPhoneForStorage } from "../../lib/format/pho
 import {
   isValidUniformSizeStored,
   normalizeUniformIssuedFields,
+  normalizeTshirtIssuedFields,
+  parseTshirtIssuedFromForm,
   parseUniformCondition,
   parseUniformSizeFormValue,
   UNIFORM_HEIGHT_MAX,
@@ -35,11 +37,17 @@ import {
   isGuardAssignedToObject,
   listGuardObjectAssignments,
   returnGuardToWork,
+  returnGuardTshirt,
+  returnGuardUniform,
   setGuardObjects,
   unassignGuardFromObject,
   updateGuardProfile,
   updateGuardStatus,
 } from "../../lib/operations/guards-repository";
+import {
+  listObjectsForAssignment,
+  type ObjectListRow,
+} from "../../lib/operations/objects-repository";
 import type { GuardProfilePeriodKind } from "../../lib/guards/profile-periods";
 import { canReturnGuardToWork } from "../../lib/guards/return-to-work";
 import {
@@ -195,12 +203,18 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
     const uniformNote = formData.get("uniformNote");
 
     let issuedFields;
+    let tshirtFields;
     try {
       issuedFields = normalizeUniformIssuedFields({
         issued: uniformIssued,
         issuedOn: String(uniformIssuedOn ?? ""),
         condition: parseUniformCondition(uniformCondition),
         note: String(uniformNote ?? ""),
+      });
+      tshirtFields = normalizeTshirtIssuedFields({
+        issued: parseTshirtIssuedFromForm(formData),
+        size: parseUniformSizeFormValue(formData.get("tshirtSize")),
+        issuedOn: String(formData.get("tshirtIssuedOn") ?? ""),
       });
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "Ошибка данных формы" };
@@ -221,6 +235,9 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
         uniformIssuedOn: issuedFields.uniformIssuedOn,
         uniformCondition: issuedFields.uniformCondition,
         uniformNote: issuedFields.uniformNote,
+        tshirtIssued: tshirtFields.tshirtIssued,
+        tshirtSize: tshirtFields.tshirtSize,
+        tshirtIssuedOn: tshirtFields.tshirtIssuedOn,
         position,
         licenseType: licenseForDb(input.licenseType),
         employmentType: input.employmentType,
@@ -371,6 +388,68 @@ export async function returnGuardToWorkAction(formData: FormData): Promise<Retur
       return { ok: false, error: error.message };
     }
     return { ok: false, error: "Не удалось вернуть охранника в работу" };
+  }
+}
+
+const returnUniformSchema = z.object({
+  guardId: z.string().uuid(),
+  returnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Укажите дату сдачи формы"),
+});
+
+export type ReturnGuardUniformResult = { ok: true } | { ok: false; error: string };
+
+export async function returnGuardUniformAction(formData: FormData): Promise<ReturnGuardUniformResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "guards:manage");
+
+    const input = returnUniformSchema.parse({
+      guardId: formData.get("guardId"),
+      returnedOn: formData.get("returnedOn"),
+    });
+
+    await returnGuardUniform(input.guardId, input.returnedOn);
+    revalidatePath("/guards");
+    revalidatePath(`/guards/${input.guardId}`);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: formatZodError(error) };
+    }
+    if (error instanceof Error && error.message) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: false, error: "Не удалось отметить сдачу формы" };
+  }
+}
+
+const returnTshirtSchema = z.object({
+  guardId: z.string().uuid(),
+  returnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Укажите дату сдачи футболки"),
+});
+
+export async function returnGuardTshirtAction(formData: FormData): Promise<ReturnGuardUniformResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "guards:manage");
+
+    const input = returnTshirtSchema.parse({
+      guardId: formData.get("guardId"),
+      returnedOn: formData.get("returnedOn"),
+    });
+
+    await returnGuardTshirt(input.guardId, input.returnedOn);
+    revalidatePath("/guards");
+    revalidatePath(`/guards/${input.guardId}`);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: formatZodError(error) };
+    }
+    if (error instanceof Error && error.message) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: false, error: "Не удалось отметить сдачу футболки" };
   }
 }
 
@@ -578,12 +657,18 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
     const uniformNote = formData.get("uniformNote");
 
     let issuedFields;
+    let tshirtFields;
     try {
       issuedFields = normalizeUniformIssuedFields({
         issued: uniformIssued,
         issuedOn: String(uniformIssuedOn ?? ""),
         condition: parseUniformCondition(uniformCondition),
         note: String(uniformNote ?? ""),
+      });
+      tshirtFields = normalizeTshirtIssuedFields({
+        issued: parseTshirtIssuedFromForm(formData),
+        size: parseUniformSizeFormValue(formData.get("tshirtSize")),
+        issuedOn: String(formData.get("tshirtIssuedOn") ?? ""),
       });
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "Ошибка данных формы" };
@@ -602,6 +687,9 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
       uniformIssuedOn: issuedFields.uniformIssuedOn,
       uniformCondition: issuedFields.uniformCondition,
       uniformNote: issuedFields.uniformNote,
+      tshirtIssued: tshirtFields.tshirtIssued,
+      tshirtSize: tshirtFields.tshirtSize,
+      tshirtIssuedOn: tshirtFields.tshirtIssuedOn,
       position: existing.position,
       licenseType,
       employmentType,
@@ -697,4 +785,69 @@ export async function assignGuardProfilePeriodAction(
   revalidatePath(`/guards/${parsed.guardId}`);
   revalidateTag("timesheet", undefined as any);
   return { ok: true, warnings: result.warnings };
+}
+
+/** Список объектов для редактора профиля — только при открытии формы. */
+export async function listObjectsForGuardEditorAction(): Promise<
+  { ok: true; objects: ObjectListRow[] } | { ok: false; error: string }
+> {
+  const session = await requireSession();
+  assertPermission(session.user.role, "guards:manage");
+  try {
+    const objects = await listObjectsForAssignment();
+    return { ok: true, objects };
+  } catch {
+    return { ok: false, error: "Не удалось загрузить список объектов" };
+  }
+}
+
+export type GuardMonthShiftsDto = {
+  id: string;
+  objectId: string;
+  objectName: string;
+  startsAt: string;
+  endsAt: string;
+  shiftKind: string;
+  isNoShow: boolean;
+  incidentCategory: string | null;
+  incidentRecordedAt: string | null;
+};
+
+/** Смены охранника за месяц — для календаря профиля (клиентский fetch). */
+export async function listGuardMonthShiftsAction(
+  guardId: string,
+  year: number,
+  month0: number,
+): Promise<{ ok: true; shifts: GuardMonthShiftsDto[] } | { ok: false; error: string }> {
+  const session = await requireSession();
+  assertPermission(session.user.role, "guards:manage");
+  if (!z.string().uuid().safeParse(guardId).success) {
+    return { ok: false, error: "Некорректный охранник" };
+  }
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return { ok: false, error: "Некорректный год" };
+  }
+  if (!Number.isInteger(month0) || month0 < 0 || month0 > 11) {
+    return { ok: false, error: "Некорректный месяц" };
+  }
+  try {
+    const { listGuardShiftHistoryForMonth } = await import("../../lib/operations/guards-repository");
+    const rows = await listGuardShiftHistoryForMonth(guardId, year, month0);
+    return {
+      ok: true,
+      shifts: rows.map((row) => ({
+        id: row.id,
+        objectId: row.objectId,
+        objectName: row.objectName,
+        startsAt: row.startsAt.toISOString(),
+        endsAt: row.endsAt.toISOString(),
+        shiftKind: row.shiftKind,
+        isNoShow: row.isNoShow,
+        incidentCategory: row.incidentCategory,
+        incidentRecordedAt: row.incidentRecordedAt?.toISOString() ?? null,
+      })),
+    };
+  } catch {
+    return { ok: false, error: "Не удалось загрузить смены" };
+  }
 }

@@ -473,6 +473,7 @@ export async function createShiftLogAction(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/scheduler");
+  revalidatePath("/shift-logs");
   revalidatePath("/admin/curators");
   revalidateTag("timesheet", "max");
   if (input.redirect?.startsWith("/objects/")) {
