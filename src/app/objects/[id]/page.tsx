@@ -14,7 +14,7 @@ import { listShiftTemplatesForObjectIds } from "../../../lib/operations/shift-te
 import { buildExpectedShiftsForLocalMonth } from "../../../lib/scheduling/object-shift-templates";
 import { getObjectOperationalDayStartTimeForMonth } from "../../../lib/operations/objects-repository";
 import { listObjectHolidays } from "../../../lib/operations/object-holidays-repository";
-import { getObjectPosts, ensureMonthlyPostsInherited, syncObjectGuardsToMonthStaff } from "../../../lib/operations/object-posts-repository";
+import { getObjectPosts, ensureMonthlyPostsInherited, seedEmptyPostsFromObjectGuards } from "../../../lib/operations/object-posts-repository";
 import { listMonthlyPostGuardsByObject } from "../../../lib/operations/object-monthly-post-guards-repository";
 import { listObjectMonthScheduleGuardIds } from "../../../lib/operations/object-month-schedule-guards-repository";
 import {
@@ -66,11 +66,11 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
   const monthKey = `${year}-${String(month0 + 1).padStart(2, "0")}`;
   const monthIsPast = isKhabarovskMonthPast(year, month0);
 
-  // Наследование постов и снимок пула — только текущий/будущий месяц.
-  // Прошлый месяц не создаём посты и не перетираем штат.
+  // Наследование постов — только текущий/будущий месяц.
+  // Штат поста не копируем с объекта: пустые посты один раз заполняем, кастом не затираем.
   if (!monthIsPast) {
     await ensureMonthlyPostsInherited(id, monthKey);
-    await syncObjectGuardsToMonthStaff(id, monthKey, object.guardIds);
+    await seedEmptyPostsFromObjectGuards(id, monthKey, object.guardIds);
   }
 
   // Смены всех объектов за месяц для пикера доступности — НЕ грузим в SSR:

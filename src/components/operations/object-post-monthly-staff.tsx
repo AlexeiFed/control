@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Users } from "lucide-react";
 import { Button } from "../ui/button";
-import { replaceMonthlyPostGuardsAction } from "../../app/objects/actions";
+import { setMonthlyPostGuardAction } from "../../app/objects/actions";
 import { designTokens } from "../../lib/design-tokens";
 
 type ObjectPostMonthlyStaffProps = {
@@ -30,18 +30,23 @@ export function ObjectPostMonthlyStaff({
 
   async function toggleGuard(guardId: string, checked: boolean) {
     if (!canManage || pending) return;
-    const next = checked
-      ? [...new Set([...assignedGuardIds, guardId])]
-      : assignedGuardIds.filter((id) => id !== guardId);
+    if (!checked) {
+      const name = guardNames[guardId] ?? "охранника";
+      const ok = window.confirm(
+        `Убрать «${name}» из штата поста? Смены не удаляются.`,
+      );
+      if (!ok) return;
+    }
 
     setPending(true);
     try {
       const fd = new FormData();
       fd.set("objectId", objectId);
       fd.set("postId", postId);
+      fd.set("guardId", guardId);
       fd.set("month", month);
-      fd.set("guardIds", next.join(","));
-      await replaceMonthlyPostGuardsAction(fd);
+      fd.set("assigned", checked ? "true" : "false");
+      await setMonthlyPostGuardAction(fd);
     } finally {
       setPending(false);
     }

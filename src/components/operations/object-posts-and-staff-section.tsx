@@ -1,17 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Edit2, Plus, Save, Trash2, X } from "lucide-react";
 import { Button } from "../ui/button";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import type { MonthlyPostGuardsByPostId } from "../../lib/operations/object-monthly-post-guards-repository";
+import type { GuardSchedulePickerRow } from "../../lib/operations/guards-repository";
 import {
   createObjectPostAction,
   deleteObjectPostAction,
-  replaceMonthlyPostGuardsAction,
+  setMonthlyPostGuardAction,
   updateObjectPostAction,
 } from "../../app/objects/actions";
+import { toast } from "../../store/toast-store";
 import { designTokens } from "../../lib/design-tokens";
+
+type StaffRow = { id: string; label: string };
 
 type ObjectPostsAndStaffSectionProps = {
   objectId: string;
@@ -23,6 +28,10 @@ type ObjectPostsAndStaffSectionProps = {
   guardNames: Record<string, string>;
   canManage: boolean;
   hideStaffAssignment?: boolean;
+  allowAnyGuard?: boolean;
+  pickerGuards?: GuardSchedulePickerRow[] | null;
+  pickerGuardsLoading?: boolean;
+  onPickerFocus?: () => void;
 };
 
 export function ObjectPostsAndStaffSection({
@@ -35,7 +44,12 @@ export function ObjectPostsAndStaffSection({
   guardNames,
   canManage,
   hideStaffAssignment = false,
+  allowAnyGuard = false,
+  pickerGuards = null,
+  pickerGuardsLoading = false,
+  onPickerFocus,
 }: ObjectPostsAndStaffSectionProps) {
+  const router = useRouter();
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activePostId, setActivePostId] = useState<string | null>(posts[0]?.id ?? null);
@@ -59,27 +73,50 @@ export function ObjectPostsAndStaffSection({
   const activePost = posts.find((p) => p.id === activePostId) ?? null;
   const activeGuardIds = activePost ? (monthlyPostGuardsByPostId[activePost.id] ?? []) : [];
   const staffQuery = staffSearch.trim().toLowerCase();
-  const filteredObjectGuardIds =
-    staffQuery.length === 0
-      ? objectGuardIds
-      : objectGuardIds.filter((guardId) =>
-          (guardNames[guardId] ?? "").toLowerCase().includes(staffQuery),
-        );
 
-  async function toggleGuard(guardId: string, checked: boolean) {
+  const staffRows: StaffRow[] = allowAnyGuard
+    ? (pickerGuards ?? []).map((guard) => ({
+        id: guard.id,
+        label: `${guard.lastName} ${guard.firstName}`.trim(),
+      }))
+    : objectGuardIds.map((guardId) => ({
+        id: guardId,
+        label: guardNames[guardId] ?? "Неизвестный",
+      }));
+
+  const filteredStaffRows =
+    staffQuery.length === 0
+      ? staffRows
+      : staffRows.filter((row) => row.label.toLowerCase().includes(staffQuery));
+
+  async function toggleGuard(guardId: string, label: string, checked: boolean) {
     if (!canManage || !activePost || pendingStaff) return;
-    const next = checked
-      ? [...new Set([...activeGuardIds, guardId])]
-      : activeGuardIds.filter((id) => id !== guardId);
+    if (!checked) {
+      const ok = window.confirm(
+        `Убрать «${label}» из штата поста «${activePost.name}» за ${monthLabel}? Смены не удаляются.`,
+      );
+      if (!ok) return;
+    }
 
     setPendingStaff(true);
     try {
       const fd = new FormData();
       fd.set("objectId", objectId);
       fd.set("postId", activePost.id);
+      fd.set("guardId", guardId);
       fd.set("month", monthKey);
-      fd.set("guardIds", next.join(","));
-      await replaceMonthlyPostGuardsAction(fd);
+      fd.set("assigned", checked ? "true" : "false");
+      const result = await setMonthlyPostGuardAction(fd);
+      if (!result.ok) {
+        toast({ title: "Не сохранено", message: result.error, variant: "error", durationMs: 6500 });
+        return;
+      }
+      toast({
+        title: checked ? "Охранник добавлен на пост" : "Охранник убран с поста",
+        message: `${activePost.name} · ${monthLabel}`,
+        variant: "success",
+      });
+      router.refresh();
     } finally {
       setPendingStaff(false);
     }
@@ -94,7 +131,9 @@ export function ObjectPostsAndStaffSection({
         <div>
           <h2 className="text-lg font-semibold">Посты за {monthLabel}</h2>
           <p className="mt-1 text-xs text-app-muted">
-            Посты и штат настраиваются отдельно для каждого месяца. Июнь не меняется, если вы правите июль.
+            Посты и штат настраиваются отдельно для каждого месяца. Галка добавляет или убирает
+            одного охранника на выбранном посту — остальных и смены не трогает. Пул «Охранники
+            объекта» сам по себе штат поста не перезаписывает.
           </p>
         </div>
         {canManage ? (
@@ -237,7 +276,15 @@ export function ObjectPostsAndStaffSection({
             <p className="rounded-button border border-dashed border-app-border p-4 text-sm text-app-muted">
               Выберите пост слева или добавьте первый пост для этого месяца.
             </p>
-          ) : objectGuardIds.length === 0 ? (
+          ) : allowAnyGuard && pickerGuardsLoading && pickerGuards === null ? (
+            <p className="rounded-button border border-dashed border-app-border p-4 text-sm text-app-muted">
+              Загрузка списка охранников…
+            </p>
+          ) : allowAnyGuard && pickerGuards === null ? (
+            <p className="rounded-button border border-dashed border-app-border p-4 text-sm text-app-muted">
+              Кликните в поле поиска, чтобы загрузить список.
+            </p>
+          ) : !allowAnyGuard && objectGuardIds.length === 0 ? (
             <p className="rounded-button border border-dashed border-app-border p-4 text-sm text-app-muted">
               Сначала назначьте охранников на объект (блок выше).
             </p>
@@ -247,30 +294,31 @@ export function ObjectPostsAndStaffSection({
                 type="search"
                 value={staffSearch}
                 onChange={(e) => setStaffSearch(e.target.value)}
+                onFocus={() => onPickerFocus?.()}
                 placeholder="Поиск по фамилии"
                 aria-label="Поиск охранника по фамилии"
                 className="w-full rounded-button border border-app-border bg-app-surface px-2 py-2 text-sm text-app-text outline-none focus:border-accent-primary"
                 style={{ borderColor: designTokens.color.border }}
               />
               <div className="max-h-64 space-y-1 overflow-auto">
-                {filteredObjectGuardIds.length === 0 ? (
+                {filteredStaffRows.length === 0 ? (
                   <p className="px-2 py-2 text-xs text-app-muted">Никого не найдено</p>
                 ) : (
-                  filteredObjectGuardIds.map((guardId) => {
-                    const checked = activeGuardIds.includes(guardId);
+                  filteredStaffRows.map((row) => {
+                    const checked = activeGuardIds.includes(row.id);
                     return (
                       <label
-                        key={guardId}
+                        key={row.id}
                         className="flex cursor-pointer items-center gap-3 rounded-button p-2 transition hover:bg-app-elevated"
                       >
                         <input
                           type="checkbox"
                           checked={checked}
                           disabled={!canManage || pendingStaff}
-                          onChange={(e) => void toggleGuard(guardId, e.target.checked)}
+                          onChange={(e) => void toggleGuard(row.id, row.label, e.target.checked)}
                           className="size-4 rounded border-app-border"
                         />
-                        <span className="text-sm">{guardNames[guardId] ?? "Неизвестный"}</span>
+                        <span className="text-sm">{row.label}</span>
                       </label>
                     );
                   })

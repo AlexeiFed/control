@@ -533,10 +533,10 @@ export function ObjectDetailView({
   const showLiveObjectGuardPool = shouldShowLiveObjectGuardPool(viewYear, viewMonth0);
 
   useEffect(() => {
-    if (!showLiveObjectGuardPool) {
+    if (!showLiveObjectGuardPool || posts.length > 0) {
       void ensurePickerGuards();
     }
-  }, [showLiveObjectGuardPool, ensurePickerGuards]);
+  }, [showLiveObjectGuardPool, posts.length, ensurePickerGuards]);
 
   useEffect(() => {
     if (quickAssign || incidentDraft) {
@@ -748,8 +748,9 @@ export function ObjectDetailView({
 
   const firstPostId = posts[0]?.id ?? null;
 
-  // Прошлые месяцы: снимок штата месяца (изоляция от поздних назначений).
-  // Текущий/будущий: пул «Охранники объекта» — без отдельных блоков назначения.
+  // Прошлые месяцы без постов: снимок штата месяца.
+  // С постами: штат каждого поста (и в текущем месяце).
+  // Без постов в текущем/будущем: пул «Охранники объекта».
   const guardsByPost = useMemo(() => {
     const mapRow = (id: string, assignedIds: Set<string>) => ({
       guardId: id,
@@ -791,7 +792,7 @@ export function ObjectDetailView({
     for (const post of posts) {
       const staffIds = collectScheduleMonthGuardIds(
         monthlyPostGuardsByPostId[post.id] ?? [],
-        post.id === firstPostId ? monthRosterGuardIds : [],
+        !showLiveObjectGuardPool && post.id === firstPostId ? monthRosterGuardIds : [],
       );
       const shiftGuardIds = shifts
         .filter((s) => shiftMatchesPost(s.postId, post.id, firstPostId))
@@ -802,8 +803,9 @@ export function ObjectDetailView({
         objectGuardIds: object.guardIds,
         monthlyStaffIds: staffIds,
         shiftGuardIds,
+        useMonthlyStaff: true,
       });
-      // isAssigned: в прошлом — был в снимке штата; в текущем — в пуле объекта
+      // isAssigned: в штате поста (и в текущем месяце), не пул объекта
       const assignedIds = new Set(
         resolveScheduleMonthRosterIds({
           year: viewYear,
@@ -811,6 +813,7 @@ export function ObjectDetailView({
           objectGuardIds: object.guardIds,
           monthlyStaffIds: staffIds,
           shiftGuardIds: [],
+          useMonthlyStaff: true,
         }),
       );
       result[post.id] = allIds.map((id) => mapRow(id, assignedIds)).sort(byName);
@@ -828,6 +831,7 @@ export function ObjectDetailView({
     viewMonth0,
     object.guardIds,
     monthRosterGuardIds,
+    showLiveObjectGuardPool,
   ]);
 
   const pickerGuardList = pickerGuards ?? [];
@@ -1452,7 +1456,10 @@ export function ObjectDetailView({
         monthlyPostGuardsByPostId={monthlyPostGuardsByPostId}
         guardNames={gridGuardNames}
         canManage={canManageOperationalDay}
-        hideStaffAssignment={!showLiveObjectGuardPool}
+        allowAnyGuard={posts.length > 0}
+        pickerGuards={posts.length > 0 ? pickerGuards : null}
+        pickerGuardsLoading={pickerGuardsLoading}
+        onPickerFocus={() => void ensurePickerGuards()}
       />
 
       <ObjectMonthScheduleGridLazy

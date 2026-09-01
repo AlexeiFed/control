@@ -49,7 +49,7 @@ import {
   shiftCoverageMinutes,
 } from "../../lib/scheduling/shift-attendance";
 import { incidentCategoryLabels } from "../../lib/operations/status-labels";
-import { shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
+import { scheduleRowHideKey, shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
 import { scheduleShiftColumnDateIso } from "../../lib/scheduling/operational-day-timeline";
 import { confirmDeleteShift } from "../../lib/scheduling/shift-delete-confirm";
 import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard-shift-alert";
@@ -68,6 +68,7 @@ import {
 } from "./object-detail-schedule-styles";
 
 const LAST_USED_QUICK_ASSIGN_KEY = "control.scheduler.lastQuickAssign.v1";
+const SCHEDULE_WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
 
 export function readLastUsedQuickAssign(): { startTime?: string; endTime?: string; shiftKind?: ShiftKind } | null {
   if (typeof window === "undefined") return null;
@@ -208,8 +209,8 @@ export function ObjectMonthScheduleGrid({
   const router = useRouter();
   const [operationalDayDraft, setOperationalDayDraft] = useState(operationalDayStartTime);
   const [isSavingOperationalDay, setIsSavingOperationalDay] = useState(false);
-  const [removingGuardId, setRemovingGuardId] = useState<string | null>(null);
-  /** Скрываем строку сразу после 🗑, пока router.refresh подтянет штат месяца. */
+  const [removingRowKey, setRemovingRowKey] = useState<string | null>(null);
+  /** Скрываем строку сразу после 🗑, пока router.refresh подтянет штат. Ключ: пост+охранник. */
   const [hiddenGuardIds, setHiddenGuardIds] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
@@ -225,9 +226,9 @@ export function ObjectMonthScheduleGrid({
   const guardsForExport = useMemo(() => {
     const seen = new Set<string>();
     const rows: ScheduleGridGuardRow[] = [];
-    for (const section of Object.values(guardsByPost)) {
+    for (const [postKey, section] of Object.entries(guardsByPost)) {
       for (const row of section) {
-        if (hiddenGuardIds.has(row.guardId)) continue;
+        if (hiddenGuardIds.has(scheduleRowHideKey(postKey || null, row.guardId))) continue;
         if (seen.has(row.guardId)) continue;
         seen.add(row.guardId);
         rows.push(row);
@@ -269,23 +270,32 @@ export function ObjectMonthScheduleGrid({
     }
   }
 
-  async function removeGuardFromMonth(sg: ScheduleGridGuardRow) {
-    if (!canWrite || removingGuardId) return;
+  async function removeGuardFromMonth(sg: ScheduleGridGuardRow, postId: string | null) {
+    const rowKey = scheduleRowHideKey(postId, sg.guardId);
+    if (!canWrite || removingRowKey) return;
     const monthStr = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
-    const shiftCount = monthShifts.filter((s) => s.guardId === sg.guardId).length;
+    const shiftCount = monthShifts.filter(
+      (s) => s.guardId === sg.guardId && shiftMatchesPost(s.postId, postId, firstPostId),
+    ).length;
+    const postName = postId ? (posts.find((p) => p.id === postId)?.name ?? "пост") : null;
     const ok = window.confirm(
-      `Убрать «${sg.displayName}» из графика за ${monthLabel}?\n\n` +
-        `Строка исчезнет из графика этого месяца. Будет удалено ${shiftCount} смен. ` +
-        `Табель и недоборы пересчитаются. Другие месяцы не изменятся.`,
+      postName
+        ? `Убрать «${sg.displayName}» с поста «${postName}» за ${monthLabel}?\n\n` +
+          `Строка исчезнет только с этого поста. Смены на других постах не удаляются. ` +
+          `На этом посту будет удалено ${shiftCount} смен. Другие месяцы не изменятся.`
+        : `Убрать «${sg.displayName}» из графика за ${monthLabel}?\n\n` +
+          `Строка исчезнет из графика этого месяца. Будет удалено ${shiftCount} смен. ` +
+          `Табель и недоборы пересчитаются. Другие месяцы не изменятся.`,
     );
     if (!ok) return;
 
-    setRemovingGuardId(sg.guardId);
+    setRemovingRowKey(rowKey);
     try {
       const fd = new FormData();
       fd.set("objectId", objectId);
       fd.set("guardId", sg.guardId);
       fd.set("month", monthStr);
+      if (postId) fd.set("postId", postId);
       const result = await removeGuardFromObjectMonthScheduleAction(fd);
       if (!result.ok) {
         toast({ title: "Не удалось убрать", message: result.error, variant: "error", durationMs: 6500 });
@@ -293,11 +303,11 @@ export function ObjectMonthScheduleGrid({
       }
       setHiddenGuardIds((prev) => {
         const next = new Set(prev);
-        next.add(sg.guardId);
+        next.add(rowKey);
         return next;
       });
       toast({
-        title: "Охранник убран из графика",
+        title: postName ? "Охранник убран с поста" : "Охранник убран из графика",
         message: `Удалено смен: ${result.deletedShifts}. ${monthLabel}`,
         variant: "success",
       });
@@ -312,7 +322,7 @@ export function ObjectMonthScheduleGrid({
         durationMs: 6500,
       });
     } finally {
-      setRemovingGuardId(null);
+      setRemovingRowKey(null);
     }
   }
 
@@ -550,6 +560,51 @@ export function ObjectMonthScheduleGrid({
     }
   }
 
+  function renderPostDateRow(postId: string) {
+    return (
+      <tr className="bg-app-elevated/50">
+        <th className="schedule-sticky-col border border-app-border p-1.5 text-left text-[9px] font-semibold uppercase tracking-wider text-app-muted sm:p-2 sm:text-[10px]">
+          Дата
+        </th>
+        {days.map((d) => {
+          const meta = dayColumnMetaByDay.get(d);
+          const dateObj = new Date(viewYear, viewMonth0, d);
+          const headerStyle = meta ? buildScheduleDayColumnStyle(meta) : undefined;
+          if (meta?.isToday && headerStyle) {
+            headerStyle.boxShadow = `inset 0 -3px 0 0 ${designTokens.color.accent.primary}`;
+          }
+          return (
+            <th
+              key={`${postId}-date-${d}`}
+              data-schedule-col={d}
+              className="border border-app-border p-1 text-center min-w-[2.5rem] sm:min-w-[45px]"
+              style={mergeScheduleCellStyles(
+                headerStyle,
+                scheduleGridColumnHoverStyle(gridHover, d),
+              )}
+            >
+              <div className="flex flex-col items-center">
+                <span
+                  className="tabular-nums"
+                  style={
+                    meta?.isToday
+                      ? { color: designTokens.color.accent.primary, fontWeight: 700 }
+                      : undefined
+                  }
+                >
+                  {d}
+                </span>
+                <span className="text-[10px] font-normal text-app-muted">
+                  {SCHEDULE_WEEKDAYS[getDayKhabarovsk(dateObj)]}
+                </span>
+              </div>
+            </th>
+          );
+        })}
+      </tr>
+    );
+  }
+
   function renderPlanRow(plan: Record<number, ExpectedShifts>, postId: string | null) {
     return (
       <tr className="bg-app-elevated/40 border-b-2 border-app-border">
@@ -671,7 +726,7 @@ export function ObjectMonthScheduleGrid({
 
   function renderGuardsRows(postId: string | null) {
     const sectionGuards = (guardsByPost[postId ?? ""] ?? []).filter(
-      (sg) => !hiddenGuardIds.has(sg.guardId),
+      (sg) => !hiddenGuardIds.has(scheduleRowHideKey(postId, sg.guardId)),
     );
     if (sectionGuards.length === 0) {
       return (
@@ -717,13 +772,17 @@ export function ObjectMonthScheduleGrid({
               <button
                 type="button"
                 className="shrink-0 rounded p-0.5 text-app-muted opacity-70 transition hover:bg-app-elevated hover:text-status-sick hover:opacity-100 disabled:opacity-40"
-                title="Убрать из графика месяца"
-                aria-label={`Убрать ${sg.displayName} из графика за ${monthLabel}`}
-                disabled={removingGuardId === sg.guardId}
+                title={postId ? "Убрать с этого поста" : "Убрать из графика месяца"}
+                aria-label={
+                  postId
+                    ? `Убрать ${sg.displayName} с этого поста за ${monthLabel}`
+                    : `Убрать ${sg.displayName} из графика за ${monthLabel}`
+                }
+                disabled={removingRowKey === scheduleRowHideKey(postId, sg.guardId)}
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  void removeGuardFromMonth(sg);
+                  void removeGuardFromMonth(sg, postId);
                 }}
                 onMouseEnter={(e) => e.stopPropagation()}
               >
@@ -1177,7 +1236,7 @@ export function ObjectMonthScheduleGrid({
             {operationalDayDraft} – {operationalDayDraft} (+1)
           </p>
           <p className="mt-1 text-[11px] leading-snug text-app-muted">
-            Суточная смена и шкала назначения для {monthLabel}.
+            Суточная смена и шкала для {monthLabel}. Смена якоря двигает время стояния, дни не прыгают.
           </p>
         </div>
 
@@ -1244,7 +1303,6 @@ export function ObjectMonthScheduleGrid({
               </th>
               {days.map((d) => {
                 const meta = dayColumnMetaByDay.get(d);
-                const weekdays = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
                 const dateObj = new Date(viewYear, viewMonth0, d);
                 const headerStyle = meta ? buildScheduleDayColumnStyle(meta) : undefined;
                 if (meta?.isToday && headerStyle) {
@@ -1281,7 +1339,7 @@ export function ObjectMonthScheduleGrid({
                         ) : null}
                       </span>
                       <span className="text-[10px] font-normal text-app-muted">
-                        {weekdays[getDayKhabarovsk(dateObj)]}
+                        {SCHEDULE_WEEKDAYS[getDayKhabarovsk(dateObj)]}
                       </span>
                       {meta?.isHoliday ? (
                         <span
@@ -1317,6 +1375,7 @@ export function ObjectMonthScheduleGrid({
                       {post.name}
                     </td>
                   </tr>
+                  {renderPostDateRow(post.id)}
                   {renderPlanRow(monthPlanByPost?.[post.id] ?? monthPlan, post.id)}
                   {renderGuardsRows(post.id)}
                 </Fragment>
@@ -1332,7 +1391,6 @@ export function ObjectMonthScheduleGrid({
               </th>
               {days.map((d) => {
                 const meta = dayColumnMetaByDay.get(d);
-                const weekdays = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
                 const dateObj = new Date(viewYear, viewMonth0, d);
                 const headerStyle = meta ? buildScheduleDayColumnStyle(meta) : undefined;
                 if (meta?.isToday && headerStyle) {
@@ -1366,7 +1424,7 @@ export function ObjectMonthScheduleGrid({
                         ) : null}
                       </span>
                       <span className="text-[10px] font-normal text-app-muted">
-                        {weekdays[getDayKhabarovsk(dateObj)]}
+                        {SCHEDULE_WEEKDAYS[getDayKhabarovsk(dateObj)]}
                       </span>
                     </div>
                   </th>

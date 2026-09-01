@@ -100,4 +100,17 @@ describe("scheduleShiftColumnDateIso", () => {
     const interval = buildShiftIntervalFromHm("2026-07-07", "08:00", "08:00", "08:00");
     expect(scheduleShiftColumnDateIso(interval, "08:00")).toBe("2026-07-07");
   });
+
+  it("не утаскивает сутки 8–8 1-го числа в предыдущий месяц при якоре 09:00", () => {
+    const interval = {
+      startsAt: new Date("2026-08-31T22:00:00.000Z"),
+      endsAt: new Date("2026-09-01T22:00:00.000Z"),
+    };
+    expect(scheduleShiftColumnDateIso(interval, "09:00")).toBe("2026-09-01");
+  });
+
+  it("сутки 31-е 09:00–09:00 при якоре 09:00 остаются в текущем месяце", () => {
+    const interval = buildShiftIntervalFromHm("2026-08-31", "09:00", "09:00", "09:00");
+    expect(scheduleShiftColumnDateIso(interval, "09:00")).toBe("2026-08-31");
+  });
 });

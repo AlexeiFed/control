@@ -56,10 +56,20 @@ export function nextMonthRosterIds(
   return current.filter((id) => id !== guardId);
 }
 
+/** Плоский штат поста: галка только добавляет/убирает id, остальных не трогает. */
+export function nextPostStaffIds(
+  current: ReadonlyArray<string>,
+  guardId: string,
+  assigned: boolean,
+): string[] {
+  return nextMonthRosterIds(current, guardId, assigned);
+}
+
 /**
  * Источник строк графика:
- * - прошлый месяц: только снимок штата месяца (изоляция от поздних назначений на объект);
- * - текущий/будущий: живой пул «Охранники объекта».
+ * - прошлый месяц: снимок штата месяца (изоляция от поздних назначений на объект);
+ * - текущий/будущий без постов: живой пул «Охранники объекта»;
+ * - с постами (`useMonthlyStaff`): штат поста и в текущем месяце.
  * Смены месяца всегда добавляются сверху.
  */
 export function resolveScheduleMonthRosterIds(input: {
@@ -69,9 +79,11 @@ export function resolveScheduleMonthRosterIds(input: {
   monthlyStaffIds: ReadonlyArray<string>;
   shiftGuardIds: ReadonlyArray<string>;
   now?: Date;
+  useMonthlyStaff?: boolean;
 }): string[] {
-  const roster = isKhabarovskMonthPast(input.year, input.monthIndex0, input.now)
-    ? input.monthlyStaffIds
-    : input.objectGuardIds;
+  const roster =
+    input.useMonthlyStaff || isKhabarovskMonthPast(input.year, input.monthIndex0, input.now)
+      ? input.monthlyStaffIds
+      : input.objectGuardIds;
   return collectScheduleMonthGuardIds(roster, input.shiftGuardIds);
 }

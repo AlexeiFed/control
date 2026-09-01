@@ -121,6 +121,18 @@ export function operationalDayDateIsoFromStart(
 }
 
 /**
+ * Не утаскивать смену в прошлый календарный месяц: 01.09 08:00–08:00 при якоре 09:00
+ * — это сентябрь, а не хвост 31.08. Внутри месяца хвост 08:00–09:00 остаётся вчерашним.
+ */
+function clampColumnDateToStartMonth(columnDateIso: string, startsAt: Date): string {
+  const startDateIso = toDateIsoKhabarovsk(startsAt);
+  if (columnDateIso.slice(0, 7) < startDateIso.slice(0, 7)) {
+    return startDateIso;
+  }
+  return columnDateIso;
+}
+
+/**
  * Колонка графика/экспорта для смены: хвост достаивания (окончание ровно на якоре)
  * относится к операционным суткам, заканчивающимся в этот момент.
  */
@@ -135,11 +147,12 @@ export function scheduleShiftColumnDateIso(
   const endKh = getKhabarovskComponents(endsAt);
   const endMin = endKh.hours * 60 + endKh.minutes;
 
-  if (endMin === anchorMin) {
-    return addDaysToIsoDate(toDateIsoKhabarovsk(endsAt), -1);
-  }
+  const columnDateIso =
+    endMin === anchorMin
+      ? addDaysToIsoDate(toDateIsoKhabarovsk(endsAt), -1)
+      : operationalDayDateIsoFromStart(startsAt, anchor);
 
-  return operationalDayDateIsoFromStart(startsAt, anchor);
+  return clampColumnDateToStartMonth(columnDateIso, startsAt);
 }
 
 export function shiftOperationalDayDateIso(

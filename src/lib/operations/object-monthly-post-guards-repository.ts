@@ -22,6 +22,34 @@ export async function listMonthlyPostGuardsByObject(
   return map;
 }
 
+/** Добавляет одного охранника на пост. Остальной штат и смены не трогает. */
+export async function addGuardToMonthlyPost(
+  objectId: string,
+  postId: string,
+  month: string,
+  guardId: string,
+): Promise<void> {
+  await query(
+    `INSERT INTO object_monthly_post_guards (object_id, post_id, guard_id, month)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (post_id, guard_id, month) DO NOTHING`,
+    [objectId, postId, guardId, month],
+  );
+}
+
+/** Убирает одного охранника с поста. Смены и штат других постов не трогает. */
+export async function removeGuardFromMonthlyPost(
+  postId: string,
+  month: string,
+  guardId: string,
+): Promise<void> {
+  await query(
+    `DELETE FROM object_monthly_post_guards
+     WHERE post_id = $1 AND month = $2 AND guard_id = $3`,
+    [postId, month, guardId],
+  );
+}
+
 export async function replaceMonthlyPostGuards(
   objectId: string,
   postId: string,

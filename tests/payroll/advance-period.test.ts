@@ -68,6 +68,27 @@ describe("resolveTimesheetRowOperationalDateIso + payroll halves", () => {
     expect(dateIsoBelongsToHalf(dateIso, "first", { year: 2026, monthIndex0: 6 })).toBe(true);
     expect(dateIsoBelongsToHalf(dateIso, "second", { year: 2026, monthIndex0: 6 })).toBe(false);
   });
+
+  it("сутки 1-го 08:00–08:00 при якоре 09:00 не попадают в предыдущий месяц", () => {
+    const objectId = "obj-artomonov";
+    const monthly = new Map([
+      [operationalDayMonthKey(objectId, "2026-08"), "09:00"],
+      [operationalDayMonthKey(objectId, "2026-09"), "09:00"],
+    ]);
+    const defaults = new Map([[objectId, "09:00"]]);
+    const dateIso = resolveTimesheetRowOperationalDateIso(
+      {
+        objectId,
+        startsAt: "2026-08-31T22:00:00.000Z",
+        endsAt: "2026-09-01T22:00:00.000Z",
+      },
+      defaults,
+      monthly,
+    );
+    expect(dateIso).toBe("2026-09-01");
+    expect(dateIsoInPayrollMonth(dateIso, { year: 2026, monthIndex0: 7 })).toBe(false);
+    expect(dateIsoBelongsToHalf(dateIso, "first", { year: 2026, monthIndex0: 8 })).toBe(true);
+  });
 });
 
 describe("buildGuardPayrollHalfSummaries", () => {

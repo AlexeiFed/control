@@ -35,15 +35,31 @@ export async function getObjectPosts(objectId: string, month: string): Promise<O
   }));
 }
 
-export async function syncObjectGuardsToMonthStaff(
+export async function seedEmptyPostsFromObjectGuards(
   objectId: string,
   month: string,
   guardIds: string[],
 ): Promise<void> {
   const posts = await getObjectPosts(objectId, month);
+  if (posts.length === 0 || guardIds.length === 0) return;
+
+  const staffByPost = await listMonthlyPostGuardsByObject(objectId, month);
   for (const post of posts) {
+    if ((staffByPost[post.id] ?? []).length > 0) continue;
     await replaceMonthlyPostGuards(objectId, post.id, month, guardIds);
   }
+}
+
+export async function seedMonthlyPostGuardsIfEmpty(
+  objectId: string,
+  postId: string,
+  month: string,
+  guardIds: string[],
+): Promise<void> {
+  if (guardIds.length === 0) return;
+  const existing = await listMonthlyPostGuardsByObject(objectId, month);
+  if ((existing[postId] ?? []).length > 0) return;
+  await replaceMonthlyPostGuards(objectId, postId, month, guardIds);
 }
 
 export async function ensureMonthlyPostsInherited(objectId: string, month: string): Promise<void> {

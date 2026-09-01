@@ -4,6 +4,7 @@ import {
   collectScheduleMonthGuardIds,
   isKhabarovskMonthPast,
   nextMonthRosterIds,
+  nextPostStaffIds,
   resolveScheduleMonthRosterIds,
   shouldShowLiveObjectGuardPool,
 } from "../../src/lib/scheduling/schedule-month-guards";
@@ -77,6 +78,32 @@ describe("resolveScheduleMonthRosterIds", () => {
       }),
     ).not.toContain("stale");
   });
+
+  it("текущий месяц с постами: штат поста, без докидывания с объекта", () => {
+    const sep = new Date("2026-09-01T12:00:00+10:00");
+    expect(
+      resolveScheduleMonthRosterIds({
+        year: 2026,
+        monthIndex0: 8,
+        objectGuardIds: ["a", "b"],
+        monthlyStaffIds: ["a", "extra"],
+        shiftGuardIds: [],
+        now: sep,
+        useMonthlyStaff: true,
+      }),
+    ).toEqual(expect.arrayContaining(["a", "extra"]));
+    expect(
+      resolveScheduleMonthRosterIds({
+        year: 2026,
+        monthIndex0: 8,
+        objectGuardIds: ["a", "b"],
+        monthlyStaffIds: ["a", "extra"],
+        shiftGuardIds: [],
+        now: sep,
+        useMonthlyStaff: true,
+      }),
+    ).not.toContain("b");
+  });
 });
 
 describe("shouldShowLiveObjectGuardPool", () => {
@@ -123,5 +150,15 @@ describe("nextMonthRosterIds", () => {
 
   it("галка без текущего штата не требует поста", () => {
     expect(nextMonthRosterIds([], "new", true)).toEqual(["new"]);
+  });
+});
+
+describe("nextPostStaffIds", () => {
+  it("добавляет на пост, не затирая остальных", () => {
+    expect(nextPostStaffIds(["a", "b"], "c", true)).toEqual(["a", "b", "c"]);
+  });
+
+  it("снятие с поста не трогает других на этом посту", () => {
+    expect(nextPostStaffIds(["a", "b", "c"], "b", false)).toEqual(["a", "c"]);
   });
 });

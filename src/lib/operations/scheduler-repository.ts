@@ -21,6 +21,7 @@ import {
   isShiftDateInCurrentOrFutureMonth,
 } from "../scheduling/pending-incident-month-filter";
 import { isKhabarovskMonthPast } from "../scheduling/schedule-month-guards";
+import { monthScheduleRemovalScope } from "../scheduling/shift-post-display";
 import { isOperationalDayPlanSatisfied } from "../scheduling/pending-incident-plan-satisfied";
 import { buildOperationalDayAnchorByObjectIdForDate } from "../scheduling/operational-day-anchors";
 import { expectedShiftsForObjectDay } from "../scheduling/object-shift-templates";
@@ -680,6 +681,7 @@ export async function removeGuardFromObjectMonthSchedule(
   guardId: string,
   year: number,
   monthIndex0: number,
+  options?: { postId?: string | null; firstPostId?: string | null },
 ): Promise<{ deletedShifts: number }> {
   const pool = getDbPool();
   const client = await pool.connect();
@@ -688,16 +690,30 @@ export async function removeGuardFromObjectMonthSchedule(
     const hasReplacedBy = await tableColumnExists("shifts", "replaced_by_shift_id");
     const { start, end } = getMonthRangeKhabarovsk(year, monthIndex0);
     const month = `${year}-${String(monthIndex0 + 1).padStart(2, "0")}`;
+    const postId = options?.postId ?? null;
+    const scope = monthScheduleRemovalScope(postId, options?.firstPostId ?? null);
 
-    const selected = await client.query<{ id: string }>(
-      `
-        SELECT id
-        FROM shifts
-        WHERE object_id = $1 AND guard_id = $2 AND ends_at > $3 AND starts_at < $4
-        FOR UPDATE
-      `,
-      [objectId, guardId, start, end],
-    );
+    const selected =
+      scope.scope === "post" && postId
+        ? await client.query<{ id: string }>(
+            `
+              SELECT id
+              FROM shifts
+              WHERE object_id = $1 AND guard_id = $2 AND ends_at > $3 AND starts_at < $4
+                AND (post_id = $5 OR ($6::boolean AND post_id IS NULL))
+              FOR UPDATE
+            `,
+            [objectId, guardId, start, end, postId, scope.includeLegacyNullPostShifts],
+          )
+        : await client.query<{ id: string }>(
+            `
+              SELECT id
+              FROM shifts
+              WHERE object_id = $1 AND guard_id = $2 AND ends_at > $3 AND starts_at < $4
+              FOR UPDATE
+            `,
+            [objectId, guardId, start, end],
+          );
 
     const ids = selected.rows.map((row) => row.id);
 
@@ -715,14 +731,29 @@ export async function removeGuardFromObjectMonthSchedule(
       await client.query(`DELETE FROM shifts WHERE id = ANY($1::uuid[])`, [ids]);
     }
 
-    await client.query(
-      `DELETE FROM object_monthly_post_guards WHERE object_id = $1 AND guard_id = $2 AND month = $3`,
-      [objectId, guardId, month],
-    );
+    if (scope.scope === "post" && postId) {
+      await client.query(
+        `DELETE FROM object_monthly_post_guards
+         WHERE post_id = $1 AND guard_id = $2 AND month = $3`,
+        [postId, guardId, month],
+      );
+    } else {
+      await client.query(
+        `DELETE FROM object_monthly_post_guards WHERE object_id = $1 AND guard_id = $2 AND month = $3`,
+        [objectId, guardId, month],
+      );
+    }
 
-    // Текущий/будущий месяц: убрать и из пула объекта, чтобы строка исчезла из живого графика.
-    // Прошлые месяцы пул не трогаем — их снимки штата остаются.
-    if (!isKhabarovskMonthPast(year, monthIndex0)) {
+    if (scope.clearMonthRoster) {
+      await client.query(
+        `DELETE FROM object_month_schedule_guards
+         WHERE object_id = $1 AND guard_id = $2 AND month = $3`,
+        [objectId, guardId, month],
+      );
+    }
+
+    // Текущий/будущий месяц без постов: убрать из пула объекта, чтобы строка исчезла.
+    if (scope.clearObjectAssignment && !isKhabarovskMonthPast(year, monthIndex0)) {
       await client.query(
         `DELETE FROM guard_object_assignments WHERE object_id = $1 AND guard_id = $2`,
         [objectId, guardId],

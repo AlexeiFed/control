@@ -8,10 +8,12 @@ import { assertPermission } from "../../lib/auth/rbac";
 import { requireSession } from "../../lib/auth/session";
 import { addObjectHoliday, deleteObjectHoliday } from "../../lib/operations/object-holidays-repository";
 import { upsertObjectMonthlySetting } from "../../lib/operations/object-monthly-settings-repository";
+import { rematObjectMonthShiftsForOperationalAnchor } from "../../lib/operations/remap-month-operational-anchor";
 import {
   createObject,
   deleteObject,
   getObject,
+  getObjectOperationalDayStartTimeForMonth,
   setObjectGuards,
   updateObject,
   updateObjectOperationalDayStartTime,
@@ -39,10 +41,17 @@ import type { GuardEmploymentType, GuardLicenseType, GuardPosition, RateUnit, Sh
 import {
   createObjectPost,
   deleteObjectPost,
-  syncObjectGuardsToMonthStaff,
+  getObjectPosts,
+  seedEmptyPostsFromObjectGuards,
+  seedMonthlyPostGuardsIfEmpty,
   updateObjectPost,
 } from "../../lib/operations/object-posts-repository";
-import { deleteGuardFromObjectMonthStaff, replaceMonthlyPostGuards } from "../../lib/operations/object-monthly-post-guards-repository";
+import {
+  addGuardToMonthlyPost,
+  deleteGuardFromObjectMonthStaff,
+  removeGuardFromMonthlyPost,
+  replaceMonthlyPostGuards,
+} from "../../lib/operations/object-monthly-post-guards-repository";
 import {
   addGuardToObjectMonthRoster,
   removeGuardFromObjectMonthRoster,
@@ -234,16 +243,6 @@ export async function setObjectGuardsAction(formData: FormData) {
     .filter(Boolean);
 
   await setObjectGuards(input.objectId, guardIds);
-
-  // Снимок пула только в текущий/будущий месяц — прошлые месяцы не трогаем.
-  const monthRaw = formData.get("month");
-  const month = typeof monthRaw === "string" ? monthRaw.trim() : "";
-  if (/^\d{4}-\d{2}$/.test(month)) {
-    const [y, m] = month.split("-").map(Number);
-    if (!isKhabarovskMonthPast(y!, m! - 1)) {
-      await syncObjectGuardsToMonthStaff(input.objectId, month, guardIds);
-    }
-  }
 
   revalidatePath("/objects");
   revalidatePath(`/objects/${input.objectId}`);
@@ -787,7 +786,11 @@ export async function createObjectPostAction(formData: FormData) {
   const month = z.string().regex(/^\d{4}-\d{2}$/).parse(formData.get("month"));
   const name = z.string().trim().min(1).parse(formData.get("name"));
 
-  await createObjectPost(objectId, month, name);
+  const created = await createObjectPost(objectId, month, name);
+  const object = await getObject(objectId);
+  if (object) {
+    await seedMonthlyPostGuardsIfEmpty(objectId, created.id, month, object.guardIds);
+  }
   revalidatePath(`/objects/${objectId}`);
 }
 
@@ -835,6 +838,13 @@ export async function upsertObjectMonthlySettingAction(
       operationalDayStartTime: formData.get("operationalDayStartTime"),
     });
 
+    const previousAnchor = await getObjectOperationalDayStartTimeForMonth(input.objectId, input.month);
+    await rematObjectMonthShiftsForOperationalAnchor({
+      objectId: input.objectId,
+      month: input.month,
+      oldAnchor: previousAnchor,
+      newAnchor: input.operationalDayStartTime,
+    });
     await upsertObjectMonthlySetting(input.objectId, input.month, input.operationalDayStartTime);
     revalidatePath("/objects");
     revalidatePath(`/objects/${input.objectId}`);
@@ -883,6 +893,64 @@ export async function replaceMonthlyPostGuardsAction(formData: FormData) {
     input.guardIds,
   );
   revalidatePath(`/objects/${input.objectId}`);
+}
+
+const setMonthlyPostGuardSchema = z.object({
+  objectId: z.string().uuid(),
+  postId: z.string().uuid(),
+  guardId: z.string().uuid(),
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  assigned: z.enum(["true", "false"]),
+});
+
+export type SetMonthlyPostGuardResult = { ok: true } | { ok: false; error: string };
+
+export async function setMonthlyPostGuardAction(
+  formData: FormData,
+): Promise<SetMonthlyPostGuardResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "objects:manage");
+    assertPermission(session.user.role, "schedule:write");
+    if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
+      return { ok: false, error: "Недостаточно прав" };
+    }
+
+    const input = setMonthlyPostGuardSchema.parse({
+      objectId: formData.get("objectId"),
+      postId: formData.get("postId"),
+      guardId: formData.get("guardId"),
+      month: formData.get("month"),
+      assigned: formData.get("assigned"),
+    });
+
+    const posts = await getObjectPosts(input.objectId, input.month);
+    if (!posts.some((post) => post.id === input.postId)) {
+      return { ok: false, error: "Пост не найден в этом месяце" };
+    }
+
+    if (input.assigned === "true") {
+      await addGuardToMonthlyPost(input.objectId, input.postId, input.month, input.guardId);
+    } else {
+      await removeGuardFromMonthlyPost(input.postId, input.month, input.guardId);
+    }
+
+    revalidateAfterShiftMutation([
+      "/scheduler",
+      "/dashboard",
+      "/",
+      `/objects/${input.objectId}`,
+    ]);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Некорректные параметры" };
+    }
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Не удалось обновить штат поста",
+    };
+  }
 }
 
 const setObjectMonthScheduleGuardSchema = z.object({
@@ -948,6 +1016,7 @@ const removeGuardFromObjectMonthScheduleSchema = z.object({
   objectId: z.string().uuid(),
   guardId: z.string().uuid(),
   month: z.string().regex(/^\d{4}-\d{2}$/),
+  postId: z.string().uuid().optional(),
 });
 
 export async function removeGuardFromObjectMonthScheduleAction(formData: FormData) {
@@ -957,12 +1026,14 @@ export async function removeGuardFromObjectMonthScheduleAction(formData: FormDat
     return { ok: false as const, error: "Недостаточно прав" };
   }
 
+  const postIdRaw = formData.get("postId");
   let input: z.infer<typeof removeGuardFromObjectMonthScheduleSchema>;
   try {
     input = removeGuardFromObjectMonthScheduleSchema.parse({
       objectId: formData.get("objectId"),
       guardId: formData.get("guardId"),
       month: formData.get("month"),
+      postId: typeof postIdRaw === "string" && postIdRaw.trim().length > 0 ? postIdRaw : undefined,
     });
   } catch {
     return { ok: false as const, error: "Некорректные параметры" };
@@ -972,12 +1043,19 @@ export async function removeGuardFromObjectMonthScheduleAction(formData: FormDat
   const year = y!;
   const monthIndex0 = m! - 1;
 
+  const posts = await getObjectPosts(input.objectId, input.month);
+  const firstPostId = posts[0]?.id ?? null;
+  if (input.postId && !posts.some((post) => post.id === input.postId)) {
+    return { ok: false as const, error: "Пост не найден в этом месяце" };
+  }
+
   try {
     const { deletedShifts } = await removeGuardFromObjectMonthSchedule(
       input.objectId,
       input.guardId,
       year,
       monthIndex0,
+      { postId: input.postId ?? null, firstPostId },
     );
     revalidateAfterShiftMutation([
       "/scheduler",

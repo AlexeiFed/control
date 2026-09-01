@@ -9,3 +9,34 @@ export function shiftMatchesPost(
   if (shiftPostId == null && firstPostId && postId === firstPostId) return true;
   return false;
 }
+
+/** Корзина в строке поста: не сносить штат/смены других постов. */
+export function monthScheduleRemovalScope(
+  postId: string | null | undefined,
+  firstPostId: string | null,
+): {
+  scope: "object" | "post";
+  includeLegacyNullPostShifts: boolean;
+  clearMonthRoster: boolean;
+  clearObjectAssignment: boolean;
+} {
+  if (!postId) {
+    return {
+      scope: "object",
+      includeLegacyNullPostShifts: true,
+      clearMonthRoster: true,
+      clearObjectAssignment: true,
+    };
+  }
+  const isFirst = Boolean(firstPostId) && postId === firstPostId;
+  return {
+    scope: "post",
+    includeLegacyNullPostShifts: isFirst,
+    clearMonthRoster: isFirst,
+    clearObjectAssignment: false,
+  };
+}
+
+export function scheduleRowHideKey(postId: string | null | undefined, guardId: string): string {
+  return `${postId ?? ""}:${guardId}`;
+}
