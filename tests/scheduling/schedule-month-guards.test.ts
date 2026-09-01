@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectMonthStaffUnionIds,
   collectScheduleMonthGuardIds,
   isKhabarovskMonthPast,
+  nextMonthRosterIds,
   resolveScheduleMonthRosterIds,
+  shouldShowLiveObjectGuardPool,
 } from "../../src/lib/scheduling/schedule-month-guards";
 
 describe("collectScheduleMonthGuardIds", () => {
@@ -73,5 +76,52 @@ describe("resolveScheduleMonthRosterIds", () => {
         now,
       }),
     ).not.toContain("stale");
+  });
+});
+
+describe("shouldShowLiveObjectGuardPool", () => {
+  const now = new Date("2026-09-01T10:36:00+10:00");
+
+  it("сентябрь: живой пул скрыт для августа", () => {
+    expect(shouldShowLiveObjectGuardPool(2026, 7, now)).toBe(false);
+  });
+
+  it("сентябрь: живой пул виден для сентября", () => {
+    expect(shouldShowLiveObjectGuardPool(2026, 8, now)).toBe(true);
+  });
+});
+
+describe("collectMonthStaffUnionIds", () => {
+  it("собирает уникальные id штата по всем постам", () => {
+    expect(
+      collectMonthStaffUnionIds({
+        postA: ["a", "b"],
+        postB: ["b", "c"],
+      }),
+    ).toEqual(expect.arrayContaining(["a", "b", "c"]));
+    expect(
+      collectMonthStaffUnionIds({
+        postA: ["a", "b"],
+        postB: ["b", "c"],
+      }),
+    ).toHaveLength(3);
+  });
+});
+
+describe("nextMonthRosterIds", () => {
+  it("галка добавляет id в плоский штат месяца, не трогая остальных", () => {
+    expect(nextMonthRosterIds(["a", "b"], "new", true)).toEqual(["a", "b", "new"]);
+  });
+
+  it("повторная галка не дублирует", () => {
+    expect(nextMonthRosterIds(["a"], "a", true)).toEqual(["a"]);
+  });
+
+  it("снятие галки убирает только этого охранника", () => {
+    expect(nextMonthRosterIds(["a", "new"], "new", false)).toEqual(["a"]);
+  });
+
+  it("галка без текущего штата не требует поста", () => {
+    expect(nextMonthRosterIds([], "new", true)).toEqual(["new"]);
   });
 });

@@ -19,7 +19,7 @@ import { ObjectShiftTemplateSection } from "./object-shift-template-section";
 import { ObjectMonthScheduleGridLazy } from "./object-month-schedule-grid-lazy";
 import { readLastUsedQuickAssign } from "./object-month-schedule-grid";
 import { normalizeHolidayDateKey, type DayColumnMeta } from "./object-detail-schedule-styles";
-import { setObjectGuardsAction, updateObjectAction } from "../../app/objects/actions";
+import { setObjectGuardsAction, setObjectMonthScheduleGuardAction, updateObjectAction } from "../../app/objects/actions";
 import {
   createShiftAction,
   createShiftLogAction,
@@ -41,6 +41,7 @@ import type { GuardStatus, Shift, ShiftKind } from "../../lib/scheduling/types";
 import { toast } from "../../store/toast-store";
 import { designTokens } from "../../lib/design-tokens";
 import { dispatchIncidentReplacementsRefresh } from "./global-incident-replacements-banner";
+import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 import { ObjectRateRulesPanel } from "./object-rate-rules-panel";
 import { ObjectSwitchTabs } from "./object-switch-tabs";
 import { shiftKindLabels, incidentCategoryLabels } from "../../lib/operations/status-labels";
@@ -59,7 +60,12 @@ import {
   addDaysToIsoDate,
 } from "../../lib/format/display-date";
 import { shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
-import { resolveScheduleMonthRosterIds } from "../../lib/scheduling/schedule-month-guards";
+import {
+  collectMonthStaffUnionIds,
+  collectScheduleMonthGuardIds,
+  resolveScheduleMonthRosterIds,
+  shouldShowLiveObjectGuardPool,
+} from "../../lib/scheduling/schedule-month-guards";
 import {
   defaultSutkiShiftInterval,
   normalizeOperationalAnchorTime,
@@ -200,6 +206,8 @@ export type ObjectDetailViewProps = {
   ) => Promise<{ created: number; skipped: Array<{ objectId: string; dateIso: string; reason: string }> } | void>;
   operationalDayStartTime: string;
   monthlyPostGuardsByPostId: MonthlyPostGuardsByPostId;
+  /** Штат графика прошлого месяца без постов. */
+  monthRosterGuardIds?: readonly string[];
   /** Валидные на текущую неделю dismiss-даты недобора часов для этого объекта (`YYYY-MM-DD`). */
   dismissedShortageDateIsos?: readonly string[];
 };
@@ -259,6 +267,7 @@ export function ObjectDetailView({
   bulkCreateShiftsAction,
   operationalDayStartTime,
   monthlyPostGuardsByPostId,
+  monthRosterGuardIds = [],
   dismissedShortageDateIsos = [],
 }: ObjectDetailViewProps) {
   const router = useRouter();
@@ -322,6 +331,7 @@ export function ObjectDetailView({
   const [pickerGuards, setPickerGuards] = useState<GuardSchedulePickerRow[] | null>(null);
   const [pickerGuardsLoading, setPickerGuardsLoading] = useState(false);
   const pickerGuardsRequestRef = useRef(false);
+  const [pendingMonthStaffGuardId, setPendingMonthStaffGuardId] = useState<string | null>(null);
   /** Смены всех объектов за месяц — только для пикера конфликтов; грузим лениво. */
   const [availabilityShifts, setAvailabilityShifts] = useState<Shift[] | null>(null);
   const availabilityMonthKeyRef = useRef<string | null>(null);
@@ -519,6 +529,14 @@ export function ObjectDetailView({
       setPickerGuardsLoading(false);
     }
   }, [pickerGuards]);
+
+  const showLiveObjectGuardPool = shouldShowLiveObjectGuardPool(viewYear, viewMonth0);
+
+  useEffect(() => {
+    if (!showLiveObjectGuardPool) {
+      void ensurePickerGuards();
+    }
+  }, [showLiveObjectGuardPool, ensurePickerGuards]);
 
   useEffect(() => {
     if (quickAssign || incidentDraft) {
@@ -719,6 +737,15 @@ export function ObjectDetailView({
 
   const monthKey = `${viewYear}-${String(viewMonth0 + 1).padStart(2, "0")}`;
 
+  const monthScheduleGuardIds = useMemo(
+    () =>
+      collectScheduleMonthGuardIds(
+        collectMonthStaffUnionIds(monthlyPostGuardsByPostId),
+        monthRosterGuardIds,
+      ),
+    [monthlyPostGuardsByPostId, monthRosterGuardIds],
+  );
+
   const firstPostId = posts[0]?.id ?? null;
 
   // Прошлые месяцы: снимок штата месяца (изоляция от поздних назначений).
@@ -743,10 +770,18 @@ export function ObjectDetailView({
         year: viewYear,
         monthIndex0: viewMonth0,
         objectGuardIds: object.guardIds,
-        monthlyStaffIds: [],
+        monthlyStaffIds: [...monthRosterGuardIds],
         shiftGuardIds: shifts.map((s) => s.guardId),
       });
-      const assignedIds = new Set(object.guardIds);
+      const assignedIds = new Set(
+        resolveScheduleMonthRosterIds({
+          year: viewYear,
+          monthIndex0: viewMonth0,
+          objectGuardIds: object.guardIds,
+          monthlyStaffIds: [...monthRosterGuardIds],
+          shiftGuardIds: [],
+        }),
+      );
       return {
         "": allIds.map((id) => mapRow(id, assignedIds)).sort(byName),
       };
@@ -754,7 +789,10 @@ export function ObjectDetailView({
 
     const result: Record<string, ReturnType<typeof mapRow>[]> = {};
     for (const post of posts) {
-      const staffIds = monthlyPostGuardsByPostId[post.id] ?? [];
+      const staffIds = collectScheduleMonthGuardIds(
+        monthlyPostGuardsByPostId[post.id] ?? [],
+        post.id === firstPostId ? monthRosterGuardIds : [],
+      );
       const shiftGuardIds = shifts
         .filter((s) => shiftMatchesPost(s.postId, post.id, firstPostId))
         .map((s) => s.guardId);
@@ -789,6 +827,7 @@ export function ObjectDetailView({
     viewYear,
     viewMonth0,
     object.guardIds,
+    monthRosterGuardIds,
   ]);
 
   const pickerGuardList = pickerGuards ?? [];
@@ -809,6 +848,51 @@ export function ObjectDetailView({
     }).format(date);
     return label.charAt(0).toUpperCase() + label.slice(1);
   }, [viewYear, viewMonth0]);
+
+  async function toggleMonthScheduleGuard(guardId: string, checked: boolean) {
+    if (pendingMonthStaffGuardId) return;
+    if (!checked) {
+      const row = pickerGuardList.find((g) => g.id === guardId);
+      const name = row
+        ? `${row.lastName} ${row.firstName}`
+        : (gridGuardNames[guardId] ?? "охранника");
+      const ok = window.confirm(
+        `Убрать «${name}» из штата графика за ${monthLabel}? Смены не удаляются.`,
+      );
+      if (!ok) return;
+    }
+
+    setPendingMonthStaffGuardId(guardId);
+    try {
+      const fd = new FormData();
+      fd.set("objectId", object.id);
+      fd.set("guardId", guardId);
+      fd.set("month", monthKey);
+      fd.set("assigned", checked ? "true" : "false");
+      const result = await setObjectMonthScheduleGuardAction(fd);
+      if (!result.ok) {
+        toast({ title: "Не сохранено", message: result.error, variant: "error", durationMs: 6500 });
+        return;
+      }
+      toast({
+        title: checked ? "Охранник добавлен в график месяца" : "Охранник убран из штата месяца",
+        message: monthLabel,
+        variant: "success",
+      });
+      window.dispatchEvent(new CustomEvent(SCHEDULE_SHORTAGE_REFRESH_EVENT));
+      dispatchIncidentReplacementsRefresh();
+      router.refresh();
+    } catch (err) {
+      toast({
+        title: "Не сохранено",
+        message: err instanceof Error ? err.message : "Ошибка штата месяца",
+        variant: "error",
+        durationMs: 6500,
+      });
+    } finally {
+      setPendingMonthStaffGuardId(null);
+    }
+  }
 
   const dateIsoToDay = useMemo(() => {
     const map = new Map<string, number>();
@@ -1326,14 +1410,25 @@ export function ObjectDetailView({
         </motion.section>
 
         <ObjectGuardAssignmentSection
-          assignedGuardIds={object.guardIds}
+          title={showLiveObjectGuardPool ? "Охранники объекта" : "Охранники графика"}
+          description={
+            showLiveObjectGuardPool
+              ? undefined
+              : `Только ${monthLabel}. Пул объекта не меняется.`
+          }
+          assignedGuardIds={showLiveObjectGuardPool ? object.guardIds : monthScheduleGuardIds}
           guardSearch={guardSearch}
           onGuardSearchChange={setGuardSearch}
           onGuardSearchFocus={() => void ensurePickerGuards()}
           pickerGuards={pickerGuards}
           pickerGuardsLoading={pickerGuardsLoading}
           filteredGuards={filteredGuards}
+          disabled={pendingMonthStaffGuardId !== null}
           onToggleGuard={async (guardId: string, checked: boolean) => {
+            if (!showLiveObjectGuardPool) {
+              await toggleMonthScheduleGuard(guardId, checked);
+              return;
+            }
             const newIds = checked
               ? [...object.guardIds, guardId]
               : object.guardIds.filter((id) => id !== guardId);
@@ -1357,6 +1452,7 @@ export function ObjectDetailView({
         monthlyPostGuardsByPostId={monthlyPostGuardsByPostId}
         guardNames={gridGuardNames}
         canManage={canManageOperationalDay}
+        hideStaffAssignment={!showLiveObjectGuardPool}
       />
 
       <ObjectMonthScheduleGridLazy

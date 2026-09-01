@@ -2,6 +2,7 @@
 
 import { Shield } from "lucide-react";
 import type { GuardSchedulePickerRow } from "../../lib/operations/guards-repository";
+import { designTokens } from "../../lib/design-tokens";
 
 type ObjectGuardAssignmentSectionProps = {
   assignedGuardIds: string[];
@@ -12,6 +13,9 @@ type ObjectGuardAssignmentSectionProps = {
   pickerGuardsLoading: boolean;
   filteredGuards: GuardSchedulePickerRow[];
   onToggleGuard: (guardId: string, checked: boolean) => void | Promise<void>;
+  title?: string;
+  description?: string;
+  disabled?: boolean;
 };
 
 export function ObjectGuardAssignmentSection({
@@ -23,13 +27,19 @@ export function ObjectGuardAssignmentSection({
   pickerGuardsLoading,
   filteredGuards,
   onToggleGuard,
+  title = "Охранники объекта",
+  description,
+  disabled = false,
 }: ObjectGuardAssignmentSectionProps) {
   return (
     <section className="rounded-card border border-app-border bg-app-surface p-6 shadow-glow">
       <div className="mb-4 flex items-center gap-2 text-accent-primary">
         <Shield className="size-5" />
-        <h2 className="text-lg font-semibold">Охранники объекта</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
       </div>
+      {description ? (
+        <p className="mb-4 text-xs leading-snug text-app-muted">{description}</p>
+      ) : null}
       <div className="mb-4">
         <input
           value={guardSearch}
@@ -37,6 +47,7 @@ export function ObjectGuardAssignmentSection({
           onFocus={onGuardSearchFocus}
           placeholder="Поиск охранника..."
           className="w-full rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"
+          style={{ borderColor: designTokens.color.border }}
         />
       </div>
       <div className="max-h-[400px] space-y-1 overflow-auto pr-2">
@@ -57,8 +68,9 @@ export function ObjectGuardAssignmentSection({
                 <input
                   type="checkbox"
                   checked={isAssigned}
+                  disabled={disabled}
                   onChange={(e) => void onToggleGuard(guard.id, e.target.checked)}
-                  className="size-4 rounded border-app-border bg-app-bg text-accent-primary focus:ring-accent-primary"
+                  className="size-4 rounded border-app-border bg-app-bg text-accent-primary focus:ring-accent-primary disabled:opacity-50"
                 />
                 <span className="text-sm">
                   {guard.lastName} {guard.firstName}

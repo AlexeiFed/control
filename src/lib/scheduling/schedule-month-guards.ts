@@ -23,6 +23,39 @@ export function isKhabarovskMonthPast(year: number, monthIndex0: number, now = n
   return year < kh.year || (year === kh.year && monthIndex0 < kh.month0);
 }
 
+/** Живой пул «Охранники объекта» только для текущего/будущего месяца. */
+export function shouldShowLiveObjectGuardPool(
+  year: number,
+  monthIndex0: number,
+  now = new Date(),
+): boolean {
+  return !isKhabarovskMonthPast(year, monthIndex0, now);
+}
+
+export function collectMonthStaffUnionIds(
+  monthlyPostGuardsByPostId: Readonly<Record<string, ReadonlyArray<string>>>,
+): string[] {
+  const ids = new Set<string>();
+  for (const staffIds of Object.values(monthlyPostGuardsByPostId)) {
+    for (const id of staffIds) {
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+/** Плоский штат месяца без постов: галка только добавляет/убирает id. */
+export function nextMonthRosterIds(
+  current: ReadonlyArray<string>,
+  guardId: string,
+  assigned: boolean,
+): string[] {
+  if (assigned) {
+    return current.includes(guardId) ? [...current] : [...current, guardId];
+  }
+  return current.filter((id) => id !== guardId);
+}
+
 /**
  * Источник строк графика:
  * - прошлый месяц: только снимок штата месяца (изоляция от поздних назначений на объект);

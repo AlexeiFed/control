@@ -39,10 +39,14 @@ import type { GuardEmploymentType, GuardLicenseType, GuardPosition, RateUnit, Sh
 import {
   createObjectPost,
   deleteObjectPost,
+  syncObjectGuardsToMonthStaff,
   updateObjectPost,
 } from "../../lib/operations/object-posts-repository";
-import { replaceMonthlyPostGuards } from "../../lib/operations/object-monthly-post-guards-repository";
-import { syncObjectGuardsToMonthStaff } from "../../lib/operations/object-posts-repository";
+import { deleteGuardFromObjectMonthStaff, replaceMonthlyPostGuards } from "../../lib/operations/object-monthly-post-guards-repository";
+import {
+  addGuardToObjectMonthRoster,
+  removeGuardFromObjectMonthRoster,
+} from "../../lib/operations/object-month-schedule-guards-repository";
 import { removeGuardFromObjectMonthSchedule } from "../../lib/operations/scheduler-repository";
 import { isKhabarovskMonthPast } from "../../lib/scheduling/schedule-month-guards";
 
@@ -879,6 +883,65 @@ export async function replaceMonthlyPostGuardsAction(formData: FormData) {
     input.guardIds,
   );
   revalidatePath(`/objects/${input.objectId}`);
+}
+
+const setObjectMonthScheduleGuardSchema = z.object({
+  objectId: z.string().uuid(),
+  guardId: z.string().uuid(),
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  assigned: z.enum(["true", "false"]),
+});
+
+export type SetObjectMonthScheduleGuardResult = { ok: true } | { ok: false; error: string };
+
+export async function setObjectMonthScheduleGuardAction(
+  formData: FormData,
+): Promise<SetObjectMonthScheduleGuardResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "objects:manage");
+    assertPermission(session.user.role, "schedule:write");
+    if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
+      return { ok: false, error: "Недостаточно прав" };
+    }
+
+    const input = setObjectMonthScheduleGuardSchema.parse({
+      objectId: formData.get("objectId"),
+      guardId: formData.get("guardId"),
+      month: formData.get("month"),
+      assigned: formData.get("assigned"),
+    });
+
+    const [y, m] = input.month.split("-").map(Number);
+    const year = y!;
+    const monthIndex0 = m! - 1;
+    if (!isKhabarovskMonthPast(year, monthIndex0)) {
+      return { ok: false, error: "В текущем месяце правьте пул «Охранники объекта»" };
+    }
+
+    if (input.assigned === "true") {
+      await addGuardToObjectMonthRoster(input.objectId, input.month, input.guardId);
+    } else {
+      await removeGuardFromObjectMonthRoster(input.objectId, input.month, input.guardId);
+      await deleteGuardFromObjectMonthStaff(input.objectId, input.guardId, input.month);
+    }
+
+    revalidateAfterShiftMutation([
+      "/scheduler",
+      "/dashboard",
+      "/",
+      `/objects/${input.objectId}`,
+    ]);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Некорректные параметры" };
+    }
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Не удалось обновить штат месяца",
+    };
+  }
 }
 
 const removeGuardFromObjectMonthScheduleSchema = z.object({

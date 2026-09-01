@@ -22,6 +22,7 @@ type ObjectPostsAndStaffSectionProps = {
   monthlyPostGuardsByPostId: MonthlyPostGuardsByPostId;
   guardNames: Record<string, string>;
   canManage: boolean;
+  hideStaffAssignment?: boolean;
 };
 
 export function ObjectPostsAndStaffSection({
@@ -33,6 +34,7 @@ export function ObjectPostsAndStaffSection({
   monthlyPostGuardsByPostId,
   guardNames,
   canManage,
+  hideStaffAssignment = false,
 }: ObjectPostsAndStaffSectionProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -227,7 +229,11 @@ export function ObjectPostsAndStaffSection({
             Штат поста{activePost ? `: ${activePost.name}` : ""}
           </p>
 
-          {!activePost ? (
+          {hideStaffAssignment ? (
+            <p className="rounded-button border border-dashed border-app-border p-4 text-sm text-app-muted">
+              Штат прошлого месяца правится списком «Охранники графика» выше. Посты здесь только для структуры сетки.
+            </p>
+          ) : !activePost ? (
             <p className="rounded-button border border-dashed border-app-border p-4 text-sm text-app-muted">
               Выберите пост слева или добавьте первый пост для этого месяца.
             </p>

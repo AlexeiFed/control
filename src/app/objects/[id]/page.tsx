@@ -16,6 +16,7 @@ import { getObjectOperationalDayStartTimeForMonth } from "../../../lib/operation
 import { listObjectHolidays } from "../../../lib/operations/object-holidays-repository";
 import { getObjectPosts, ensureMonthlyPostsInherited, syncObjectGuardsToMonthStaff } from "../../../lib/operations/object-posts-repository";
 import { listMonthlyPostGuardsByObject } from "../../../lib/operations/object-monthly-post-guards-repository";
+import { listObjectMonthScheduleGuardIds } from "../../../lib/operations/object-month-schedule-guards-repository";
 import {
   listScheduledGuardsByObjectForLocalMonth,
   listShiftsForObjectInLocalMonth,
@@ -63,11 +64,12 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
   const monthEndExclusive = new Date(Date.UTC(year, month0 + 1, 1, 0, 0, 0, 0) - 10 * 3600_000);
 
   const monthKey = `${year}-${String(month0 + 1).padStart(2, "0")}`;
+  const monthIsPast = isKhabarovskMonthPast(year, month0);
 
-  await ensureMonthlyPostsInherited(id, monthKey);
-
-  // Текущий/будущий месяц: фиксируем пул объекта в штат месяца (снимок для изоляции, когда месяц станет прошлым).
-  if (!isKhabarovskMonthPast(year, month0)) {
+  // Наследование постов и снимок пула — только текущий/будущий месяц.
+  // Прошлый месяц не создаём посты и не перетираем штат.
+  if (!monthIsPast) {
+    await ensureMonthlyPostsInherited(id, monthKey);
     await syncObjectGuardsToMonthStaff(id, monthKey, object.guardIds);
   }
 
@@ -84,6 +86,7 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
     posts,
     operationalDayStartTime,
     monthlyPostGuardsByPostId,
+    monthRosterGuardIds,
     dismissedShortageDateIsos,
   ] = await Promise.all([
     listShiftTemplatesForObjectIds([id]),
@@ -95,12 +98,13 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
     getObjectPosts(id, monthKey),
     getObjectOperationalDayStartTimeForMonth(id, monthKey),
     listMonthlyPostGuardsByObject(id, monthKey),
+    listObjectMonthScheduleGuardIds(id, monthKey),
     listValidShortageDismissDateIsosForObject(id),
   ]);
 
   const monthlyStaffIds = Object.values(monthlyPostGuardsByPostId).flat();
   const gridGuardIds = [
-    ...new Set([...object.guardIds, ...monthlyStaffIds, ...shifts.map((s) => s.guardId)]),
+    ...new Set([...object.guardIds, ...monthlyStaffIds, ...monthRosterGuardIds, ...shifts.map((s) => s.guardId)]),
   ];
   const [gridGuardNames, gridGuardStatuses] = await Promise.all([
     listGuardDisplayNamesByIds(gridGuardIds),
@@ -133,6 +137,7 @@ export default async function ObjectDetailPage({ params, searchParams }: PagePro
         bulkCreateShiftsAction={bulkCreateShiftsAction}
         operationalDayStartTime={operationalDayStartTime}
         monthlyPostGuardsByPostId={monthlyPostGuardsByPostId}
+        monthRosterGuardIds={monthRosterGuardIds}
         dismissedShortageDateIsos={dismissedShortageDateIsos}
       />
     </main>
