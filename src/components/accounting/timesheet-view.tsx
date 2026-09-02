@@ -1,5 +1,6 @@
 import React, { type ReactNode } from "react";
 import type { AttendanceIncidentLine, TimesheetRow } from "../../lib/scheduling/timesheet";
+import { resolveTimesheetDisplayPost } from "../../lib/accounting/timesheet-object-xlsx";
 import { ButtonLink, buttonVariants } from "../ui/button";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import { designTokens } from "../../lib/design-tokens";
@@ -89,9 +90,25 @@ export function TimesheetView({
   const detailShiftColSpan = 12 + (showPayroll ? 1 : 0) + (showFinance ? 1 : 0);
 
   // Group rows by post for the details table
+  const firstPostByObjectId = new Map<string, { id: string; name: string }>();
+  const namedPostsByObject = new Map<string, Map<string, string>>();
+  for (const row of rows) {
+    if (!row.objectId || !row.postId) continue;
+    const inner = namedPostsByObject.get(row.objectId) ?? new Map<string, string>();
+    if (!inner.has(row.postId)) inner.set(row.postId, row.postName?.trim() || row.postId);
+    namedPostsByObject.set(row.objectId, inner);
+  }
+  for (const [objectId, posts] of namedPostsByObject) {
+    if (posts.size !== 1) continue;
+    const [id, name] = [...posts.entries()][0]!;
+    firstPostByObjectId.set(objectId, { id, name });
+  }
+
   const rowsByPost = new Map<string, TimesheetRow[]>();
   for (const row of rows) {
-    const key = row.postId ? `${row.postId}|${row.postName}` : "none|Без поста";
+    const firstPost = row.objectId ? firstPostByObjectId.get(row.objectId) : undefined;
+    const { postKey, postName } = resolveTimesheetDisplayPost(row, firstPost);
+    const key = `${postKey}|${postName}`;
     const bucket = rowsByPost.get(key) ?? [];
     bucket.push(row);
     rowsByPost.set(key, bucket);

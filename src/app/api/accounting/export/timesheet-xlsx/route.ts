@@ -16,6 +16,7 @@ import { listObjectTimesheetApprovalsByIds } from "../../../../../lib/operations
 import { getTimesheetSnapshot } from "../../../../../lib/operations/scheduler-repository";
 import { operationalDayMonthKey } from "../../../../../lib/scheduling/operational-day-anchors";
 import { normalizeOperationalAnchorTime } from "../../../../../lib/scheduling/operational-day-timeline";
+import { listFirstPostsByObjectForMonth } from "../../../../../lib/operations/object-posts-repository";
 
 function parseObjectIdsParam(url: URL): Set<string> | null {
   const raw = url.searchParams.get("objectIds")?.trim() ?? "";
@@ -84,6 +85,10 @@ export async function GET(request: Request) {
     objects,
     monthKeysForPayrollMonth(parsed.month.year, parsed.month.monthIndex),
   );
+  const firstPostByObjectId = await listFirstPostsByObjectForMonth(
+    objects.map((o) => o.id),
+    monthKey,
+  );
 
   const sheets: TimesheetObjectWorkbookSheet[] = objects
     .map((o) => {
@@ -96,6 +101,7 @@ export async function GET(request: Request) {
           monthlyAnchor ??
           objectDefaultById.get(o.id) ??
           normalizeOperationalAnchorTime(o.operationalDayStartTime),
+        firstPost: firstPostByObjectId.get(o.id) ?? null,
         rows: rowsFiltered.filter((r) =>
           r.objectId ? r.objectId === o.id : r.objectName === o.name,
         ),

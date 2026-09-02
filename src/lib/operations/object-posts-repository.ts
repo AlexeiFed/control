@@ -18,6 +18,25 @@ function previousMonthKey(month: string): string | null {
   return `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+export async function listFirstPostsByObjectForMonth(
+  objectIds: readonly string[],
+  month: string,
+): Promise<Map<string, { id: string; name: string }>> {
+  const map = new Map<string, { id: string; name: string }>();
+  if (objectIds.length === 0) return map;
+  const rows = await query<{ object_id: string; id: string; name: string }>(
+    `SELECT DISTINCT ON (object_id) object_id, id, name
+     FROM object_posts
+     WHERE month = $1 AND object_id = ANY($2::uuid[])
+     ORDER BY object_id, created_at ASC`,
+    [month, [...objectIds]],
+  );
+  for (const row of rows) {
+    map.set(row.object_id, { id: row.id, name: row.name });
+  }
+  return map;
+}
+
 export async function getObjectPosts(objectId: string, month: string): Promise<ObjectPost[]> {
   const rows = await query<{ id: string; object_id: string; month: string; name: string }>(
     `SELECT id, object_id, month, name

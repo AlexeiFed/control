@@ -3,6 +3,7 @@ import { resolveShiftExportColors } from "./schedule-export-shift-style";
 import {
   computeScheduleExportRowHeights,
   formatScheduleExportEntryDisplayText,
+  scheduleExportCellEntries,
   type ScheduleExportCellEntry,
   type ScheduleExportTable,
 } from "./schedule-export-table";
@@ -203,7 +204,7 @@ export function renderScheduleExportJpg(table: ScheduleExportTable): Blob {
     x += NAME_COL_WIDTH;
 
     for (const col of table.dayColumns) {
-      const entries = table.cells[guard.guardId]?.[col.dateIso] ?? [];
+      const entries = scheduleExportCellEntries(table, guard, col.dateIso);
       drawDayCell(ctx, x, y, rowHeight, entries);
       x += DAY_COL_WIDTH;
     }

@@ -107,6 +107,8 @@ export type ScheduleGridGuardRow = {
   displayName: string;
   isAssigned: boolean;
   status?: GuardStatus;
+  /** Пост строки графика; `null` если объект без постов. */
+  postId?: string | null;
 };
 
 export type QuickAssignDraft = {
@@ -224,17 +226,15 @@ export function ObjectMonthScheduleGrid({
   const operationalDayDirty = operationalDayDraft !== operationalDayStartTime;
 
   const guardsForExport = useMemo(() => {
-    const seen = new Set<string>();
     const rows: ScheduleGridGuardRow[] = [];
     for (const [postKey, section] of Object.entries(guardsByPost)) {
+      const postId = postKey || null;
       for (const row of section) {
-        if (hiddenGuardIds.has(scheduleRowHideKey(postKey || null, row.guardId))) continue;
-        if (seen.has(row.guardId)) continue;
-        seen.add(row.guardId);
-        rows.push(row);
+        if (hiddenGuardIds.has(scheduleRowHideKey(postId, row.guardId))) continue;
+        rows.push({ ...row, postId });
       }
     }
-    return rows.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "ru-RU"));
+    return rows;
   }, [guardsByPost, hiddenGuardIds]);
 
   const firstPostId = posts[0]?.id ?? null;
@@ -1546,6 +1546,7 @@ export function ObjectMonthScheduleGrid({
           guardsForGrid={guardsForExport}
           monthShifts={monthShifts}
           operationalDayStartTime={operationalDayStartTime}
+          firstPostId={firstPostId}
           onClose={() => setExportDialog(null)}
         />
       ) : null}

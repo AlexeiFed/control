@@ -212,8 +212,8 @@ export async function listTimesheetEntries(
           e.object_id::text AS object_id,
           e.guard_name,
           COALESCE(o.name, e.object_name) AS object_name,
-          e.post_id,
-          e.post_name,
+          COALESCE(e.post_id, s.post_id, fp.id) AS post_id,
+          COALESCE(named.name, e.post_name) AS post_name,
           e.starts_at,
           e.ends_at,
           e.total_hours::text,
@@ -234,6 +234,16 @@ export async function listTimesheetEntries(
           e.guard_rate_contributions
         FROM timesheet_shift_entries e
         LEFT JOIN security_objects o ON o.id = e.object_id
+        LEFT JOIN shifts s ON s.id = e.shift_id
+        LEFT JOIN LATERAL (
+          SELECT op.id, op.name
+          FROM object_posts op
+          WHERE op.object_id = e.object_id
+            AND op.month = to_char(e.work_date, 'YYYY-MM')
+          ORDER BY op.created_at ASC
+          LIMIT 1
+        ) fp ON true
+        LEFT JOIN object_posts named ON named.id = COALESCE(e.post_id, s.post_id, fp.id)
         WHERE e.ends_at > $1
           AND e.starts_at < $2
           AND ($3::uuid IS NULL OR e.guard_id = $3)

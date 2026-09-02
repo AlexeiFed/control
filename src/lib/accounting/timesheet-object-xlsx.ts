@@ -20,7 +20,24 @@ export type TimesheetObjectWorkbookSheet = {
   approval: TimesheetObjectApprovalSettings;
   /** Якорь операционных суток объекта — колонки табеля как в графике. */
   operationalDayStartTime?: string;
+  /** Первый пост месяца: смены без post_id идут сюда, как в графике. */
+  firstPost?: { id: string; name: string } | null;
 };
+
+export type TimesheetDisplayPost = { id: string; name: string };
+
+export function resolveTimesheetDisplayPost(
+  row: { postId?: string | null; postName?: string | null },
+  firstPost?: TimesheetDisplayPost | null,
+): { postKey: string; postName: string } {
+  if (row.postId) {
+    return { postKey: row.postId, postName: row.postName?.trim() || "Без поста" };
+  }
+  if (firstPost) {
+    return { postKey: firstPost.id, postName: firstPost.name };
+  }
+  return { postKey: "none", postName: "Без поста" };
+}
 
 type GuardDayCell = {
   hours: number;
@@ -115,6 +132,7 @@ export async function buildTimesheetObjectWorkbook(
       year,
       monthIndex0,
       sheet.operationalDayStartTime,
+      sheet.firstPost,
     );
     const posts = Array.from(byPost.values()).sort((a, b) => a.postName.localeCompare(b.postName, "ru-RU"));
 
@@ -276,6 +294,7 @@ export function groupTimesheetObjectRowsByPostAndGuard(
   year: number,
   monthIndex0: number,
   operationalDayStartTime: string = DEFAULT_OPERATIONAL_DAY_START_TIME,
+  firstPost?: TimesheetDisplayPost | null,
 ): Map<string, { postName: string; guards: Map<string, { days: Map<number, GuardDayCell> }> }> {
   const byPost = new Map<string, { postName: string; guards: Map<string, { days: Map<number, GuardDayCell> }> }>();
   const anchor = normalizeOperationalAnchorTime(operationalDayStartTime);
@@ -288,8 +307,7 @@ export function groupTimesheetObjectRowsByPostAndGuard(
     const hours = round2(row.totalHours);
     if (hours <= 0) continue;
 
-    const postKey = row.postId ?? "none";
-    const postName = row.postName || "Без поста";
+    const { postKey, postName } = resolveTimesheetDisplayPost(row, firstPost);
     const postBucket = byPost.get(postKey) ?? { postName, guards: new Map() };
 
     const guardName = row.guardName?.trim() || "—";

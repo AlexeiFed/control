@@ -35,6 +35,7 @@ type ScheduleExportDialogProps = {
   guardsForGrid: ScheduleGridGuardRow[];
   monthShifts: Shift[];
   operationalDayStartTime: string;
+  firstPostId?: string | null;
   onClose: () => void;
 };
 
@@ -61,6 +62,7 @@ export function ScheduleExportDialog({
   guardsForGrid,
   monthShifts,
   operationalDayStartTime,
+  firstPostId = null,
   onClose,
 }: ScheduleExportDialogProps) {
   const defaultPeriods = useMemo(
@@ -142,9 +144,14 @@ export function ScheduleExportDialog({
         year: viewYear,
         monthIndex0: viewMonth0,
         periods: selectedPeriods,
-        guards: guardsForGrid.map((g) => ({ guardId: g.guardId, displayName: g.displayName })),
+        guards: guardsForGrid.map((g) => ({
+          guardId: g.guardId,
+          displayName: g.displayName,
+          postId: g.postId,
+        })),
         monthShifts,
         operationalDayStartTime,
+        firstPostId,
       });
 
       const periodSlug = selectedPeriods.map((p) => p.id).join("_");

@@ -243,6 +243,79 @@ describe("schedule-export-table", () => {
     expect(table.cells.g1?.["2026-07-02"]?.some((entry) => entry.text.startsWith("1"))).toBe(true);
     expect(table.cells.g1?.["2026-07-02"]?.some((entry) => entry.text.startsWith("24"))).toBe(true);
   });
+
+  it("не переносит смены чужого поста на строку другого охранника", () => {
+    const sutki = (dateIso: string, guardId: string, postId: string | null, id: string) => {
+      const { startsAt, endsAt } = buildShiftIntervalFromHm(dateIso, "09:00", "09:00", "09:00");
+      return makeShift({ id, guardId, postId, startsAt, endsAt });
+    };
+    const dayColumns = Array.from({ length: 13 }, (_, index) => {
+      const day = index + 1;
+      const dateIso = `2026-09-${String(day).padStart(2, "0")}`;
+      return { dateIso, header: `${day}\n`, day, monthIndex0: 8, year: 2026 };
+    });
+    const alf = { guardId: "alf", displayName: "Алфутов Алексей", postId: "post-a" };
+    const vor = { guardId: "vor", displayName: "Ворожбицкий Игорь", postId: "post-a" };
+
+    const table = buildScheduleExportTable(
+      "Тест",
+      [alf, vor],
+      dayColumns,
+      [
+        sutki("2026-09-01", "alf", "post-a", "a1"),
+        sutki("2026-09-04", "alf", "post-a", "a4"),
+        sutki("2026-09-07", "alf", "post-a", "a7"),
+        sutki("2026-09-10", "alf", "post-a", "a10"),
+        sutki("2026-09-13", "alf", "post-a", "a13"),
+        sutki("2026-09-08", "alf", "post-b", "a8-other-post"),
+        sutki("2026-09-11", "alf", "post-b", "a11-other-post"),
+        sutki("2026-09-08", "vor", "post-a", "v8"),
+        sutki("2026-09-11", "vor", "post-a", "v11"),
+      ],
+      "09:00",
+      "post-a",
+    );
+
+    expect(table.cells[`${alf.postId}:${alf.guardId}`]?.["2026-09-07"]).toHaveLength(1);
+    expect(table.cells[`${alf.postId}:${alf.guardId}`]?.["2026-09-08"] ?? []).toHaveLength(0);
+    expect(table.cells[`${alf.postId}:${alf.guardId}`]?.["2026-09-11"] ?? []).toHaveLength(0);
+    expect(table.cells[`${vor.postId}:${vor.guardId}`]?.["2026-09-08"]).toHaveLength(1);
+    expect(table.cells[`${vor.postId}:${vor.guardId}`]?.["2026-09-11"]).toHaveLength(1);
+    expect(table.cells[alf.guardId]?.["2026-09-08"] ?? []).toHaveLength(0);
+  });
+
+  it("разводит одного охранника на двух постах по разным строкам", () => {
+    const { startsAt, endsAt } = buildShiftIntervalFromHm("2026-09-08", "09:00", "09:00", "09:00");
+    const postA = { guardId: "alf", displayName: "Алфутов Алексей", postId: "post-a" };
+    const postB = { guardId: "alf", displayName: "Алфутов Алексей", postId: "post-b" };
+    const table = buildScheduleExportTable(
+      "Тест",
+      [postA, postB],
+      [{ dateIso: "2026-09-08", header: "8\nВт", day: 8, monthIndex0: 8, year: 2026 }],
+      [
+        makeShift({
+          id: "a",
+          guardId: "alf",
+          postId: "post-a",
+          startsAt,
+          endsAt,
+        }),
+        makeShift({
+          id: "b",
+          guardId: "alf",
+          postId: "post-b",
+          startsAt,
+          endsAt,
+        }),
+      ],
+      "09:00",
+      "post-a",
+    );
+
+    expect(table.cells["post-a:alf"]?.["2026-09-08"]).toHaveLength(1);
+    expect(table.cells["post-b:alf"]?.["2026-09-08"]).toHaveLength(1);
+    expect(table.cells.alf?.["2026-09-08"] ?? []).toHaveLength(0);
+  });
 });
 
 describe("schedule-export-shift-style", () => {

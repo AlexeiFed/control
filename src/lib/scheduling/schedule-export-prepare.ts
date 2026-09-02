@@ -95,6 +95,7 @@ export async function prepareScheduleExportTable(input: {
   guards: ScheduleExportGuardRow[];
   monthShifts: Shift[];
   operationalDayStartTime: string;
+  firstPostId?: string | null;
 }): Promise<ReturnType<typeof buildScheduleExportTable>> {
   const anchorTime = normalizeOperationalAnchorTime(input.operationalDayStartTime);
   const dayColumns = expandSelectedExportPeriods(input.periods, input.year, input.monthIndex0);
@@ -128,6 +129,7 @@ export async function prepareScheduleExportTable(input: {
     dayColumns,
     shifts,
     anchorTime,
+    input.firstPostId ?? null,
   );
 }
 

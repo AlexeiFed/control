@@ -3,6 +3,7 @@ import { pickDominantShiftKind, shiftExportFillArgb } from "./schedule-export-sh
 import {
   computeScheduleExportRowHeights,
   formatScheduleExportCellText,
+  scheduleExportCellEntries,
   type ScheduleExportTable,
 } from "./schedule-export-table";
 
@@ -70,7 +71,7 @@ export async function buildScheduleExportWorkbook(table: ScheduleExportTable): P
     applyTableBorder(nameCell);
 
     table.dayColumns.forEach((col, colIndex) => {
-      const entries = table.cells[guard.guardId]?.[col.dateIso] ?? [];
+      const entries = scheduleExportCellEntries(table, guard, col.dateIso);
       const cell = row.getCell(colIndex + 2);
       cell.value = formatScheduleExportCellText(entries);
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };

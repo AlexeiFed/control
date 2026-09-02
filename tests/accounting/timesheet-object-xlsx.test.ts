@@ -168,6 +168,41 @@ describe("groupTimesheetObjectRowsByPostAndGuard", () => {
     expect(days?.get(17)).toBeUndefined();
     expect(days?.get(18)).toMatchObject({ hours: 25, kind: "Regular" });
   });
+
+  it("смены без post_id на объекте с постом идут в первый пост, не в «Без поста»", () => {
+    const grouped = groupTimesheetObjectRowsByPostAndGuard(
+      [
+        baseRow({
+          objectId: "obj-1",
+          guardName: "Тарабыкин Алексей",
+          postId: "post-baza",
+          postName: "База на Краснодарской",
+          startsAt: "2026-07-31T22:00:00.000Z",
+          endsAt: "2026-07-31T23:00:00.000Z",
+          totalHours: 1,
+          regularHours: 1,
+        }),
+        baseRow({
+          objectId: "obj-1",
+          guardName: "Тарабыкин Алексей",
+          postId: null,
+          postName: null,
+          startsAt: "2026-07-31T23:00:00.000Z",
+          endsAt: "2026-08-01T13:00:00.000Z",
+          totalHours: 14,
+          regularHours: 14,
+        }),
+      ],
+      2026,
+      7,
+      "08:00",
+      { id: "post-baza", name: "База на Краснодарской" },
+    );
+
+    expect(grouped.has("none")).toBe(false);
+    const days = grouped.get("post-baza")?.guards.get("Тарабыкин Алексей")?.days;
+    expect(days?.get(1)).toMatchObject({ hours: 15, kind: "Regular" });
+  });
 });
 
 describe("buildTimesheetObjectWorkbook", () => {

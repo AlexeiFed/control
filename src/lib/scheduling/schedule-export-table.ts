@@ -2,13 +2,22 @@ import { coerceToDate, getHoursKhabarovsk } from "../format/display-date";
 import { scheduleShiftColumnDateIso } from "./operational-day-timeline";
 import { incidentCategoryLabels } from "../operations/status-labels";
 import { isFullNoShow, isPartialAttendance, partialAttendanceWindow } from "./shift-attendance";
+import { shiftMatchesPost } from "./shift-post-display";
 import type { Shift, ShiftKind } from "./types";
 import type { ScheduleExportDayColumn } from "./schedule-export-periods";
 
 export type ScheduleExportGuardRow = {
   guardId: string;
   displayName: string;
+  /** Как в сетке: `null` — объект без постов. Нет поля — не фильтровать пост (тесты/legacy). */
+  postId?: string | null;
 };
+
+/** Ключ строки экспорта: пост + охранник, чтобы смены не склеивались между постами. */
+export function scheduleExportRowKey(guard: ScheduleExportGuardRow): string {
+  if (guard.postId === undefined) return guard.guardId;
+  return `${guard.postId ?? ""}:${guard.guardId}`;
+}
 
 export type ScheduleExportCellEntry = {
   text: string;
@@ -22,6 +31,14 @@ export type ScheduleExportTable = {
   dayColumns: ScheduleExportDayColumn[];
   cells: Record<string, Record<string, ScheduleExportCellEntry[]>>;
 };
+
+export function scheduleExportCellEntries(
+  table: ScheduleExportTable,
+  guard: ScheduleExportGuardRow,
+  dateIso: string,
+): ScheduleExportCellEntry[] {
+  return table.cells[scheduleExportRowKey(guard)]?.[dateIso] ?? [];
+}
 
 export const SCHEDULE_EXPORT_BASE_ROW_HEIGHT = 52;
 export const SCHEDULE_EXPORT_COMPACT_BLOCK_HEIGHT = 20;
@@ -43,11 +60,12 @@ export function formatScheduleExportCellText(entries: ReadonlyArray<ScheduleExpo
 
 export function maxScheduleExportEntriesInRow(
   table: ScheduleExportTable,
-  guardId: string,
+  guard: ScheduleExportGuardRow,
 ): number {
+  const rowKey = scheduleExportRowKey(guard);
   let maxEntries = 0;
   for (const col of table.dayColumns) {
-    const count = table.cells[guardId]?.[col.dateIso]?.length ?? 0;
+    const count = table.cells[rowKey]?.[col.dateIso]?.length ?? 0;
     if (count > maxEntries) maxEntries = count;
   }
   return maxEntries;
@@ -63,7 +81,7 @@ export function computeScheduleExportRowHeight(maxEntriesInRow: number): number 
 
 export function computeScheduleExportRowHeights(table: ScheduleExportTable): number[] {
   return table.guards.map((guard) =>
-    computeScheduleExportRowHeight(maxScheduleExportEntriesInRow(table, guard.guardId)),
+    computeScheduleExportRowHeight(maxScheduleExportEntriesInRow(table, guard)),
   );
 }
 
@@ -109,14 +127,16 @@ export function buildScheduleExportTable(
   dayColumns: ScheduleExportDayColumn[],
   shifts: Shift[],
   operationalDayStartTime: string,
+  firstPostId: string | null = null,
 ): ScheduleExportTable {
   const cells: Record<string, Record<string, ScheduleExportCellEntry[]>> = {};
   const dateIsoSet = new Set(dayColumns.map((c) => c.dateIso));
 
   for (const guard of guards) {
-    cells[guard.guardId] = {};
+    const rowKey = scheduleExportRowKey(guard);
+    cells[rowKey] = {};
     for (const col of dayColumns) {
-      cells[guard.guardId]![col.dateIso] = [];
+      cells[rowKey]![col.dateIso] = [];
     }
   }
 
@@ -124,14 +144,22 @@ export function buildScheduleExportTable(
     const key = scheduleShiftColumnDateIso(shift, operationalDayStartTime);
     if (!dateIsoSet.has(key)) continue;
 
-    const guardCells = cells[shift.guardId];
-    if (!guardCells) continue;
-
-    guardCells[key]!.push({
-      text: formatShiftExportCell(shift),
-      shiftKind: shift.shiftKind,
-      isNoShow: shift.isNoShow === true,
-    });
+    for (const guard of guards) {
+      if (guard.guardId !== shift.guardId) continue;
+      if (
+        guard.postId !== undefined &&
+        !shiftMatchesPost(shift.postId, guard.postId, firstPostId)
+      ) {
+        continue;
+      }
+      const guardCells = cells[scheduleExportRowKey(guard)];
+      if (!guardCells?.[key]) continue;
+      guardCells[key].push({
+        text: formatShiftExportCell(shift),
+        shiftKind: shift.shiftKind,
+        isNoShow: shift.isNoShow === true,
+      });
+    }
   }
 
   return { title, guards, dayColumns, cells };
