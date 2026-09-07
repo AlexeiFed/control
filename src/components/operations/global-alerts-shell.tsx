@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { GlobalAlertsPayload, GlobalAlertIncidentItem } from "../../lib/operations/global-alerts";
 import { GUARD_COMPLIANCE_REMINDERS_REFRESH_EVENT } from "../../lib/guards/compliance-reminders-refresh";
@@ -47,7 +47,7 @@ export function GlobalAlertsShell() {
   const [incidentDismissed, setIncidentDismissed] = useState(false);
 
   const loadIncidentItems = useCallback(async () => {
-    if (pathname === "/login") return;
+    if (window.location.pathname === "/login") return;
     const items = await fetchPendingIncidentItems();
     if (items === null) return;
     setAlerts((prev) => ({
@@ -57,10 +57,10 @@ export function GlobalAlertsShell() {
     if (items.length > 0) {
       setIncidentDismissed(false);
     }
-  }, [pathname]);
+  }, []);
 
   const load = useCallback(async () => {
-    if (pathname === "/login") return;
+    if (window.location.pathname === "/login") return;
     try {
       const res = await fetch("/api/global-alerts", {
         credentials: "same-origin",
@@ -83,30 +83,39 @@ export function GlobalAlertsShell() {
       /* ignore */
     }
     await loadIncidentItems();
-  }, [loadIncidentItems, pathname]);
+  }, [loadIncidentItems]);
+
+  const isLogin = pathname === "/login";
+  const consumedDirectoryRefreshAt = useRef(0);
 
   useEffect(() => {
-    if (pathname === "/login") {
+    if (isLogin) {
       setAlerts(null);
       return;
     }
     void load();
     const id = window.setInterval(() => void load(), 180_000);
     return () => window.clearInterval(id);
-  }, [load, pathname]);
+  }, [isLogin, load]);
 
-  /** После смены статуса — при переходе на другую страницу тоже подтянуть свежие RSC. */
+  /** После логина подтянуть RSC, если в другой вкладке только что меняли справочник. */
   useEffect(() => {
-    if (pathname === "/login") return;
+    if (isLogin) return;
     try {
       const at = Number(localStorage.getItem(DIRECTORY_DATA_REFRESH_STORAGE_KEY) ?? "0");
-      if (Number.isFinite(at) && at > 0 && Date.now() - at < 120_000) {
+      if (
+        Number.isFinite(at) &&
+        at > 0 &&
+        Date.now() - at < 120_000 &&
+        at !== consumedDirectoryRefreshAt.current
+      ) {
+        consumedDirectoryRefreshAt.current = at;
         router.refresh();
       }
     } catch {
       /* ignore */
     }
-  }, [pathname, router]);
+  }, [isLogin, router]);
 
   useEffect(() => {
     if (pathname === "/login") return;

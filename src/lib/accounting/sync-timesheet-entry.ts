@@ -12,7 +12,10 @@ import {
 import { listMonthlyOperationalDayStarts } from "../operations/object-monthly-settings-repository";
 import { listProfilePeriodsForGuards } from "../operations/guard-profile-periods-repository";
 import { GuardProfileResolver } from "../guards/profile-periods";
-import { listObjectRateRules } from "../operations/object-rate-rules-repository";
+import {
+  listObjectRateRules,
+  listObjectRateRulesForObjects,
+} from "../operations/object-rate-rules-repository";
 import { DEFAULT_SHIFT_TIMEZONE, loadHolidayDateSetForLocalRange } from "../rates/holiday-calendar";
 import { mapGuardLicenseFromDb } from "../scheduling/guard-profile";
 import {
@@ -214,12 +217,12 @@ async function upsertTimesheetEntry(
   shift: Shift,
   row: TimesheetRow,
   objectDefaultAnchor: string,
+  monthlyByKeyOverride?: Map<string, string>,
 ): Promise<void> {
   const calIso = toDateIsoKhabarovsk(shift.startsAt);
-  const monthlyByKey = await listMonthlyOperationalDayStarts(
-    [shift.objectId],
-    monthKeysAroundDateIso(calIso),
-  );
+  const monthlyByKey =
+    monthlyByKeyOverride ??
+    (await listMonthlyOperationalDayStarts([shift.objectId], monthKeysAroundDateIso(calIso)));
   const workDate = resolveTimesheetRowOperationalDateIso(
     {
       startsAt: shift.startsAt,
@@ -390,6 +393,121 @@ async function listShiftIdsForQuery(sql: string, params: unknown[]): Promise<str
   return rows.map((row) => row.id);
 }
 
+function shiftSyncSelectSql(incidentSel: string, rateRuleSel: string): string {
+  return `
+      SELECT
+        s.id,
+        s.guard_id,
+        s.object_id,
+        s.starts_at::text,
+        s.ends_at::text,
+        s.shift_kind,
+        s.manual_client_rate_cents,
+        s.manual_guard_rate_cents,
+        s.manual_rate_unit,
+        s.manual_rate_reason,
+        s.is_no_show,
+        s.post_id,
+        p.name AS post_name,
+        ${incidentSel},
+        ${rateRuleSel},
+        g.first_name,
+        g.last_name,
+        g.status,
+        g.position,
+        g.license_type,
+        g.employment_type,
+        g.is_trainee,
+        g.trainee_until::text,
+        o.name AS object_name,
+        o.operational_day_start_time::text AS operational_day_start_time
+      FROM shifts s
+      JOIN guards g ON g.id = s.guard_id
+      JOIN security_objects o ON o.id = s.object_id
+      LEFT JOIN object_posts p ON p.id = s.post_id
+  `;
+}
+
+async function loadShiftsForTimesheetSync(whereSql: string, params: unknown[]): Promise<ShiftSyncRow[]> {
+  const [incidentSel, rateRuleSel] = await Promise.all([
+    getShiftIncidentSelectColumns("s"),
+    getShiftSelectedRateRuleSelect("s"),
+  ]);
+  return query<ShiftSyncRow>(
+    `
+      ${shiftSyncSelectSql(incidentSel, rateRuleSel)}
+      ${whereSql}
+      ORDER BY s.starts_at ASC
+    `,
+    params,
+  );
+}
+
+async function syncLoadedShiftRows(loadedRows: ShiftSyncRow[]): Promise<number> {
+  if (loadedRows.length === 0) return 0;
+
+  const mapped = loadedRows.map(mapShiftSyncRow);
+  let minStart = mapped[0]!.shift.startsAt;
+  let maxEnd = mapped[0]!.shift.endsAt;
+  const guardIds = new Set<string>();
+  const objectIds = new Set<string>();
+  const monthKeys = new Set<string>();
+  for (const item of mapped) {
+    guardIds.add(item.guard.id);
+    objectIds.add(item.shift.objectId);
+    if (item.shift.startsAt < minStart) minStart = item.shift.startsAt;
+    if (item.shift.endsAt > maxEnd) maxEnd = item.shift.endsAt;
+    for (const key of monthKeysAroundDateIso(toDateIsoKhabarovsk(item.shift.startsAt))) {
+      monthKeys.add(key);
+    }
+  }
+
+  const objectIdList = [...objectIds];
+  const shiftIds = loadedRows.map((row) => row.id);
+  const [allRateRules, holidayDates, periods, incidentLogLinesByShiftId, monthlyByKey] = await Promise.all([
+    listObjectRateRulesForObjects(objectIdList),
+    loadHolidayDateSetForLocalRange(minStart, maxEnd),
+    listProfilePeriodsForGuards([...guardIds]),
+    loadIncidentLogLinesForShifts(shiftIds),
+    listMonthlyOperationalDayStarts(objectIdList, [...monthKeys]),
+  ]);
+  const profileResolver = new GuardProfileResolver(periods);
+  const rateRulesByObjectId: Record<string, Awaited<ReturnType<typeof listObjectRateRulesForObjects>>> = {};
+  for (const id of objectIdList) rateRulesByObjectId[id] = [];
+  for (const rule of allRateRules) {
+    (rateRulesByObjectId[rule.objectId] ??= []).push(rule);
+  }
+  const postsByPostId = new Map<string, { id: string; name: string }>();
+  for (const row of loadedRows) {
+    if (row.post_id && row.post_name) {
+      postsByPostId.set(row.post_id, { id: row.post_id, name: row.post_name });
+    }
+  }
+
+  await mapPool(mapped, 12, async (item) => {
+    const { shift, guard, object } = item;
+    const rows = buildTimesheetRows({
+      guards: [guard],
+      objects: [object],
+      shifts: [shift],
+      holidayDates,
+      incidentLogLinesByShiftId,
+      rateRulesByObjectId,
+      postsByPostId: postsByPostId.size > 0 ? postsByPostId : undefined,
+      timeZone: DEFAULT_SHIFT_TIMEZONE,
+      profileResolver,
+    });
+    const row = rows[0];
+    if (!row) {
+      await query(`DELETE FROM timesheet_shift_entries WHERE shift_id = $1::uuid`, [shift.id]);
+      return;
+    }
+    await upsertTimesheetEntry(shift, row, object.operationalDayStartTime, monthlyByKey);
+  });
+
+  return loadedRows.length;
+}
+
 /** Дозаполняет записи для смен без строки в материализованном табеле. */
 export async function backfillMissingTimesheetEntries(): Promise<number> {
   const shiftIds = await listShiftIdsForQuery(
@@ -446,14 +564,8 @@ export async function resyncOutdatedTimesheetEntriesSafe(): Promise<number> {
 }
 
 export async function backfillTimesheetEntriesForGuard(guardId: string): Promise<number> {
-  const shiftIds = await listShiftIdsForQuery(
-    `SELECT id FROM shifts WHERE guard_id = $1::uuid ORDER BY starts_at ASC`,
-    [guardId],
-  );
-  for (const shiftId of shiftIds) {
-    await syncTimesheetEntryFromShift(shiftId);
-  }
-  return shiftIds.length;
+  const loadedRows = await loadShiftsForTimesheetSync(`WHERE s.guard_id = $1::uuid`, [guardId]);
+  return syncLoadedShiftRows(loadedRows);
 }
 
 export async function backfillTimesheetEntriesForGuardSafe(guardId: string): Promise<void> {
@@ -466,14 +578,8 @@ export async function backfillTimesheetEntriesForGuardSafe(guardId: string): Pro
 }
 
 export async function backfillTimesheetEntriesForObject(objectId: string): Promise<number> {
-  const shiftIds = await listShiftIdsForQuery(
-    `SELECT id FROM shifts WHERE object_id = $1::uuid ORDER BY starts_at ASC`,
-    [objectId],
-  );
-  for (const shiftId of shiftIds) {
-    await syncTimesheetEntryFromShift(shiftId);
-  }
-  return shiftIds.length;
+  const loadedRows = await loadShiftsForTimesheetSync(`WHERE s.object_id = $1::uuid`, [objectId]);
+  return syncLoadedShiftRows(loadedRows);
 }
 
 export async function backfillTimesheetEntriesForObjectSafe(objectId: string): Promise<void> {
@@ -495,98 +601,11 @@ export async function backfillTimesheetEntriesForObjectFromDate(
   localFromIso: string,
 ): Promise<number> {
   const rangeStart = new Date(`${localFromIso}T00:00:00+10:00`);
-  const [incidentSel, rateRuleSel] = await Promise.all([
-    getShiftIncidentSelectColumns("s"),
-    getShiftSelectedRateRuleSelect("s"),
-  ]);
-  const loadedRows = await query<ShiftSyncRow>(
-    `
-      SELECT
-        s.id,
-        s.guard_id,
-        s.object_id,
-        s.starts_at::text,
-        s.ends_at::text,
-        s.shift_kind,
-        s.manual_client_rate_cents,
-        s.manual_guard_rate_cents,
-        s.manual_rate_unit,
-        s.manual_rate_reason,
-        s.is_no_show,
-        s.post_id,
-        p.name AS post_name,
-        ${incidentSel},
-        ${rateRuleSel},
-        g.first_name,
-        g.last_name,
-        g.status,
-        g.position,
-        g.license_type,
-        g.employment_type,
-        g.is_trainee,
-        g.trainee_until::text,
-        o.name AS object_name,
-        o.operational_day_start_time::text AS operational_day_start_time
-      FROM shifts s
-      JOIN guards g ON g.id = s.guard_id
-      JOIN security_objects o ON o.id = s.object_id
-      LEFT JOIN object_posts p ON p.id = s.post_id
-      WHERE s.object_id = $1::uuid
-        AND s.ends_at > $2
-      ORDER BY s.starts_at ASC
-    `,
+  const loadedRows = await loadShiftsForTimesheetSync(
+    `WHERE s.object_id = $1::uuid AND s.ends_at > $2`,
     [objectId, rangeStart.toISOString()],
   );
-  if (loadedRows.length === 0) return 0;
-
-  const mapped = loadedRows.map(mapShiftSyncRow);
-  let minStart = mapped[0]!.shift.startsAt;
-  let maxEnd = mapped[0]!.shift.endsAt;
-  const guardIds = new Set<string>();
-  for (const item of mapped) {
-    guardIds.add(item.guard.id);
-    if (item.shift.startsAt < minStart) minStart = item.shift.startsAt;
-    if (item.shift.endsAt > maxEnd) maxEnd = item.shift.endsAt;
-  }
-
-  const shiftIds = loadedRows.map((row) => row.id);
-  const [rateRules, holidayDates, periods, incidentLogLinesByShiftId] = await Promise.all([
-    listObjectRateRules(objectId),
-    loadHolidayDateSetForLocalRange(minStart, maxEnd),
-    listProfilePeriodsForGuards([...guardIds]),
-    loadIncidentLogLinesForShifts(shiftIds),
-  ]);
-  const profileResolver = new GuardProfileResolver(periods);
-  const rateRulesByObjectId = { [objectId]: rateRules };
-  const postsByPostId = new Map<string, { id: string; name: string }>();
-  for (const row of loadedRows) {
-    if (row.post_id && row.post_name) {
-      postsByPostId.set(row.post_id, { id: row.post_id, name: row.post_name });
-    }
-  }
-
-  await mapPool(mapped, 12, async (item) => {
-    const { shift, guard, object } = item;
-    const rows = buildTimesheetRows({
-      guards: [guard],
-      objects: [object],
-      shifts: [shift],
-      holidayDates,
-      incidentLogLinesByShiftId,
-      rateRulesByObjectId,
-      postsByPostId: postsByPostId.size > 0 ? postsByPostId : undefined,
-      timeZone: DEFAULT_SHIFT_TIMEZONE,
-      profileResolver,
-    });
-    const row = rows[0];
-    if (!row) {
-      await query(`DELETE FROM timesheet_shift_entries WHERE shift_id = $1::uuid`, [shift.id]);
-      return;
-    }
-    await upsertTimesheetEntry(shift, row, object.operationalDayStartTime);
-  });
-
-  return loadedRows.length;
+  return syncLoadedShiftRows(loadedRows);
 }
 
 export async function backfillTimesheetEntriesForObjectFromDateSafe(

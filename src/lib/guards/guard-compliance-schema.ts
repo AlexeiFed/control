@@ -11,6 +11,17 @@ export function parseOptionalIsoDate(value: unknown): string | null {
 
 export const optionalIsoDateSchema = z.preprocess(parseOptionalIsoDate, z.string().nullable());
 
+export function parseOptionalDocumentNumber(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  return s ? s : null;
+}
+
+export const optionalDocumentNumberSchema = z.preprocess(
+  parseOptionalDocumentNumber,
+  z.union([z.null(), z.string().min(1).max(64)]),
+);
+
 export const licenseGradeSchema = z.preprocess(
   (v) => {
     const s = typeof v === "string" ? v.trim() : "";
@@ -28,6 +39,8 @@ export const guardComplianceFieldsSchema = z.object({
   employedOn: optionalIsoDateSchema,
   licenseGrade: licenseGradeSchema,
   licenseValidUntil: optionalIsoDateSchema,
+  licenseNumber: optionalDocumentNumberSchema,
+  personalCardNumber: optionalDocumentNumberSchema,
 });
 
 export type GuardComplianceFieldsParsed = z.infer<typeof guardComplianceFieldsSchema>;

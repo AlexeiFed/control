@@ -12,6 +12,7 @@ import {
 import {
   formatGuardTableDate,
   GuardTableHeaderLabel,
+  GuardTableStackedNumber,
   guardRegistryLastNameClass,
   guardRegistryReminderRowClass,
   guardRegistryReminderRowStyle,
@@ -119,13 +120,13 @@ function renderCell(
       );
     case "license":
       return (
-        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-          {guard.licenseType === "Licensed" ? (
-            <span className="cursor-default" title={guardLicenseCellTooltip(guard)}>
-              {guardLicenseLabels.Licensed}
-            </span>
-          ) : guard.licenseType ? (
-            guardLicenseLabels[guard.licenseType]
+        <td key={columnId} className={`${guardTableTdClass} whitespace-normal text-app-muted`}>
+          {guard.licenseType ? (
+            <GuardTableStackedNumber
+              primary={guardLicenseLabels[guard.licenseType]}
+              number={guard.licenseNumber}
+              title={guardLicenseCellTooltip(guard)}
+            />
           ) : (
             "—"
           )}
@@ -175,8 +176,12 @@ function renderCell(
       );
     case "personalCard":
       return (
-        <td key={columnId} className={`${guardTableTdClass} text-app-muted`}>
-          {formatGuardTableDate(guard.personalCardAssignedOn)}
+        <td key={columnId} className={`${guardTableTdClass} whitespace-normal text-app-muted`}>
+          <GuardTableStackedNumber
+            primary={formatGuardTableDate(guard.personalCardAssignedOn)}
+            number={guard.personalCardNumber}
+            title={guard.personalCardNumber ? `Номер личной карточки: ${guard.personalCardNumber}` : undefined}
+          />
         </td>
       );
     case "car":

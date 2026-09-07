@@ -29,11 +29,13 @@ function row(partial: Partial<GuardListRow>): GuardListRow {
     licenseType: "Licensed",
     licenseGrade: 4,
     licenseValidUntil: "2027-01-01",
+    licenseNumber: "У-10421",
     employmentType: "Employed",
     employedOn: "2024-03-01",
     medicalCommissionPassedOn: "2025-01-01",
     periodicCheckPassedOn: "2025-06-01",
     personalCardAssignedOn: "2025-06-02",
+    personalCardNumber: "ЛК-8821",
     isTrainee: false,
     traineeUntil: null,
     hasCar: true,
@@ -55,14 +57,16 @@ describe("guard-registry-export", () => {
     expect(exported[3]).toBe("Иванович");
     expect(exported[4]).toBe("15.05.1990");
     expect(exported[7]).toBe("Охранник");
-    expect(exported[21]).toBe("нет");
-    expect(exported[22]).toBe("");
-    expect(exported[23]).toBe("");
-    expect(exported[24]).toBe("");
-    expect(exported[25]).toBe("нет");
-    expect(exported[26]).toBe("");
-    expect(exported[27]).toBe("");
-    expect(exported[28]).toBe("Объект 1");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Номер удостоверения")]).toBe("У-10421");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Номер личной карточки")]).toBe("ЛК-8821");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Форма выдана")]).toBe("нет");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи формы")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Состояние формы")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Примечание к форме")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Футболка выдана")]).toBe("нет");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Размер футболки")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи футболки")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Объекты")]).toBe("Объект 1");
   });
 
   it("builds uniform issued columns when form is issued", () => {
@@ -75,10 +79,10 @@ describe("guard-registry-export", () => {
       }),
       0,
     );
-    expect(exported[21]).toBe("да");
-    expect(exported[22]).toBe("15.01.2026");
-    expect(exported[23]).toBe("новое");
-    expect(exported[24]).toBe("комплект полный");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Форма выдана")]).toBe("да");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи формы")]).toBe("15.01.2026");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Состояние формы")]).toBe("новое");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Примечание к форме")]).toBe("комплект полный");
   });
 
   it("exports tshirt even when uniform is not issued", () => {
@@ -91,10 +95,10 @@ describe("guard-registry-export", () => {
       }),
       0,
     );
-    expect(exported[21]).toBe("нет");
-    expect(exported[25]).toBe("да");
-    expect(exported[26]).toBe("L");
-    expect(exported[27]).toBe("01.06.2026");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Форма выдана")]).toBe("нет");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Футболка выдана")]).toBe("да");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Размер футболки")]).toBe("L");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи футболки")]).toBe("01.06.2026");
   });
 
   it("exports expired trainee as not trainee", () => {
@@ -122,6 +126,8 @@ describe("guard-registry-export", () => {
         "Футболка выдана",
         "Размер футболки",
         "Дата выдачи футболки",
+        "Номер удостоверения",
+        "Номер личной карточки",
       ]),
     );
     expect(GUARD_REGISTRY_EXPORT_HEADERS.length).toBeGreaterThan(26);

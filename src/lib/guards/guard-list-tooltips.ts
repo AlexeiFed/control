@@ -2,10 +2,13 @@ import { formatDisplayDateFromIso } from "../format/display-date";
 import type { GuardListRow } from "../operations/guards-repository";
 
 export function guardLicenseCellTooltip(guard: GuardListRow): string | undefined {
-  if (guard.licenseType !== "Licensed") return undefined;
+  if (guard.licenseType !== "Licensed" && !guard.licenseNumber) return undefined;
   const parts: string[] = [];
-  if (guard.licenseGrade != null) parts.push(`Разряд ${guard.licenseGrade}`);
-  if (guard.licenseValidUntil) {
+  if (guard.licenseNumber) parts.push(`№ ${guard.licenseNumber}`);
+  if (guard.licenseType === "Licensed" && guard.licenseGrade != null) {
+    parts.push(`Разряд ${guard.licenseGrade}`);
+  }
+  if (guard.licenseType === "Licensed" && guard.licenseValidUntil) {
     parts.push(`действует до ${formatDisplayDateFromIso(guard.licenseValidUntil)}`);
   }
   return parts.length > 0 ? parts.join(", ") : "Данные удостоверения не указаны";

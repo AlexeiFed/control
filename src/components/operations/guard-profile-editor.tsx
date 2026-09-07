@@ -234,6 +234,17 @@ export function GuardProfileEditor({ guard }: GuardProfileEditorProps) {
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
+          <span className="text-app-muted font-medium">Номер удостоверения</span>
+          <input
+            type="text"
+            name="licenseNumber"
+            defaultValue={guard.licenseNumber ?? ""}
+            maxLength={64}
+            autoComplete="off"
+            className={fieldClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
           <span className="text-app-muted font-medium">Разряд</span>
           <select
             name="licenseGrade"
@@ -278,6 +289,17 @@ export function GuardProfileEditor({ guard }: GuardProfileEditorProps) {
           <DateInput
             name="personalCardAssignedOn"
             defaultValue={guard.personalCardAssignedOn ?? ""}
+            className={fieldClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-app-muted font-medium">Номер личной карточки</span>
+          <input
+            type="text"
+            name="personalCardNumber"
+            defaultValue={guard.personalCardNumber ?? ""}
+            maxLength={64}
+            autoComplete="off"
             className={fieldClass}
           />
         </label>

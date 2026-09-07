@@ -21,6 +21,8 @@ type GuardFormComplianceFieldsProps = {
     employedOn?: string | null;
     licenseGrade?: number | null;
     licenseValidUntil?: string | null;
+    licenseNumber?: string | null;
+    personalCardNumber?: string | null;
   };
   /** Компактная сетка формы создания в реестре. */
   compact?: boolean;
@@ -81,6 +83,17 @@ export function GuardFormComplianceFields({
           <option value="Licensed">{guardLicenseLabels.Licensed}</option>
         </select>
       </label>
+      <label className={labelClass}>
+        <span className="text-app-muted">Номер удостоверения</span>
+        <input
+          type="text"
+          name="licenseNumber"
+          defaultValue={defaults?.licenseNumber ?? ""}
+          maxLength={64}
+          autoComplete="off"
+          className={inputClass}
+        />
+      </label>
       {licenseType === "Licensed" ? (
         <>
           <label className={labelClass}>
@@ -133,6 +146,17 @@ export function GuardFormComplianceFields({
         <DateInput
           name="personalCardAssignedOn"
           defaultValue={defaults?.personalCardAssignedOn ?? ""}
+          className={inputClass}
+        />
+      </label>
+      <label className={labelClass}>
+        <span className="text-app-muted">Номер личной карточки</span>
+        <input
+          type="text"
+          name="personalCardNumber"
+          defaultValue={defaults?.personalCardNumber ?? ""}
+          maxLength={64}
+          autoComplete="off"
           className={inputClass}
         />
       </label>

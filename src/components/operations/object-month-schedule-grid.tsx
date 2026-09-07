@@ -1367,10 +1367,26 @@ export function ObjectMonthScheduleGrid({
             {posts.length > 0 ? (
               posts.map((post) => (
                 <Fragment key={post.id}>
-                  <tr>
+                  <tr className="sm:hidden">
+                    <td
+                      className="schedule-sticky-col border border-app-border p-1.5 text-left text-sm font-bold text-app-text"
+                      style={{ backgroundColor: designTokens.color.surfaceElevated }}
+                    >
+                      <span className="break-words">{post.name}</span>
+                    </td>
+                    {days.map((d) => (
+                      <td
+                        key={`${post.id}-head-${d}`}
+                        className="border border-app-border"
+                        style={{ backgroundColor: designTokens.color.surfaceElevated }}
+                      />
+                    ))}
+                  </tr>
+                  <tr className="hidden sm:table-row">
                     <td
                       colSpan={days.length + 1}
-                      className="bg-app-elevated/60 p-2 text-center text-sm font-bold text-app-text"
+                      className="p-2 text-center text-sm font-bold text-app-text"
+                      style={{ backgroundColor: designTokens.color.surfaceElevated }}
                     >
                       {post.name}
                     </td>

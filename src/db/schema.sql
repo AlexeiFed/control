@@ -179,6 +179,8 @@ ALTER TABLE guards ADD COLUMN IF NOT EXISTS license_valid_until date;
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS dismissed_on date;
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS birth_date date;
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS middle_name text NOT NULL DEFAULT '';
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS license_number text;
+ALTER TABLE guards ADD COLUMN IF NOT EXISTS personal_card_number text;
 
 ALTER TABLE guards DROP CONSTRAINT IF EXISTS guards_position_check;
 ALTER TABLE guards ADD CONSTRAINT guards_position_check CHECK (position IN ('ShiftLead', 'Guard', 'Curator'));

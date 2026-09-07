@@ -149,6 +149,8 @@ sudo -u "${REMOTE_APP_USER}" bash -lc "
   fi
   echo 'deploy: миграции (db:migrate)...'
   npm run db:migrate
+  echo 'deploy: 20260907 guards.license_number / personal_card_number...'
+  psql \"\$DATABASE_URL\" -v ON_ERROR_STOP=1 -f src/db/migrations/20260907_guard_license_personal_card_numbers.sql
   # Idempotent repair: на случай «уже в schema_migrations, но ALTER на сервере не выполнился»
   if [[ -f scripts/idempotent-migrations.txt ]]; then
     echo 'deploy: idempotent repair (psql)...'

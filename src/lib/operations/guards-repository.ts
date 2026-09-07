@@ -17,27 +17,38 @@ import { toDateIsoKhabarovsk } from "../format/display-date";
 import type { UniformCondition } from "../format/uniform";
 import { normalizeTshirtReturn, normalizeUniformReturn } from "../format/uniform";
 
+/** Кэш колонок `guards` (один information_schema на процесс). */
+let guardsColumnSetCache: Set<string> | null = null;
+let guardsColumnSetPromise: Promise<Set<string>> | null = null;
+
+async function loadGuardsColumnSet(): Promise<Set<string>> {
+  if (guardsColumnSetCache) return guardsColumnSetCache;
+  if (!guardsColumnSetPromise) {
+    guardsColumnSetPromise = (async () => {
+      try {
+        const rows = await query<{ column_name: string }>(
+          `
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'guards'
+          `,
+        );
+        guardsColumnSetCache = new Set(rows.map((row) => row.column_name));
+      } catch {
+        guardsColumnSetCache = new Set();
+      }
+      return guardsColumnSetCache;
+    })();
+  }
+  return guardsColumnSetPromise;
+}
+
 /** Кэш наличия колонки `guards.phone` (старые локальные БД без миграций). */
 let guardsHasPhoneColumnCache: boolean | undefined;
 
 async function resolveGuardsHasPhoneColumn(): Promise<boolean> {
   if (guardsHasPhoneColumnCache !== undefined) return guardsHasPhoneColumnCache;
-  try {
-    const rows = await query<{ exists: boolean }>(
-      `
-        SELECT EXISTS (
-          SELECT 1
-          FROM information_schema.columns
-          WHERE table_schema = 'public'
-            AND table_name = 'guards'
-            AND column_name = 'phone'
-        ) AS exists
-      `,
-    );
-    guardsHasPhoneColumnCache = rows[0]?.exists === true;
-  } catch {
-    guardsHasPhoneColumnCache = false;
-  }
+  guardsHasPhoneColumnCache = (await loadGuardsColumnSet()).has("phone");
   return guardsHasPhoneColumnCache;
 }
 
@@ -57,22 +68,7 @@ let guardsHasCarColumnCache: boolean | undefined;
 
 async function resolveGuardsHasCarColumn(): Promise<boolean> {
   if (guardsHasCarColumnCache !== undefined) return guardsHasCarColumnCache;
-  try {
-    const rows = await query<{ exists: boolean }>(
-      `
-        SELECT EXISTS (
-          SELECT 1
-          FROM information_schema.columns
-          WHERE table_schema = 'public'
-            AND table_name = 'guards'
-            AND column_name = 'has_car'
-        ) AS exists
-      `,
-    );
-    guardsHasCarColumnCache = rows[0]?.exists === true;
-  } catch {
-    guardsHasCarColumnCache = false;
-  }
+  guardsHasCarColumnCache = (await loadGuardsColumnSet()).has("has_car");
   return guardsHasCarColumnCache;
 }
 
@@ -96,26 +92,9 @@ const guardOptionalColumnCache = new Map<string, boolean>();
 async function resolveGuardsOptionalColumn(columnName: string): Promise<boolean> {
   const cached = guardOptionalColumnCache.get(columnName);
   if (cached !== undefined) return cached;
-  try {
-    const rows = await query<{ exists: boolean }>(
-      `
-        SELECT EXISTS (
-          SELECT 1
-          FROM information_schema.columns
-          WHERE table_schema = 'public'
-            AND table_name = 'guards'
-            AND column_name = $1
-        ) AS exists
-      `,
-      [columnName],
-    );
-    const exists = rows[0]?.exists === true;
-    guardOptionalColumnCache.set(columnName, exists);
-    return exists;
-  } catch {
-    guardOptionalColumnCache.set(columnName, false);
-    return false;
-  }
+  const exists = (await loadGuardsColumnSet()).has(columnName);
+  guardOptionalColumnCache.set(columnName, exists);
+  return exists;
 }
 
 export async function getGuardsContactPhoneSelect(
@@ -250,11 +229,13 @@ export type GuardListRow = {
   licenseType: GuardLicenseType | null;
   licenseGrade: number | null;
   licenseValidUntil: string | null;
+  licenseNumber: string | null;
   employmentType: GuardEmploymentType;
   employedOn: string | null;
   medicalCommissionPassedOn: string | null;
   periodicCheckPassedOn: string | null;
   personalCardAssignedOn: string | null;
+  personalCardNumber: string | null;
   isTrainee: boolean;
   traineeUntil: string | null;
   hasCar: boolean;
@@ -291,11 +272,13 @@ type GuardRow = {
   license_type: string | null;
   license_grade: number | null;
   license_valid_until: string | null;
+  license_number: string | null;
   employment_type: GuardEmploymentType;
   employed_on: string | null;
   medical_commission_passed_on: string | null;
   periodic_check_passed_on: string | null;
   personal_card_assigned_on: string | null;
+  personal_card_number: string | null;
   is_trainee: boolean;
   trainee_until: string | null;
   has_car: boolean;
@@ -312,6 +295,8 @@ export type GuardComplianceInput = {
   employedOn: string | null;
   licenseGrade: number | null;
   licenseValidUntil: string | null;
+  licenseNumber: string | null;
+  personalCardNumber: string | null;
 };
 
 export const emptyGuardCompliance: GuardComplianceInput = {
@@ -321,6 +306,8 @@ export const emptyGuardCompliance: GuardComplianceInput = {
   employedOn: null,
   licenseGrade: null,
   licenseValidUntil: null,
+  licenseNumber: null,
+  personalCardNumber: null,
 };
 
 export type CreateGuardInput = {
@@ -560,6 +547,20 @@ async function saveGuardComplianceFields(
       licenseType === "Licensed" ? compliance.licenseValidUntil : null,
     ],
   );
+
+  const hasDocumentNumbers = await resolveGuardsOptionalColumn("license_number");
+  if (hasDocumentNumbers) {
+    await query(
+      `
+        UPDATE guards
+        SET
+          license_number = $2,
+          personal_card_number = $3
+        WHERE id = $1
+      `,
+      [guardId, compliance.licenseNumber, compliance.personalCardNumber],
+    );
+  }
 }
 
 export async function listGuardsForPeriodicCheckReminders(): Promise<PeriodicCheckReminderRow[]> {
@@ -982,6 +983,13 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
   const personalCardSel = hasCompliance
     ? "g.personal_card_assigned_on::text AS personal_card_assigned_on"
     : "NULL::text AS personal_card_assigned_on";
+  const hasDocumentNumbers = await resolveGuardsOptionalColumn("license_number");
+  const licenseNumberSel = hasDocumentNumbers
+    ? "g.license_number AS license_number"
+    : "NULL::text AS license_number";
+  const personalCardNumberSel = hasDocumentNumbers
+    ? "g.personal_card_number AS personal_card_number"
+    : "NULL::text AS personal_card_number";
   const hasDismissedOn = await resolveGuardsOptionalColumn("dismissed_on");
   const dismissedOnSel = hasDismissedOn
     ? "g.dismissed_on::text AS dismissed_on"
@@ -1037,6 +1045,8 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${medicalCommissionSel},
           ${periodicCheckSel},
           ${personalCardSel},
+          ${licenseNumberSel},
+          ${personalCardNumberSel},
           g.is_trainee,
           g.trainee_until::text AS trainee_until,
           ${hasCarSel},
@@ -1089,6 +1099,8 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${medicalCommissionSel},
           ${periodicCheckSel},
           ${personalCardSel},
+          ${licenseNumberSel},
+          ${personalCardNumberSel},
           g.is_trainee,
           g.trainee_until::text AS trainee_until,
           ${hasCarSel},
@@ -1966,6 +1978,8 @@ export type GuardDetails = {
   employedOn: string | null;
   licenseGrade: number | null;
   licenseValidUntil: string | null;
+  licenseNumber: string | null;
+  personalCardNumber: string | null;
   objects: Array<{ id: string; name: string }>;
 };
 
@@ -1982,6 +1996,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     hasCarSel,
     hasCompliance,
     hasDismissedOn,
+    hasDocumentNumbers,
   ] = await Promise.all([
     getGuardsPhoneSelect("aliased"),
     getGuardsContactPhoneSelect("aliased"),
@@ -1994,6 +2009,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     getGuardsHasCarSelect("aliased"),
     resolveGuardsOptionalColumn("periodic_check_passed_on"),
     resolveGuardsOptionalColumn("dismissed_on"),
+    resolveGuardsOptionalColumn("license_number"),
   ]);
   const medicalCommissionSel = hasCompliance
     ? "g.medical_commission_passed_on::text AS medical_commission_passed_on"
@@ -2013,6 +2029,12 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
   const licenseValidSel = hasCompliance
     ? "g.license_valid_until::text AS license_valid_until"
     : "NULL::text AS license_valid_until";
+  const licenseNumberSel = hasDocumentNumbers
+    ? "g.license_number AS license_number"
+    : "NULL::text AS license_number";
+  const personalCardNumberSel = hasDocumentNumbers
+    ? "g.personal_card_number AS personal_card_number"
+    : "NULL::text AS personal_card_number";
   const dismissedOnSel = hasDismissedOn
     ? "g.dismissed_on::text AS dismissed_on"
     : "NULL::text AS dismissed_on";
@@ -2049,6 +2071,8 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     employed_on: string | null;
     license_grade: number | null;
     license_valid_until: string | null;
+    license_number: string | null;
+    personal_card_number: string | null;
     object_id: string | null;
     object_name: string | null;
   }>(
@@ -2079,6 +2103,8 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
         ${employedOnSel},
         ${licenseGradeSel},
         ${licenseValidSel},
+        ${licenseNumberSel},
+        ${personalCardNumberSel},
         so.id AS object_id,
         so.name AS object_name
       FROM guards g
@@ -2131,6 +2157,8 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     employedOn: first.employed_on,
     licenseGrade: first.license_grade,
     licenseValidUntil: first.license_valid_until,
+    licenseNumber: first.license_number,
+    personalCardNumber: first.personal_card_number,
     objects: rows
       .filter((row) => row.object_id && row.object_name)
       .map((row) => ({ id: row.object_id as string, name: row.object_name as string })),
@@ -2280,11 +2308,13 @@ function mapGuardRow(row: GuardRow): GuardListRow {
     licenseType: (row.license_type as GuardLicenseType | null) ?? null,
     licenseGrade: row.license_grade ?? null,
     licenseValidUntil: row.license_valid_until,
+    licenseNumber: row.license_number,
     employmentType: row.employment_type ?? "Unemployed",
     employedOn: row.employed_on,
     medicalCommissionPassedOn: row.medical_commission_passed_on,
     periodicCheckPassedOn: row.periodic_check_passed_on,
     personalCardAssignedOn: row.personal_card_assigned_on,
+    personalCardNumber: row.personal_card_number,
     isTrainee: row.is_trainee ?? false,
     traineeUntil,
     hasCar: row.has_car ?? false,

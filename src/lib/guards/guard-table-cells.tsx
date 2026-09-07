@@ -44,6 +44,27 @@ export function formatGuardTableDate(iso: string | null | undefined): string {
   return iso ? formatDisplayDateFromIso(iso) : "—";
 }
 
+/** Основное значение + номер второй строкой (Уд. / ЛК). */
+export function GuardTableStackedNumber({
+  primary,
+  number,
+  title,
+}: {
+  primary: ReactNode;
+  number: string | null | undefined;
+  title?: string;
+}): ReactNode {
+  const trimmed = number?.trim() || "";
+  return (
+    <span className="inline-flex flex-col items-center gap-0.5 leading-tight" title={title}>
+      <span>{primary}</span>
+      {trimmed ? (
+        <span className="text-[11px] font-medium tabular-nums text-app-text">{trimmed}</span>
+      ) : null}
+    </span>
+  );
+}
+
 export function guardTableLicenseGrade(guard: GuardListRow): string {
   if (guard.licenseType !== "Licensed") return "—";
   return guard.licenseGrade != null ? String(guard.licenseGrade) : "—";

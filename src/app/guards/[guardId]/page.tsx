@@ -259,6 +259,9 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                 {guardLicenseLabels[guard.licenseType ?? "None"]}
               </span>
 
+              <span className="text-app-muted">Номер удостоверения:</span>
+              <span className="font-semibold text-app-text">{guard.licenseNumber || "—"}</span>
+
               <span className="text-app-muted">Разряд:</span>
               <span className="font-semibold text-app-text">
                 {guard.licenseType === "Licensed" && guard.licenseGrade != null
@@ -295,6 +298,9 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                   ? formatDisplayDateFromIso(guard.personalCardAssignedOn)
                   : "Нет"}
               </span>
+
+              <span className="text-app-muted">Номер личной карточки:</span>
+              <span className="font-semibold text-app-text">{guard.personalCardNumber || "—"}</span>
 
               <span className="text-app-muted">Стажёр:</span>
               <div className="flex flex-col items-start">

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { assertPermission } from "../../lib/auth/rbac";
 import { requireSession } from "../../lib/auth/session";
 import { isValidGuardLicenseForPosition } from "../../lib/scheduling/guard-profile";
-import type { GuardLicenseType, GuardPosition } from "../../lib/scheduling/types";
+import type { GuardEmploymentType, GuardLicenseType, GuardPosition } from "../../lib/scheduling/types";
 import { isValidRuPhone, normalizeRuPhoneForStorage } from "../../lib/format/phone-ru";
 import {
   isValidUniformSizeStored,
@@ -188,6 +188,8 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
       employedOn: formData.get("employedOn"),
       licenseGrade: formData.get("licenseGrade"),
       licenseValidUntil: formData.get("licenseValidUntil"),
+      licenseNumber: formData.get("licenseNumber"),
+      personalCardNumber: formData.get("personalCardNumber"),
       birthDate: formData.get("birthDate"),
     };
 
@@ -253,6 +255,8 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
           employedOn: input.employedOn,
           licenseGrade: input.licenseGrade,
           licenseValidUntil: input.licenseValidUntil,
+          licenseNumber: input.licenseNumber,
+          personalCardNumber: input.personalCardNumber,
         },
       });
     } catch (error) {
@@ -292,6 +296,42 @@ function isUniqueViolation(error: unknown): boolean {
 
 function formatZodError(error: z.ZodError): string {
   return error.issues.map((issue) => issue.message).join("; ");
+}
+
+function isoKey(value: string | null | undefined): string {
+  return value?.trim() || "";
+}
+
+function profileSaveAffectsTimesheet(
+  existing: {
+    licenseType: GuardLicenseType | null;
+    employmentType: GuardEmploymentType;
+    personalCardAssignedOn: string | null;
+    employedOn: string | null;
+  },
+  next: {
+    licenseType: GuardLicenseType;
+    employmentType: GuardEmploymentType;
+    personalCardAssignedOn: string | null;
+    employedOn: string | null;
+  },
+): boolean {
+  return (
+    (existing.licenseType ?? "None") !== next.licenseType ||
+    existing.employmentType !== next.employmentType ||
+    isoKey(existing.personalCardAssignedOn) !== isoKey(next.personalCardAssignedOn) ||
+    isoKey(existing.employedOn) !== isoKey(next.employedOn)
+  );
+}
+
+function profileSaveAffectsComplianceAlerts(
+  existing: { medicalCommissionPassedOn: string | null; periodicCheckPassedOn: string | null },
+  next: { medicalCommissionPassedOn: string | null; periodicCheckPassedOn: string | null },
+): boolean {
+  return (
+    isoKey(existing.medicalCommissionPassedOn) !== isoKey(next.medicalCommissionPassedOn) ||
+    isoKey(existing.periodicCheckPassedOn) !== isoKey(next.periodicCheckPassedOn)
+  );
 }
 
 export type UpdateGuardProfileResult = { ok: true } | { ok: false; error: string };
@@ -606,6 +646,8 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
       employedOn: formData.get("employedOn"),
       licenseGrade: formData.get("licenseGrade"),
       licenseValidUntil: formData.get("licenseValidUntil"),
+      licenseNumber: formData.get("licenseNumber"),
+      personalCardNumber: formData.get("personalCardNumber"),
       birthDate: formData.get("birthDate"),
     };
 
@@ -704,16 +746,32 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
         employedOn: input.employedOn,
         licenseGrade: input.licenseGrade,
         licenseValidUntil: input.licenseValidUntil,
+        licenseNumber: input.licenseNumber,
+        personalCardNumber: input.personalCardNumber,
       },
     });
-    const { backfillTimesheetEntriesForGuardSafe } = await import(
-      "../../lib/accounting/sync-timesheet-entry"
-    );
-    await backfillTimesheetEntriesForGuardSafe(input.guardId);
+    const timesheetAffected = profileSaveAffectsTimesheet(existing, {
+      licenseType,
+      employmentType,
+      personalCardAssignedOn: input.personalCardAssignedOn,
+      employedOn: input.employedOn,
+    });
+    const complianceAlertsAffected = profileSaveAffectsComplianceAlerts(existing, {
+      medicalCommissionPassedOn: input.medicalCommissionPassedOn,
+      periodicCheckPassedOn: input.periodicCheckPassedOn,
+    });
+    if (timesheetAffected) {
+      const { backfillTimesheetEntriesForGuardSafe } = await import(
+        "../../lib/accounting/sync-timesheet-entry"
+      );
+      await backfillTimesheetEntriesForGuardSafe(input.guardId);
+      revalidateTag("timesheet", "max");
+    }
     revalidatePath("/guards");
     revalidatePath(`/guards/${input.guardId}`);
-    revalidateTag("timesheet", "max");
-    revalidateGuardComplianceAlerts();
+    if (complianceAlertsAffected) {
+      revalidateGuardComplianceAlerts();
+    }
     return { ok: true };
   } catch (error) {
     if (error instanceof z.ZodError) {
