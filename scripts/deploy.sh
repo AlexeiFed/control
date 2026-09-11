@@ -168,8 +168,15 @@ sudo -u "${REMOTE_APP_USER}" bash -lc "
   export NODE_OPTIONS=\"--max-old-space-size=${NODE_MEMORY_MB}\"
   echo 'deploy: next build (после Route list может идти Collecting build traces 1–3 мин без вывода)...'
   npm run build:webpack
+  # Heap сборки не должен утекать в prune: 768M на 1ГБ VPS уводит prune в swap/сеть.
+  unset NODE_OPTIONS
   echo 'deploy: npm prune...'
-  npm prune --omit=dev
+  # --offline: иначе npm лезет в registry и может висеть минутами без вывода.
+  if timeout 90 npm prune --omit=dev --offline --no-audit --no-fund; then
+    echo 'deploy: prune ok'
+  else
+    echo 'deploy: prune пропущен (таймаут/офлайн) — не критично, .next уже собран'
+  fi
   echo 'deploy: сборка завершена'
 "
 

@@ -48,6 +48,7 @@ import {
   partialAttendanceWindow,
   shiftCoverageMinutes,
 } from "../../lib/scheduling/shift-attendance";
+import { sumMonthScheduleCoverageHours } from "../../lib/scheduling/schedule-grid-hours";
 import { incidentCategoryLabels } from "../../lib/operations/status-labels";
 import { scheduleRowHideKey, shiftMatchesPost } from "../../lib/scheduling/shift-post-display";
 import { scheduleShiftColumnDateIso } from "../../lib/scheduling/operational-day-timeline";
@@ -100,6 +101,14 @@ function formatDurationRuHours(start: Date, end: Date): string {
   if (!Number.isFinite(rounded) || rounded <= 0) return "0ч";
   if (rounded === Math.trunc(rounded)) return `${Math.trunc(rounded)}ч`;
   return `${String(rounded).replace(".", ",")}ч`;
+}
+
+/** Часы для ячеек/итога: 24, 12,5. */
+function formatHoursAmount(hours: number): string {
+  const rounded = Math.round(hours * 10) / 10;
+  if (!Number.isFinite(rounded) || rounded <= 0) return "0";
+  if (rounded === Math.trunc(rounded)) return String(Math.trunc(rounded));
+  return String(rounded).replace(".", ",");
 }
 
 export type ScheduleGridGuardRow = {
@@ -465,6 +474,20 @@ export function ObjectMonthScheduleGrid({
     return ids;
   }, [shiftsByGuardAndDay]);
 
+  const visibleMonthDateIsos = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of days) {
+      const iso = dayColumnMetaByDay.get(d)?.dateIso;
+      if (iso) set.add(iso);
+    }
+    return set;
+  }, [days, dayColumnMetaByDay]);
+
+  const monthTotalHours = useMemo(
+    () => sumMonthScheduleCoverageHours(monthShifts, visibleMonthDateIsos, operationalDayStartTime),
+    [monthShifts, visibleMonthDateIsos, operationalDayStartTime],
+  );
+
   function expectedForCell(dateIso: string, postId: string | null): ExpectedShifts {
     if (postId && expectedShiftsByPostId?.[postId]?.[dateIso]) {
       return expectedShiftsByPostId[postId][dateIso];
@@ -717,6 +740,44 @@ export function ObjectMonthScheduleGrid({
                   </span>
                 ) : null}
               </div>
+            </td>
+          );
+        })}
+      </tr>
+    );
+  }
+
+  function renderDayHoursRow(postId: string | null) {
+    return (
+      <tr className="bg-app-elevated/25 border-b border-app-border">
+        <td className="schedule-sticky-col border border-app-border p-1.5 font-bold text-app-text text-[9px] uppercase tracking-wider sm:p-2 sm:text-[10px]">
+          <span className="sm:hidden">Всего ч</span>
+          <span className="hidden sm:inline">Всего часов</span>
+        </td>
+        {days.map((d) => {
+          const dayShifts = shiftsOnDayForPost(d, postId);
+          const totalMinutes = dayShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
+          const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
+          const colMeta = dayColumnMetaByDay.get(d);
+          const empty = totalHours <= 0;
+          return (
+            <td
+              key={`hours-${postId ?? "obj"}-${d}`}
+              data-schedule-col={d}
+              className="border border-app-border p-0.5 text-center sm:p-1 transition-[background-color] duration-75"
+              style={mergeScheduleCellStyles(
+                colMeta ? buildScheduleDayColumnStyle(colMeta) : undefined,
+                scheduleGridColumnHoverStyle(gridHover, d),
+              )}
+              title={empty ? "Нет смен" : `Всего часов за день, все виды смен: ${formatHoursAmount(totalHours)} ч`}
+            >
+              <span
+                className={`text-[10px] font-semibold tabular-nums leading-tight sm:text-[11px] ${
+                  empty ? "text-app-muted" : "text-app-text"
+                }`}
+              >
+                {empty ? "—" : `${formatHoursAmount(totalHours)}ч`}
+              </span>
             </td>
           );
         })}
@@ -1227,7 +1288,10 @@ export function ObjectMonthScheduleGrid({
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 rounded-button border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between" style={{ borderColor: `${designTokens.color.accent.primary}44`, backgroundColor: `${designTokens.color.accent.primary}08` }}>
+      <div
+        className="mb-4 grid grid-cols-1 gap-3 rounded-button border px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end"
+        style={{ borderColor: `${designTokens.color.accent.primary}44`, backgroundColor: `${designTokens.color.accent.primary}08` }}
+      >
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-muted">
             Операционные сутки
@@ -1236,12 +1300,29 @@ export function ObjectMonthScheduleGrid({
             {operationalDayDraft} – {operationalDayDraft} (+1)
           </p>
           <p className="mt-1 text-[11px] leading-snug text-app-muted">
-            Суточная смена и шкала для {monthLabel}. Смена якоря двигает время стояния, дни не прыгают.
+            Рабочие сутки объекта за {monthLabel} идут с {operationalDayDraft} до {operationalDayDraft} следующего дня.
+            Смены остаются в тех же числах таблицы. Если поменять время начала суток, даты не сдвинутся — изменится
+            только шкала времени смены.
+          </p>
+        </div>
+
+        <div className="flex items-baseline justify-between gap-3 border-t border-app-border/60 pt-3 sm:ml-8 sm:mr-4 sm:block sm:border-0 sm:pt-0 sm:text-left">
+          <p
+            className="text-xs font-semibold uppercase tracking-[0.14em]"
+            style={{ color: designTokens.color.accent.primary }}
+          >
+            Итого за месяц
+          </p>
+          <p
+            className="text-2xl font-bold tabular-nums leading-none sm:mt-1"
+            style={{ color: designTokens.color.accent.primary }}
+          >
+            Итого: {formatHoursAmount(monthTotalHours)} ч
           </p>
         </div>
 
         {canManageOperationalDay ? (
-          <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2 sm:justify-self-end">
             <div className="grid gap-1">
               <label htmlFor={`operational-day-${objectId}`} className="text-[10px] font-semibold uppercase tracking-wide text-app-muted">
                 Начало суток
@@ -1286,7 +1367,7 @@ export function ObjectMonthScheduleGrid({
             </Button>
           </div>
         ) : (
-          <p className="text-xs text-app-muted">Изменение — у администратора или планировщика.</p>
+          <p className="text-xs text-app-muted sm:justify-self-end">Изменение — у администратора или планировщика.</p>
         )}
       </div>
 
@@ -1361,7 +1442,12 @@ export function ObjectMonthScheduleGrid({
                 );
               })}
             </tr>
-            {posts.length === 0 ? renderPlanRow(monthPlan, null) : null}
+            {posts.length === 0 ? (
+              <>
+                {renderPlanRow(monthPlan, null)}
+                {renderDayHoursRow(null)}
+              </>
+            ) : null}
           </thead>
           <tbody>
             {posts.length > 0 ? (
@@ -1393,6 +1479,7 @@ export function ObjectMonthScheduleGrid({
                   </tr>
                   {renderPostDateRow(post.id)}
                   {renderPlanRow(monthPlanByPost?.[post.id] ?? monthPlan, post.id)}
+                  {renderDayHoursRow(post.id)}
                   {renderGuardsRows(post.id)}
                 </Fragment>
               ))
