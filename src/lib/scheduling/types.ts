@@ -1,6 +1,12 @@
 export type GuardStatus = "Active" | "Sick" | "OnVacation" | "Inactive" | "Dismissed";
 
-export type GuardPosition = "ShiftLead" | "Guard" | "Curator";
+export const GUARD_POSITIONS = ["Guard", "SeniorGuard", "ShiftLead", "Curator"] as const;
+export type GuardPosition = (typeof GUARD_POSITIONS)[number];
+
+export function isGuardPosition(value: string): value is GuardPosition {
+  return (GUARD_POSITIONS as readonly string[]).includes(value);
+}
+
 export type GuardLicenseType = "None" | "Licensed";
 export type GuardEmploymentType = "Employed" | "Unemployed";
 export type ShiftKind = "Regular" | "Reinforcement" | "RapidResponse" | "ShiftLead";

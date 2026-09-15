@@ -6,7 +6,7 @@ import type { GuardRegistryTableFilters, YesNoFilter } from "../../lib/guards/gu
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
 import {
   guardLicenseLabels,
-  guardPositionLabels,
+  guardPositionOptions,
   guardStatusLabels,
   guardStatusOptions,
 } from "../../lib/operations/status-labels";
@@ -68,9 +68,11 @@ export function GuardRegistryTableFiltersPanel({
             className={fieldClass}
           >
             <option value="">Все</option>
-            <option value="Guard">{guardPositionLabels.Guard}</option>
-            <option value="ShiftLead">{guardPositionLabels.ShiftLead}</option>
-            <option value="Curator">{guardPositionLabels.Curator}</option>
+            {guardPositionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </FilterCell>
 

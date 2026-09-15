@@ -55,7 +55,7 @@ import {
   revalidateGuardComplianceAlerts,
 } from "../../lib/scheduling/revalidate-after-mutation";
 
-const positionSchema = z.enum(["ShiftLead", "Guard", "Curator"]);
+const positionSchema = z.enum(["Guard", "SeniorGuard", "ShiftLead", "Curator"]);
 const employmentSchema = z.enum(["Employed", "Unemployed"]);
 const licenseSchema = z.enum(["None", "Licensed"]);
 

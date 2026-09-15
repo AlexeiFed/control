@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { assignGuardProfilePeriodAction } from "../../app/guards/actions";
 import { designTokens } from "../../lib/design-tokens";
-import { guardPositionLabels } from "../../lib/operations/status-labels";
+import { guardPositionOptions } from "../../lib/operations/status-labels";
 import { Button } from "../ui/button";
 import { DateInput } from "../ui/date-input";
 import { ClipboardList } from "lucide-react";
@@ -60,9 +60,11 @@ export function GuardServiceRecordSection({ guardId }: GuardServiceRecordSection
             defaultValue="Guard"
             className="rounded-button border border-app-border bg-app-bg px-3 py-2 outline-none focus:border-accent-primary"
           >
-            <option value="Guard">{guardPositionLabels.Guard}</option>
-            <option value="ShiftLead">{guardPositionLabels.ShiftLead}</option>
-            <option value="Curator">{guardPositionLabels.Curator}</option>
+            {guardPositionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
 

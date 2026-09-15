@@ -183,7 +183,7 @@ ALTER TABLE guards ADD COLUMN IF NOT EXISTS license_number text;
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS personal_card_number text;
 
 ALTER TABLE guards DROP CONSTRAINT IF EXISTS guards_position_check;
-ALTER TABLE guards ADD CONSTRAINT guards_position_check CHECK (position IN ('ShiftLead', 'Guard', 'Curator'));
+ALTER TABLE guards ADD CONSTRAINT guards_position_check CHECK (position IN ('ShiftLead', 'Guard', 'Curator', 'SeniorGuard'));
 
 ALTER TABLE guards DROP CONSTRAINT IF EXISTS guards_employment_type_check;
 ALTER TABLE guards ADD CONSTRAINT guards_employment_type_check CHECK (employment_type IN ('Employed', 'Unemployed'));
@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS object_rate_rules (
   shift_kind text CHECK (shift_kind IS NULL OR shift_kind IN ('Regular', 'Reinforcement', 'RapidResponse', 'ShiftLead')),
   starts_at time,
   ends_at time,
-  position text CHECK (position IS NULL OR position IN ('ShiftLead', 'Guard', 'Curator')),
+  position text CHECK (position IS NULL OR position IN ('ShiftLead', 'Guard', 'Curator', 'SeniorGuard')),
   license_type text CHECK (license_type IS NULL OR license_type IN ('None', 'Licensed')),
   employment_type text CHECK (employment_type IS NULL OR employment_type IN ('Employed', 'Unemployed')),
   is_trainee boolean,

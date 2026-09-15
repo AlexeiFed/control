@@ -30,7 +30,14 @@ describe("buildTimesheetGuardPositionLabel", () => {
         employmentType: "Unemployed",
         personalCardAssignedOn: "2026-02-01",
       }),
-    ).toBe("куратор, ЛК");
+      ).toBe("куратор, ЛК");
+    expect(
+      buildTimesheetGuardPositionLabel({
+        position: "SeniorGuard",
+        employmentType: "Employed",
+        personalCardAssignedOn: null,
+      }),
+    ).toBe("старший охранник, ТУ");
   });
 });
 

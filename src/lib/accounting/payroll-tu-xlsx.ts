@@ -174,6 +174,7 @@ function writeSection(
         excelRow,
         cols.firstHalfCol,
         person.salaryFirstHalfRub > 0 ? person.salaryFirstHalfRub : "",
+        { integer: true },
       );
     }
     if (cols.secondHalfCol > 0) {
@@ -181,6 +182,7 @@ function writeSection(
         excelRow,
         cols.secondHalfCol,
         person.salarySecondHalfRub > 0 ? person.salarySecondHalfRub : "",
+        { integer: true },
       );
     }
     setSummaryCell(excelRow, cols.totalHoursCol, person.totalHours > 0 ? person.totalHours : "");
@@ -193,11 +195,19 @@ function writeSection(
   return rowIndex;
 }
 
-function setSummaryCell(row: ExcelJS.Row, col: number, value: number | ""): void {
+function setSummaryCell(
+  row: ExcelJS.Row,
+  col: number,
+  value: number | "",
+  options?: { integer?: boolean },
+): void {
   const cell = row.getCell(col);
   cell.value = value;
   cell.font = { size: 10 };
   cell.alignment = { horizontal: "center", vertical: "middle" };
+  if (options?.integer && typeof value === "number") {
+    cell.numFmt = "0";
+  }
   applyTableBorder(cell);
 }
 

@@ -93,6 +93,9 @@ export async function buildPayrollStatementWorkbook(
           };
         } else if (colIndex >= 2 && colIndex <= 5) {
           cell.alignment = { horizontal: "right", vertical: "middle", wrapText: false };
+          if (colIndex !== 4 && typeof value === "number") {
+            cell.numFmt = "0";
+          }
         } else {
           cell.alignment = { horizontal: "left", vertical: "middle", wrapText: false };
         }

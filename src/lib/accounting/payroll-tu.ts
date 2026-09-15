@@ -1,4 +1,5 @@
 import { formatDisplayDateFromIso, getDaysInMonth } from "../format/display-date";
+import { floorCentsToRub, floorRub } from "../payroll/floor-rub";
 import {
   dateIsoBelongsToHalf,
   dateIsoInPayrollMonth,
@@ -114,8 +115,8 @@ export function buildPayrollTuSalaryByGuardId(input: {
   const result = new Map<string, { firstHalfRub: number; secondHalfRub: number }>();
   for (const [guardId, totals] of centsByGuard) {
     result.set(guardId, {
-      firstHalfRub: roundRub(totals.first / 100),
-      secondHalfRub: roundRub(totals.second / 100),
+      firstHalfRub: floorCentsToRub(totals.first),
+      secondHalfRub: floorCentsToRub(totals.second),
     });
   }
   return result;
@@ -272,8 +273,8 @@ export function buildPayrollTuRow(
     employedOn,
     days,
     workDaysCount,
-    salaryFirstHalfRub: roundRub(person.salaryFirstHalfRub ?? 0),
-    salarySecondHalfRub: roundRub(person.salarySecondHalfRub ?? 0),
+    salaryFirstHalfRub: floorRub(person.salaryFirstHalfRub ?? 0),
+    salarySecondHalfRub: floorRub(person.salarySecondHalfRub ?? 0),
     totalHours: round2(totalHours),
   };
 }
@@ -427,9 +428,9 @@ export function buildPayrollTuPreview(data: PayrollTuData): PayrollTuPreview {
   }
 
   return {
-    firstHalfTotalRub: roundRub(firstHalfTotalRub),
-    monthTotalRub: roundRub(monthTotalRub),
-    secondHalfTotalRub: roundRub(monthTotalRub - firstHalfTotalRub),
+    firstHalfTotalRub: floorRub(firstHalfTotalRub),
+    monthTotalRub: floorRub(monthTotalRub),
+    secondHalfTotalRub: floorRub(monthTotalRub - firstHalfTotalRub),
     peopleCount: rows.length,
   };
 }
@@ -439,9 +440,5 @@ function monthKeyFromParts(year: number, monthIndex0: number): string {
 }
 
 function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-function roundRub(value: number): number {
   return Math.round(value * 100) / 100;
 }

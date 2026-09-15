@@ -35,10 +35,18 @@ export const guardStatusOptions: Array<{ value: GuardStatus; label: string }> = 
 ];
 
 export const guardPositionLabels: Record<GuardPosition, string> = {
-  ShiftLead: "Старший смены",
   Guard: "Охранник",
+  SeniorGuard: "Старший охранник",
+  ShiftLead: "Старший смены",
   Curator: "Куратор",
 };
+
+export const guardPositionOptions: Array<{ value: GuardPosition; label: string }> = [
+  { value: "Guard", label: guardPositionLabels.Guard },
+  { value: "SeniorGuard", label: guardPositionLabels.SeniorGuard },
+  { value: "ShiftLead", label: guardPositionLabels.ShiftLead },
+  { value: "Curator", label: guardPositionLabels.Curator },
+];
 
 export const guardLicenseLabels: Record<GuardLicenseType, string> = {
   None: "Б/У",

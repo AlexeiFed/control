@@ -36,7 +36,7 @@ import {
 } from "../../lib/operations/shift-templates-repository";
 import { activeShiftsSequence } from "../../lib/scheduling/object-shift-templates";
 import { getPreviousCivilDate } from "../../lib/scheduling/shift-template-history";
-import type { GuardEmploymentType, GuardLicenseType, GuardPosition, RateUnit, ShiftKind } from "../../lib/scheduling/types";
+import { isGuardPosition, type GuardEmploymentType, type GuardLicenseType, type GuardPosition, type RateUnit, type ShiftKind } from "../../lib/scheduling/types";
 
 import {
   createObjectPost,
@@ -509,7 +509,7 @@ function parseDaysOfWeek(formData: FormData): number[] | null {
 function parsePosition(s: FormDataEntryValue | null): GuardPosition | null {
   const v = emptyToNull(s);
   if (v === null) return null;
-  if (v === "ShiftLead" || v === "Guard" || v === "Curator") return v;
+  if (isGuardPosition(v)) return v;
   throw new Error("Некорректная должность");
 }
 

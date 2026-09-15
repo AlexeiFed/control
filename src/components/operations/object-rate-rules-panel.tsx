@@ -26,6 +26,7 @@ import {
   guardEmploymentLabels,
   guardLicenseLabels,
   guardPositionLabels,
+  guardPositionOptions,
   rateUnitLabels,
   shiftKindLabels,
 } from "../../lib/operations/status-labels";
@@ -247,9 +248,11 @@ function RateRuleFields({ rule, isCreate, defaultEffectiveFrom }: FieldsProps) {
             Должность
             <select name="position" defaultValue={r?.position ?? ""} className={inputClass}>
               <option value="">Любая</option>
-              <option value="ShiftLead">{guardPositionLabels.ShiftLead}</option>
-              <option value="Guard">{guardPositionLabels.Guard}</option>
-              <option value="Curator">{guardPositionLabels.Curator}</option>
+              {guardPositionOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className={labelClass}>

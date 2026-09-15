@@ -1,5 +1,6 @@
 import type { PayrollHalf } from "../payroll/advance-period";
 import { dateIsoBelongsToHalf } from "../payroll/advance-period";
+import { floorCentsToRub, floorRub } from "../payroll/floor-rub";
 import { getDaysInMonth } from "../format/display-date";
 import type { GuardAdvanceTotals } from "../operations/advances-repository";
 import { guardObjectAdvanceKey } from "../operations/advances-repository";
@@ -117,18 +118,16 @@ export function buildPayrollStatementSheets(input: {
         const advances = guardId
           ? input.advancesByGuardObject.get(guardObjectAdvanceKey(guardId, object.id))
           : undefined;
-        const advanceRub =
-          input.half === "first" ? (advances?.firstHalfRub ?? 0) : (advances?.secondHalfRub ?? 0);
-        const totalSalaryRub = Math.round((entry.salaryCents / 100) * 100) / 100;
-        const toPayRub =
-          entry.incidents > 0
-            ? null
-            : Math.max(0, Math.round((totalSalaryRub - advanceRub) * 100) / 100);
+        const advanceRub = floorRub(
+          input.half === "first" ? (advances?.firstHalfRub ?? 0) : (advances?.secondHalfRub ?? 0),
+        );
+        const totalSalaryRub = floorCentsToRub(entry.salaryCents);
+        const toPayRub = entry.incidents > 0 ? null : Math.max(0, totalSalaryRub - advanceRub);
 
         return {
           guardName: entry.guardName,
           totalSalaryRub,
-          advanceRub: advanceRub > 0 ? advanceRub : 0,
+          advanceRub,
           fineCount: entry.incidents,
           toPayRub,
         };

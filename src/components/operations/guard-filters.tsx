@@ -25,7 +25,7 @@ import { toast } from "../../store/toast-store";
 import type { GuardFilters as GuardFilterValues } from "../../lib/operations/guard-filters";
 import type { GuardListRow } from "../../lib/operations/guards-repository";
 import type { ObjectListRow } from "../../lib/operations/objects-repository";
-import { guardPositionLabels, guardStatusLabels, guardStatusOptions } from "../../lib/operations/status-labels";
+import { guardPositionOptions, guardStatusLabels, guardStatusOptions } from "../../lib/operations/status-labels";
 import type { GuardEmploymentType, GuardLicenseType, GuardPosition, GuardStatus } from "../../lib/scheduling/types";
 import { GuardFormComplianceFields } from "./guard-form-compliance-fields";
 import { GuardObjectsMultiPicker } from "./guard-objects-multi-picker";
@@ -306,9 +306,11 @@ export function GuardFilters({ guards, objects, filters, userId }: GuardFiltersP
             onChange={(event) => setCreatePosition(event.target.value as GuardPosition)}
             className="h-8 rounded-button border border-app-border bg-app-bg px-2 text-sm outline-none focus:border-accent-primary"
           >
-            <option value="Guard">{guardPositionLabels.Guard}</option>
-            <option value="ShiftLead">{guardPositionLabels.ShiftLead}</option>
-            <option value="Curator">{guardPositionLabels.Curator}</option>
+            {guardPositionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
         <GuardFormComplianceFields

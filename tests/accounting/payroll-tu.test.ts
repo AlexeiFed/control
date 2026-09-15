@@ -216,9 +216,11 @@ describe("payroll-tu", () => {
     const data = buildPayrollTuData({
       year: 2026,
       monthIndex0: 4,
-      office: [{ name: "Куратор", daily: [{ day: 1, hours: 8 }], salaryFirstHalfRub: 2620, salarySecondHalfRub: 0 }],
-      guards: [{ name: "Охранник", daily: [{ day: 2, hours: 12 }], salaryFirstHalfRub: 0, salarySecondHalfRub: 3000 }],
+      office: [{ name: "Куратор", daily: [{ day: 1, hours: 8 }], salaryFirstHalfRub: 2620.99, salarySecondHalfRub: 0 }],
+      guards: [{ name: "Охранник", daily: [{ day: 2, hours: 12 }], salaryFirstHalfRub: 0, salarySecondHalfRub: 3000.8 }],
     });
+    expect(data.officeRows[0]?.salaryFirstHalfRub).toBe(2620);
+    expect(data.guardRows[0]?.salarySecondHalfRub).toBe(3000);
     const buffer = await buildPayrollTuWorkbook(data);
     expect(buffer.byteLength).toBeGreaterThan(1000);
   });
@@ -364,7 +366,7 @@ describe("payroll-tu", () => {
       includedGuardIds,
     });
 
-    expect(salary.get("g1")).toEqual({ firstHalfRub: 5600.06, secondHalfRub: 0 });
+    expect(salary.get("g1")).toEqual({ firstHalfRub: 5600, secondHalfRub: 0 });
 
     const breakdown = buildGuardPeriodBreakdownByName(rows, month);
     expect(breakdown.get("Антонов Олег")?.first.guardAmountCents).toBe(560006);

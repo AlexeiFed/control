@@ -89,10 +89,27 @@ describe("buildPayrollStatementSheets", () => {
     expect(sheets).toHaveLength(1);
     expect(sheets[0]?.rows[0]).toMatchObject({
       guardName: "Иванов Иван",
-      totalSalaryRub: 2000.04,
+      totalSalaryRub: 2000,
       advanceRub: 500,
       fineCount: 0,
-      toPayRub: 1500.04,
+      toPayRub: 1500,
+    });
+  });
+
+  it("округляет зарплату и выдачу вниз до целых рублей", () => {
+    const sheets = buildPayrollStatementSheets({
+      rows: [baseRow({ guardAmountCents: 200_099 })],
+      objects: [{ id: "o1", name: "Объект А", address: "ул. Тест, 1" }],
+      half: "first",
+      year: 2026,
+      monthIndex0: 4,
+      guardIdByName: new Map([["Иванов Иван", "g1"]]),
+      advancesByGuardObject: new Map([["g1:o1", { firstHalfRub: 500.99, secondHalfRub: 0 }]]),
+    });
+    expect(sheets[0]?.rows[0]).toMatchObject({
+      totalSalaryRub: 2000,
+      advanceRub: 500,
+      toPayRub: 1500,
     });
   });
 
@@ -117,9 +134,9 @@ describe("buildPayrollStatementSheets", () => {
     });
     expect(sheets).toHaveLength(1);
     expect(sheets[0]?.rows[0]).toMatchObject({
-      totalSalaryRub: 2000.04,
+      totalSalaryRub: 2000,
       advanceRub: 200,
-      toPayRub: 1800.04,
+      toPayRub: 1800,
     });
   });
 
