@@ -3,7 +3,13 @@ import {
   shiftBelongsToOperationalDayColumn,
 } from "./operational-day-timeline";
 import { buildOperationalDayAnchorByObjectIdForDate } from "./operational-day-anchors";
-import type { ExpectedShifts } from "./object-shift-templates";
+import {
+  defaultExpectedShiftsForDay,
+  expectedShiftsForDate,
+  type ExpectedShifts,
+} from "./object-shift-templates";
+import type { ObjectShiftTemplateRow } from "../operations/shift-templates-repository";
+import { shiftMatchesPost } from "./shift-post-display";
 import { shiftCoverageMinutes } from "./shift-attendance";
 import type { Shift } from "./types";
 
@@ -194,15 +200,7 @@ export function computeDayScheduleShortage(
   norms: ExpectedShifts | undefined,
 ): Omit<ScheduleDayShortage, "dateIso" | "dayLabel"> | null {
   const metrics = computeDayPlanMetrics(dayShifts, norms);
-  if (!metrics) return null;
-  if (
-    metrics.hoursShort <= 0 &&
-    metrics.reinforcementHoursShort <= 0 &&
-    metrics.rapidResponseHoursShort <= 0 &&
-    metrics.shiftLeadHoursShort <= 0
-  ) {
-    return null;
-  }
+  if (!metrics || !dayPlanHasHoursShortage(metrics)) return null;
 
   return {
     hoursShort: metrics.hoursShort,
@@ -213,6 +211,58 @@ export function computeDayScheduleShortage(
     regularDayHours: metrics.regularDayHours,
   };
 }
+
+/**
+ * Как восклицательный знак в сетке: каждый пост отдельно.
+ * Перебор на одном посту не закрывает дыру на другом.
+ */
+export function computePostAwareDayShortage(
+  dayShifts: ReadonlyArray<Shift>,
+  postIds: readonly string[],
+  normsFor: (postId: string | null) => ExpectedShifts | undefined,
+): Omit<ScheduleDayShortage, "dateIso" | "dayLabel"> | null {
+  if (postIds.length === 0) {
+    return computeDayScheduleShortage(dayShifts, normsFor(null));
+  }
+
+  const firstPostId = postIds[0] ?? null;
+  let hoursShort = 0;
+  let reinforcementShort = 0;
+  let rapidResponseShort = 0;
+  let shiftLeadShort = 0;
+  let expectedHoursRegular = 0;
+  let regularDayHours = 0;
+  let any = false;
+
+  for (const postId of postIds) {
+    const postShifts = dayShifts.filter((shift) => shiftMatchesPost(shift.postId, postId, firstPostId));
+    const metrics = computeDayPlanMetrics(postShifts, normsFor(postId));
+    if (!metrics) continue;
+    expectedHoursRegular += metrics.expectedHoursRegular;
+    regularDayHours += metrics.regularDayHours;
+    if (!dayPlanHasHoursShortage(metrics)) continue;
+    any = true;
+    hoursShort += metrics.hoursShort;
+    reinforcementShort += metrics.reinforcementHoursShort;
+    rapidResponseShort += metrics.rapidResponseHoursShort;
+    shiftLeadShort += metrics.shiftLeadHoursShort;
+  }
+
+  if (!any) return null;
+  return {
+    hoursShort: roundHours(hoursShort),
+    reinforcementShort: roundHours(reinforcementShort),
+    rapidResponseShort: roundHours(rapidResponseShort),
+    shiftLeadShort: roundHours(shiftLeadShort),
+    expectedHoursRegular: roundHours(expectedHoursRegular),
+    regularDayHours: roundHours(regularDayHours),
+  };
+}
+
+export type ScheduleShortagePostAware = {
+  templates: ReadonlyArray<ObjectShiftTemplateRow>;
+  postIdsByObjectMonth: ReadonlyMap<string, readonly string[]>;
+};
 
 /** Смены, чьи операционные сутки попадают в видимые колонки. */
 export function filterShiftsToVisibleScheduleDays(
@@ -244,6 +294,7 @@ export function computeScheduleShortages(
   weekDays: ReadonlyArray<WeekDayRef>,
   /** Ключ `objectId|YYYY-MM` → HH:mm из object_monthly_settings. */
   monthlyOperationalOverrides: ReadonlyMap<string, string> = new Map(),
+  postAware?: ScheduleShortagePostAware,
 ): ScheduleObjectShortage[] {
   const visibleShifts = filterShiftsToVisibleScheduleDays(
     shifts,
@@ -272,7 +323,17 @@ export function computeScheduleShortages(
           s.objectId === object.id &&
           shiftBelongsToOperationalDayColumn(s, day.iso, anchorByObjectId),
       );
-      const partial = computeDayScheduleShortage(dayShifts, objNorms[day.iso]);
+      const postIds = postAware
+        ? (postAware.postIdsByObjectMonth.get(`${object.id}|${day.iso.slice(0, 7)}`) ?? [])
+        : [];
+      const partial = postAware
+        ? computePostAwareDayShortage(dayShifts, postIds, (postId) =>
+            postId
+              ? (expectedShiftsForDate(postAware.templates, object.id, day.iso, postId) ??
+                defaultExpectedShiftsForDay())
+              : objNorms[day.iso],
+          )
+        : computeDayScheduleShortage(dayShifts, objNorms[day.iso]);
       if (!partial) continue;
       totalHoursShort += partial.hoursShort;
       totalReinforcementShort += partial.reinforcementShort;

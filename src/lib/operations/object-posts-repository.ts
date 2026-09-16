@@ -1,4 +1,5 @@
 import { query } from "../db/pool";
+import { monthKeysFromDateIsos } from "./object-monthly-settings-repository";
 import { listMonthlyPostGuardsByObject, replaceMonthlyPostGuards } from "./object-monthly-post-guards-repository";
 import { copyShiftTemplatesToPost } from "./shift-templates-repository";
 
@@ -52,6 +53,36 @@ export async function getObjectPosts(objectId: string, month: string): Promise<O
     month: row.month,
     name: row.name,
   }));
+}
+
+/** Ключ как в `operationalDayMonthKey`: `objectId|YYYY-MM` → id постов этого месяца. */
+export async function listPostIdsByObjectMonth(
+  objectIds: readonly string[],
+  months: readonly string[],
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (objectIds.length === 0 || months.length === 0) return map;
+  const rows = await query<{ object_id: string; month: string; id: string }>(
+    `SELECT object_id::text, month, id::text
+     FROM object_posts
+     WHERE object_id = ANY($1::uuid[]) AND month = ANY($2::text[])
+     ORDER BY object_id, month, created_at ASC`,
+    [[...objectIds], [...months]],
+  );
+  for (const row of rows) {
+    const key = `${row.object_id}|${row.month}`;
+    const list = map.get(key);
+    if (list) list.push(row.id);
+    else map.set(key, [row.id]);
+  }
+  return map;
+}
+
+export async function loadPostIdsByObjectMonthForDays(
+  objectIds: readonly string[],
+  dateIsos: readonly string[],
+): Promise<Map<string, string[]>> {
+  return listPostIdsByObjectMonth(objectIds, monthKeysFromDateIsos(dateIsos));
 }
 
 export async function seedEmptyPostsFromObjectGuards(

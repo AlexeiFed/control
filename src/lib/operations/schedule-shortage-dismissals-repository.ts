@@ -12,6 +12,7 @@ import {
 } from "./object-monthly-settings-repository";
 import { getSchedulerSnapshot } from "./scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
+import { loadPostIdsByObjectMonthForDays } from "./object-posts-repository";
 
 export async function loadMonthlyOperationalOverridesForDays(
   objectIds: ReadonlyArray<string>,
@@ -142,12 +143,13 @@ export async function buildCurrentWeekValidShortageDismissKeySet(
   if (scopedObjectIds.length === 0) return { weekDayIsos, validKeys: new Set() };
 
   const templates = await listShiftTemplatesForObjectIds(scopedObjectIds);
-  const expectedByObjectDay = buildExpectedShiftsByObjectAndDay(scopedObjectIds, weekDayIsos, templates);
-  const storedDismissals = await listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[6]!);
-  const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
-    scopedObjectIds,
-    weekDayIsos,
-  );
+  const [expectedByObjectDay, storedDismissals, monthlyOperationalOverrides] = await Promise.all([
+    loadPostIdsByObjectMonthForDays(scopedObjectIds, weekDayIsos).then((postIdsByObjectMonth) =>
+      buildExpectedShiftsByObjectAndDay(scopedObjectIds, weekDayIsos, templates, postIdsByObjectMonth),
+    ),
+    listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[6]!),
+    loadMonthlyOperationalOverridesForDays(scopedObjectIds, weekDayIsos),
+  ]);
 
   const validKeys = buildValidShortageDismissKeySet({
     objects,

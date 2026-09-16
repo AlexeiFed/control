@@ -156,6 +156,64 @@ describe("object shift templates", () => {
     expect(map.o1?.["2026-07-13"]?.regular! * map.o1!["2026-07-13"]!.shiftHours).toBe(72);
   });
 
+  it("does not sum previous-month post templates into the current week plan", () => {
+    const rows: ObjectShiftTemplateRow[] = [
+      {
+        objectId: "gidro",
+        postId: "p-aug",
+        postMonth: "2026-08",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: "gidro",
+        postId: "p-sep",
+        postMonth: "2026-09",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+    ];
+    const map = buildExpectedShiftsByObjectAndDay(["gidro"], ["2026-09-14"], rows);
+    expect(map.gidro?.["2026-09-14"]?.regular).toBe(1);
+    expect(templatePartTotalHours(map.gidro!["2026-09-14"]!.regular, map.gidro!["2026-09-14"]!.shiftHours)).toBe(14);
+  });
+
+  it("uses object-level template when the date's month has no posts", () => {
+    const rows: ObjectShiftTemplateRow[] = [
+      {
+        objectId: "gidro",
+        postId: null,
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: "gidro",
+        postId: "p-aug",
+        postMonth: "2026-08",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+    ];
+    const map = buildExpectedShiftsByObjectAndDay(["gidro"], ["2026-09-14"], rows);
+    expect(templatePartTotalHours(map.gidro!["2026-09-14"]!.regular, map.gidro!["2026-09-14"]!.shiftHours)).toBe(14);
+  });
+
   it("builds expected map with default 2 shifts when no template row", () => {
     const weekIsos = ["2026-05-18", "2026-05-19"];
     const map = buildExpectedShiftsByObjectAndDay(["o-new"], weekIsos, []);

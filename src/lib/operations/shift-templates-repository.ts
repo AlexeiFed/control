@@ -53,6 +53,8 @@ export type ObjectShiftTemplateRow = {
   effectiveFrom: string;
   effectiveTo: string | null;
   postId?: string | null;
+  /** YYYY-MM поста из object_posts; null у шаблона объекта (post_id IS NULL). */
+  postMonth?: string | null;
 };
 
 type DbRow = {
@@ -69,7 +71,12 @@ type DbRow = {
   effective_from: string;
   effective_to: string | null;
   post_id: string | null;
+  post_month: string | null;
 };
+
+function qualifyTemplateSelect(expr: string): string {
+  return /\sAS\s/i.test(expr) ? expr : `t.${expr}`;
+}
 
 function mapRow(row: DbRow): ObjectShiftTemplateRow {
   return {
@@ -86,6 +93,7 @@ function mapRow(row: DbRow): ObjectShiftTemplateRow {
     effectiveFrom: String(row.effective_from).slice(0, 10),
     effectiveTo: row.effective_to ? String(row.effective_to).slice(0, 10) : null,
     postId: row.post_id,
+    postMonth: row.post_month ? String(row.post_month).slice(0, 7) : null,
   };
 }
 
@@ -96,22 +104,24 @@ export async function listShiftTemplatesForObjectIds(objectIds: string[]): Promi
   const rows = await query<DbRow>(
     `
       SELECT
-        object_id,
-        day_of_week,
-        shifts_per_day,
-        shifts_reinforcement_per_day,
-        ${extra.shiftHours},
-        ${extra.reinforcementShiftHours},
-        ${extra.shiftsRapidResponsePerDay},
-        ${extra.rapidResponseShiftHours},
-        ${extra.shiftsShiftLeadPerDay},
-        ${extra.shiftLeadShiftHours},
-        effective_from::text,
-        effective_to::text,
-        ${hasPostId ? "post_id" : "NULL::uuid AS post_id"}
-      FROM object_shift_templates
-      WHERE object_id = ANY($1::uuid[])
-      ORDER BY object_id, day_of_week, effective_from ASC
+        t.object_id,
+        t.day_of_week,
+        t.shifts_per_day,
+        t.shifts_reinforcement_per_day,
+        ${qualifyTemplateSelect(extra.shiftHours)},
+        ${qualifyTemplateSelect(extra.reinforcementShiftHours)},
+        ${qualifyTemplateSelect(extra.shiftsRapidResponsePerDay)},
+        ${qualifyTemplateSelect(extra.rapidResponseShiftHours)},
+        ${qualifyTemplateSelect(extra.shiftsShiftLeadPerDay)},
+        ${qualifyTemplateSelect(extra.shiftLeadShiftHours)},
+        t.effective_from::text,
+        t.effective_to::text,
+        ${hasPostId ? "t.post_id" : "NULL::uuid AS post_id"},
+        ${hasPostId ? "p.month" : "NULL::text"} AS post_month
+      FROM object_shift_templates t
+      ${hasPostId ? "LEFT JOIN object_posts p ON p.id = t.post_id" : ""}
+      WHERE t.object_id = ANY($1::uuid[])
+      ORDER BY t.object_id, t.day_of_week, t.effective_from ASC
     `,
     [objectIds],
   );

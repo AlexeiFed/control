@@ -260,12 +260,16 @@ export function buildExpectedShiftsByObjectAndDay(
   objectIds: ReadonlyArray<string>,
   weekDayIsos: ReadonlyArray<string>,
   rows: ReadonlyArray<ObjectShiftTemplateRow>,
+  postIdsByObjectMonth?: ReadonlyMap<string, readonly string[]>,
 ): Record<string, Record<string, ExpectedShifts>> {
   const out: Record<string, Record<string, ExpectedShifts>> = {};
   for (const oid of objectIds) {
     const byDay: Record<string, ExpectedShifts> = {};
     for (const iso of weekDayIsos) {
-      byDay[iso] = expectedShiftsForObjectDay(rows, oid, iso);
+      const activePostIds = postIdsByObjectMonth
+        ? (postIdsByObjectMonth.get(`${oid}|${iso.slice(0, 7)}`) ?? [])
+        : undefined;
+      byDay[iso] = expectedShiftsForObjectDay(rows, oid, iso, activePostIds);
     }
     out[oid] = byDay;
   }
@@ -273,21 +277,31 @@ export function buildExpectedShiftsByObjectAndDay(
 }
 
 /**
- * План объекта на день для недельного графика:
- * если есть шаблоны постов — сумма по постам, иначе шаблон объекта (post_id IS NULL).
+ * План объекта на день для недельного графика / колокола:
+ * посты берём из `object_posts` месяца даты (как сетка объекта), не из всех исторических шаблонов.
+ * Без постов в этом месяце — шаблон объекта (post_id IS NULL).
  */
 export function expectedShiftsForObjectDay(
   rows: ReadonlyArray<ObjectShiftTemplateRow>,
   objectId: string,
   civilDateIso: string,
+  activePostIds?: readonly string[],
 ): ExpectedShifts {
-  const postIds = [
-    ...new Set(
-      rows
-        .filter((row) => row.objectId === objectId && row.postId)
-        .map((row) => row.postId as string),
-    ),
-  ];
+  const month = civilDateIso.slice(0, 7);
+  const postIds =
+    activePostIds !== undefined
+      ? [...new Set(activePostIds)]
+      : [
+          ...new Set(
+            rows
+              .filter((row) => {
+                if (row.objectId !== objectId || !row.postId) return false;
+                if (row.postMonth == null || row.postMonth === "") return true;
+                return row.postMonth === month;
+              })
+              .map((row) => row.postId as string),
+          ),
+        ];
   if (postIds.length === 0) {
     return expectedShiftsForDate(rows, objectId, civilDateIso, null) ?? defaultExpectedShiftsForDay();
   }

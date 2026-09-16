@@ -9,6 +9,7 @@ import { requireSession } from "../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
 import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDays } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
+import { loadPostIdsByObjectMonthForDays } from "../../../../lib/operations/object-posts-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../../../../lib/scheduling/schedule-shortage";
 import { getMondayWeekStartKhabarovsk, toDateIsoKhabarovsk, formatWeekdayDayLabel } from "../../../../lib/format/display-date";
@@ -49,10 +50,15 @@ export async function GET() {
       ? await listShiftTemplatesForObjectIds(objectIds) 
       : [];
 
-    const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
-    const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+    const [postIdsByObjectMonth, monthlyOperationalOverrides] = await Promise.all([
+      loadPostIdsByObjectMonthForDays(objectIds, weekDayIsos),
+      loadMonthlyOperationalOverridesForDays(objectIds, weekDayIsos),
+    ]);
+    const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(
       objectIds,
       weekDayIsos,
+      templates,
+      postIdsByObjectMonth,
     );
 
     const rawShortages = computeScheduleShortages(
@@ -61,6 +67,7 @@ export async function GET() {
       expectedShiftsByObjectDay,
       weekDays,
       monthlyOperationalOverrides,
+      { templates, postIdsByObjectMonth },
     );
 
     const shortages = await filterShortagesByStoredDismissals({

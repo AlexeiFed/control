@@ -45,6 +45,7 @@ import {
   monthKeysFromDateIsos,
 } from "./object-monthly-settings-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
+import { loadPostIdsByObjectMonthForDays } from "./object-posts-repository";
 import { listObjectRateRulesForObjects, type ObjectRateRuleRecord } from "./object-rate-rules-repository";
 import { getGuardsHasCarSelect, getGuardsPhoneSelect } from "./guards-repository";
 
@@ -1630,7 +1631,10 @@ export async function listPendingIncidentReplacements(): Promise<PendingIncident
   if (candidates.length === 0) return [];
 
   const dateIsos = [...new Set(candidates.map((c) => c.shiftDateKey))].sort();
-  const templates = await listShiftTemplatesForObjectIds(objectIds);
+  const [templates, postIdsByObjectMonth] = await Promise.all([
+    listShiftTemplatesForObjectIds(objectIds),
+    loadPostIdsByObjectMonthForDays(objectIds, dateIsos),
+  ]);
 
   const rangeStart = operationalDayStart(dateIsos[0]!, "00:00");
   const rangeEnd = operationalDayEnd(addDaysToIsoDate(dateIsos[dateIsos.length - 1]!, 1), "00:00");
@@ -1678,7 +1682,12 @@ export async function listPendingIncidentReplacements(): Promise<PendingIncident
 
   const out: PendingIncidentReplacement[] = [];
   for (const item of candidates) {
-    const norms = expectedShiftsForObjectDay(templates, item.objectId, item.shiftDateKey);
+    const norms = expectedShiftsForObjectDay(
+      templates,
+      item.objectId,
+      item.shiftDateKey,
+      postIdsByObjectMonth.get(`${item.objectId}|${item.shiftDateKey.slice(0, 7)}`) ?? [],
+    );
     if (isOperationalDayPlanSatisfied(dayShiftsFor(item.objectId, item.shiftDateKey), norms)) {
       continue;
     }

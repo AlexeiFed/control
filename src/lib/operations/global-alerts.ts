@@ -8,6 +8,7 @@ import {
 } from "./guards-repository";
 import { getSchedulerSnapshot, listPendingIncidentReplacements } from "./scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
+import { loadPostIdsByObjectMonthForDays } from "./object-posts-repository";
 import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDays } from "./schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../scheduling/schedule-shortage";
@@ -159,10 +160,15 @@ async function loadScheduleShortages(): Promise<{
   const objectIds = snapshot.objects.map((o) => o.id);
   const templates =
     objectIds.length > 0 ? await listShiftTemplatesForObjectIds(objectIds) : [];
-  const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
-  const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+  const [postIdsByObjectMonth, monthlyOperationalOverrides] = await Promise.all([
+    loadPostIdsByObjectMonthForDays(objectIds, weekDayIsos),
+    loadMonthlyOperationalOverridesForDays(objectIds, weekDayIsos),
+  ]);
+  const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(
     objectIds,
     weekDayIsos,
+    templates,
+    postIdsByObjectMonth,
   );
   const rawShortages = computeScheduleShortages(
     snapshot.objects,
@@ -170,6 +176,7 @@ async function loadScheduleShortages(): Promise<{
     expectedShiftsByObjectDay,
     weekDays,
     monthlyOperationalOverrides,
+    { templates, postIdsByObjectMonth },
   );
   const shortages = await filterShortagesByStoredDismissals({
     objectIds,
@@ -186,7 +193,7 @@ async function loadScheduleShortages(): Promise<{
 
 const getGlobalAlertsCached = unstable_cache(
   (role: string) => loadGlobalAlertsForRole(role as Role),
-  ["global-alerts:v4"],
+  ["global-alerts:v5"],
   {
     tags: ["global-alerts", "scheduler", "shifts", "guards", "directory"],
     revalidate: 180,

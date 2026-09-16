@@ -6,6 +6,8 @@ import {
   filterShiftsToVisibleScheduleDays,
 } from "../../src/lib/scheduling/schedule-shortage";
 import { operationalDayMonthKey } from "../../src/lib/scheduling/operational-day-anchors";
+import { buildExpectedShiftsByObjectAndDay } from "../../src/lib/scheduling/object-shift-templates";
+import type { ObjectShiftTemplateRow } from "../../src/lib/operations/shift-templates-repository";
 import type { Shift } from "../../src/lib/scheduling/types";
 
 const fullNorm = {
@@ -410,5 +412,283 @@ describe("schedule-shortage", () => {
     expect(withMonthly).toHaveLength(1);
     expect(withMonthly[0]?.days[0]?.hoursShort).toBe(1);
     expect(withMonthly[0]?.days[0]?.regularDayHours).toBe(0);
+  });
+
+  it("does not flag a filled week day when leftover previous-month post templates exist", () => {
+    const templates: ObjectShiftTemplateRow[] = [
+      {
+        objectId: "gidro",
+        postId: "p-aug",
+        postMonth: "2026-08",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: "gidro",
+        postId: "p-sep",
+        postMonth: "2026-09",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+    ];
+    const weekDays = [{ iso: "2026-09-14", label: "Пн, 14" }];
+    const expected = buildExpectedShiftsByObjectAndDay(["gidro"], ["2026-09-14"], templates);
+    const shifts: Shift[] = [
+      {
+        id: "filled",
+        guardId: "g1",
+        objectId: "gidro",
+        startsAt: new Date("2026-09-14T08:00:00+10:00"),
+        endsAt: new Date("2026-09-14T22:00:00+10:00"),
+        shiftKind: "Regular",
+        manualClientRateCents: null,
+        manualGuardRateCents: null,
+        manualRateUnit: null,
+        manualRateReason: "",
+        isNoShow: false,
+        incidentCategory: null,
+        incidentComment: "",
+        incidentWorkedUntilAt: null,
+        incidentRecordedAt: null,
+        replacedByShiftId: null,
+        selectedRateRuleId: null,
+        postId: "p-sep",
+      },
+    ];
+    expect(computeScheduleShortages([{ id: "gidro", name: "ООО ГИДРОСТРОЙ" }], shifts, expected, weekDays)).toEqual([]);
+  });
+
+  it("hydrostroy: night 18–08 covers the post 1×14 plan even if object-level template is 2×14", () => {
+    const gidro = "1b8fd2cc-4f27-4d5b-ae2b-1b28afd08016";
+    const sepPost = "53d3e723-26ea-4531-8ae3-189bbb39fb83";
+    const augPost = "959c8d3c-0b40-4a2a-bac2-20147b3ba655";
+    const templates: ObjectShiftTemplateRow[] = [
+      {
+        objectId: gidro,
+        postId: null,
+        dayOfWeek: 1,
+        shiftsPerDay: 2,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        rapidResponse: undefined,
+        shiftsRapidResponsePerDay: 1,
+        rapidResponseShiftHours: 24,
+        effectiveFrom: "2026-05-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: gidro,
+        postId: augPost,
+        postMonth: "2026-08",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-08-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: gidro,
+        postId: sepPost,
+        postMonth: "2026-09",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-09-14",
+        effectiveTo: null,
+      },
+    ];
+    const weekDays = [{ iso: "2026-09-14", label: "Пн, 14" }];
+    const expected = buildExpectedShiftsByObjectAndDay([gidro], ["2026-09-14"], templates);
+    const shifts: Shift[] = [
+      {
+        id: "night",
+        guardId: "g1",
+        objectId: gidro,
+        startsAt: new Date("2026-09-14T18:00:00+10:00"),
+        endsAt: new Date("2026-09-15T08:00:00+10:00"),
+        shiftKind: "Regular",
+        manualClientRateCents: null,
+        manualGuardRateCents: null,
+        manualRateUnit: null,
+        manualRateReason: "",
+        isNoShow: false,
+        incidentCategory: null,
+        incidentComment: "",
+        incidentWorkedUntilAt: null,
+        incidentRecordedAt: null,
+        replacedByShiftId: null,
+        selectedRateRuleId: null,
+        postId: sepPost,
+      },
+    ];
+    const result = computeScheduleShortages(
+      [{ id: gidro, name: "ООО ГИДРОСТРОЙ", operationalDayStartTime: "08:00" }],
+      shifts,
+      expected,
+      weekDays,
+    );
+    expect(expected[gidro]?.["2026-09-14"]?.regular).toBe(1);
+    expect(expected[gidro]?.["2026-09-14"]?.shiftHours).toBe(14);
+    expect(result).toEqual([]);
+  });
+
+  it("hydrostroy: current-month object_posts win even if leftover templates have no postMonth", () => {
+    const gidro = "1b8fd2cc-4f27-4d5b-ae2b-1b28afd08016";
+    const sepPost = "53d3e723-26ea-4531-8ae3-189bbb39fb83";
+    const augPost = "959c8d3c-0b40-4a2a-bac2-20147b3ba655";
+    const templates: ObjectShiftTemplateRow[] = [
+      {
+        objectId: gidro,
+        postId: null,
+        dayOfWeek: 1,
+        shiftsPerDay: 2,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        shiftsRapidResponsePerDay: 1,
+        rapidResponseShiftHours: 24,
+        effectiveFrom: "2026-05-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: gidro,
+        postId: augPost,
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-08-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: gidro,
+        postId: sepPost,
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-09-14",
+        effectiveTo: null,
+      },
+    ];
+    const postIdsByObjectMonth = new Map<string, readonly string[]>([[`${gidro}|2026-09`, [sepPost]]]);
+    const expected = buildExpectedShiftsByObjectAndDay(
+      [gidro],
+      ["2026-09-14"],
+      templates,
+      postIdsByObjectMonth,
+    );
+    expect(expected[gidro]?.["2026-09-14"]?.regular).toBe(1);
+    expect(expected[gidro]?.["2026-09-14"]?.shiftHours).toBe(14);
+    const shifts: Shift[] = [
+      {
+        id: "night",
+        guardId: "g1",
+        objectId: gidro,
+        startsAt: new Date("2026-09-14T18:00:00+10:00"),
+        endsAt: new Date("2026-09-15T08:00:00+10:00"),
+        shiftKind: "Regular",
+        manualClientRateCents: null,
+        manualGuardRateCents: null,
+        manualRateUnit: null,
+        manualRateReason: "",
+        isNoShow: false,
+        incidentCategory: null,
+        incidentComment: "",
+        incidentWorkedUntilAt: null,
+        incidentRecordedAt: null,
+        replacedByShiftId: null,
+        selectedRateRuleId: null,
+        postId: sepPost,
+      },
+    ];
+    expect(
+      computeScheduleShortages(
+        [{ id: gidro, name: "ООО ГИДРОСТРОЙ", operationalDayStartTime: "08:00" }],
+        shifts,
+        expected,
+        [{ iso: "2026-09-14", label: "Пн, 14" }],
+        new Map(),
+        { templates, postIdsByObjectMonth },
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags an empty post even if another post on the same object is over plan", () => {
+    const templates: ObjectShiftTemplateRow[] = [
+      {
+        objectId: "o1",
+        postId: "pa",
+        postMonth: "2026-09",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+      {
+        objectId: "o1",
+        postId: "pb",
+        postMonth: "2026-09",
+        dayOfWeek: 1,
+        shiftsPerDay: 1,
+        shiftsReinforcementPerDay: 0,
+        shiftHours: 14,
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      },
+    ];
+    const postIdsByObjectMonth = new Map<string, readonly string[]>([["o1|2026-09", ["pa", "pb"]]]);
+    const expected = buildExpectedShiftsByObjectAndDay(["o1"], ["2026-09-14"], templates, postIdsByObjectMonth);
+    const baseShift = {
+      guardId: "g1",
+      objectId: "o1",
+      startsAt: new Date("2026-09-14T08:00:00+10:00"),
+      endsAt: new Date("2026-09-14T22:00:00+10:00"),
+      shiftKind: "Regular" as const,
+      manualClientRateCents: null,
+      manualGuardRateCents: null,
+      manualRateUnit: null,
+      manualRateReason: "",
+      isNoShow: false,
+      incidentCategory: null,
+      incidentComment: "",
+      incidentWorkedUntilAt: null,
+      incidentRecordedAt: null,
+      replacedByShiftId: null,
+      selectedRateRuleId: null,
+      postId: "pa",
+    };
+    const shifts: Shift[] = [
+      { ...baseShift, id: "a1", guardId: "g1" },
+      { ...baseShift, id: "a2", guardId: "g2" },
+    ];
+    const pooled = computeScheduleShortages(
+      [{ id: "o1", name: "Объект" }],
+      shifts,
+      expected,
+      [{ iso: "2026-09-14", label: "Пн, 14" }],
+    );
+    expect(pooled).toEqual([]);
+
+    const perPost = computeScheduleShortages(
+      [{ id: "o1", name: "Объект" }],
+      shifts,
+      expected,
+      [{ iso: "2026-09-14", label: "Пн, 14" }],
+      new Map(),
+      { templates, postIdsByObjectMonth },
+    );
+    expect(perPost[0]?.days[0]?.hoursShort).toBe(14);
   });
 });

@@ -10,6 +10,7 @@ import {
   listScheduledGuardsByObjectForLocalMonth,
 } from "../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../lib/operations/shift-templates-repository";
+import { loadPostIdsByObjectMonthForDays } from "../../lib/operations/object-posts-repository";
 import { buildCurrentWeekValidShortageDismissKeySet } from "../../lib/operations/schedule-shortage-dismissals-repository";
 import { formatMonthYearLongRu, toDateIso, getKhabarovskComponents, toDateIsoKhabarovsk } from "../../lib/format/display-date";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../lib/scheduling/object-shift-templates";
@@ -63,7 +64,13 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
         ? buildCurrentWeekValidShortageDismissKeySet(objectIds)
         : Promise.resolve({ weekDayIsos: [] as string[], validKeys: new Set<string>() }),
     ]);
-  const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(objectIds, weekDayIsos, templates);
+  const postIdsByObjectMonth = await loadPostIdsByObjectMonthForDays(objectIds, weekDayIsos);
+  const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(
+    objectIds,
+    weekDayIsos,
+    templates,
+    postIdsByObjectMonth,
+  );
   const dismissedShortageKeys = Array.from(shortageDismissState.validKeys);
   const kh = getKhabarovskComponents(weekStart);
   const objectMonthTitle = formatMonthYearLongRu(kh.year, kh.month0);

@@ -11,6 +11,7 @@ import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
 import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
+import { loadPostIdsByObjectMonthForDays } from "../../../../lib/operations/object-posts-repository";
 import { upsertShortageDismissal, loadMonthlyOperationalOverridesForDays } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
 import { buildOperationalDayAnchorByObjectIdForDate } from "../../../../lib/scheduling/operational-day-anchors";
@@ -61,10 +62,15 @@ export async function POST(request: Request) {
     }
 
     const templates = await listShiftTemplatesForObjectIds([objectId]);
-    const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay([objectId], weekDayIsos, templates);
-    const monthlyOperationalOverrides = await loadMonthlyOperationalOverridesForDays(
+    const [postIdsByObjectMonth, monthlyOperationalOverrides] = await Promise.all([
+      loadPostIdsByObjectMonthForDays([objectId], weekDayIsos),
+      loadMonthlyOperationalOverridesForDays([objectId], weekDayIsos),
+    ]);
+    const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(
       [objectId],
       weekDayIsos,
+      templates,
+      postIdsByObjectMonth,
     );
 
     const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(

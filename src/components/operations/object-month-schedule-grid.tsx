@@ -39,7 +39,7 @@ import {
 } from "../../lib/scheduling/object-shift-templates";
 import {
   computeDayPlanMetrics,
-  dayPlanHasHoursShortage,
+  computePostAwareDayShortage,
   formatTemplateCountWithHours,
 } from "../../lib/scheduling/schedule-shortage";
 import {
@@ -525,17 +525,15 @@ export function ObjectMonthScheduleGrid({
   function dayHasCurrentWeekHoursShortage(d: number): boolean {
     const dateIso = dateIsoForDay(d);
     if (!isIsoInCurrentKhabarovskWeek(dateIso)) return false;
-    if (posts.length > 0) {
-      return posts.some((post) => {
-        const metrics = computeDayPlanMetrics(
-          shiftsOnDayForPost(d, post.id),
-          (monthPlanByPost?.[post.id] ?? monthPlan)[d],
-        );
-        return metrics != null && dayPlanHasHoursShortage(metrics);
-      });
-    }
-    const metrics = computeDayPlanMetrics(shiftsOnDayForPost(d, null), monthPlan[d]);
-    return metrics != null && dayPlanHasHoursShortage(metrics);
+    const dayShifts =
+      posts.length > 0
+        ? Object.values(shiftsByGuardAndDay).flatMap((byDay) => byDay[d] || [])
+        : shiftsOnDayForPost(d, null);
+    return (
+      computePostAwareDayShortage(dayShifts, posts.map((post) => post.id), (postId) =>
+        postId ? (monthPlanByPost?.[postId] ?? monthPlan)[d] : monthPlan[d],
+      ) != null
+    );
   }
 
   const dismissedShortageDateIsoSet = useMemo(
