@@ -28,6 +28,8 @@ export function aggregatePlanSnapshot(
     rapidResponseShiftHours: 24,
     shiftLead: 0,
     shiftLeadShiftHours: 24,
+    seniorGuard: 0,
+    seniorGuardShiftHours: 24,
   };
   let gotHours = false;
   for (const p of plans) {
@@ -36,11 +38,13 @@ export function aggregatePlanSnapshot(
     acc.reinforcement += p.reinforcement;
     acc.rapidResponse += p.rapidResponse;
     acc.shiftLead += p.shiftLead;
+    acc.seniorGuard += p.seniorGuard;
     if (!gotHours) {
       acc.shiftHours = p.shiftHours;
       acc.reinforcementShiftHours = p.reinforcementShiftHours;
       acc.rapidResponseShiftHours = p.rapidResponseShiftHours;
       acc.shiftLeadShiftHours = p.shiftLeadShiftHours;
+      acc.seniorGuardShiftHours = p.seniorGuardShiftHours;
       gotHours = true;
     }
   }

@@ -17,7 +17,7 @@ import {
 import { deleteShiftAction } from "../../app/scheduler/actions";
 import { removeGuardFromObjectMonthScheduleAction, upsertObjectMonthlySettingAction } from "../../app/objects/actions";
 import { Button } from "../ui/button";
-import type { Shift, ShiftKind, GuardStatus } from "../../lib/scheduling/types";
+import { isShiftKind, type Shift, type ShiftKind, type GuardStatus } from "../../lib/scheduling/types";
 import type { ObjectPost } from "../../lib/operations/object-posts-repository";
 import { toast } from "../../store/toast-store";
 import { humanizeClientError } from "../../lib/ui/humanize-client-error";
@@ -81,9 +81,7 @@ export function readLastUsedQuickAssign(): { startTime?: string; endTime?: strin
       startTime: typeof parsed.startTime === "string" ? parsed.startTime : undefined,
       endTime: typeof parsed.endTime === "string" ? parsed.endTime : undefined,
       shiftKind:
-        parsed.shiftKind === "Regular" || parsed.shiftKind === "Reinforcement" || parsed.shiftKind === "RapidResponse" || parsed.shiftKind === "ShiftLead"
-          ? (parsed.shiftKind as ShiftKind)
-          : undefined,
+        isShiftKind(parsed.shiftKind) ? parsed.shiftKind : undefined,
     };
   } catch {
     return null;
@@ -629,8 +627,8 @@ export function ObjectMonthScheduleGrid({
   function renderPlanRow(plan: Record<number, ExpectedShifts>, postId: string | null) {
     return (
       <tr className="bg-app-elevated/40 border-b-2 border-app-border">
-        <td className="schedule-sticky-col border border-app-border p-1.5 font-bold text-accent-primary text-[9px] uppercase tracking-wider sm:p-2 sm:text-[10px]">
-          План (осн/ус/мп/СтМ)
+        <td className="schedule-sticky-col border border-app-border p-1.5 font-bold text-accent-primary text-[9px] tracking-wide sm:p-2 sm:text-[10px]">
+          План (осн/ус/мп/СтСм/СтОх)
         </td>
         {days.map((d) => {
           const dayPlan = plan[d];
@@ -679,7 +677,12 @@ export function ObjectMonthScheduleGrid({
           }
           if (metrics.expectedShiftLead > 0 || metrics.shiftLeadCount > 0) {
             tooltipParts.push(
-              `СтМ: факт ${metrics.shiftLeadDayHours} / план ${metrics.expectedShiftLeadHours} ч`,
+              `СтСм: факт ${metrics.shiftLeadDayHours} / план ${metrics.expectedShiftLeadHours} ч`,
+            );
+          }
+          if (metrics.expectedSeniorGuard > 0 || metrics.seniorGuardCount > 0) {
+            tooltipParts.push(
+              `СтОх: факт ${metrics.seniorGuardDayHours} / план ${metrics.expectedSeniorGuardHours} ч`,
             );
           }
           tooltipParts.push(`Всего на дне: ${totalHours} ч`);
@@ -734,7 +737,18 @@ export function ObjectMonthScheduleGrid({
                         : "text-accent-primary"
                     }`}
                   >
-                    СтМ {metrics.shiftLeadDayHours}/{metrics.expectedShiftLeadHours}
+                    СтСм {metrics.shiftLeadDayHours}/{metrics.expectedShiftLeadHours}
+                  </span>
+                ) : null}
+                {metrics.expectedSeniorGuard > 0 || metrics.seniorGuardCount > 0 ? (
+                  <span
+                    className={`text-[10px] tabular-nums leading-tight ${
+                      metrics.seniorGuardHoursShort > 0 || metrics.seniorGuardHoursOver > 0
+                        ? "text-accent-warning"
+                        : "text-accent-primary"
+                    }`}
+                  >
+                    СтОх {metrics.seniorGuardDayHours}/{metrics.expectedSeniorGuardHours}
                   </span>
                 ) : null}
               </div>
@@ -935,6 +949,10 @@ export function ObjectMonthScheduleGrid({
                         surface = "border-2";
                         cardStyle.backgroundColor = designTokens.color.shiftKind.ShiftLead.bg;
                         cardStyle.borderColor = designTokens.color.shiftKind.ShiftLead.border;
+                      } else if (s.shiftKind === "SeniorGuard") {
+                        surface = "border-2";
+                        cardStyle.backgroundColor = designTokens.color.shiftKind.SeniorGuard.bg;
+                        cardStyle.borderColor = designTokens.color.shiftKind.SeniorGuard.border;
                       } else {
                         surface = "border border-app-border bg-app-elevated/80";
                       }
@@ -950,6 +968,10 @@ export function ObjectMonthScheduleGrid({
                       surface = "border-2";
                       cardStyle.backgroundColor = designTokens.color.shiftKind.ShiftLead.bg;
                       cardStyle.borderColor = designTokens.color.shiftKind.ShiftLead.border;
+                    } else if (s.shiftKind === "SeniorGuard") {
+                      surface = "border-2";
+                      cardStyle.backgroundColor = designTokens.color.shiftKind.SeniorGuard.bg;
+                      cardStyle.borderColor = designTokens.color.shiftKind.SeniorGuard.border;
                     } else if (partial) {
                       surface = "border border-app-border bg-app-elevated/80";
                       cardStyle.backgroundColor = designTokens.color.shift.regularCellBg;

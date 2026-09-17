@@ -21,6 +21,7 @@ type DayShortage = {
   reinforcementShort: number;
   rapidResponseShort: number;
   shiftLeadShort: number;
+  seniorGuardShort: number;
   expectedHoursRegular: number;
   regularDayHours: number;
 };
@@ -32,6 +33,7 @@ type ObjectShortage = {
   totalReinforcementShort: number;
   totalRapidResponseShort: number;
   totalShiftLeadShort: number;
+  totalSeniorGuardShort: number;
   days: DayShortage[];
 };
 
@@ -86,6 +88,7 @@ export function GlobalScheduleShortageBell({
           totalReinforcementShort: Math.round(activeDays.reduce((sum, d) => sum + d.reinforcementShort, 0) * 10) / 10,
           totalRapidResponseShort: Math.round(activeDays.reduce((sum, d) => sum + d.rapidResponseShort, 0) * 10) / 10,
           totalShiftLeadShort: Math.round(activeDays.reduce((sum, d) => sum + d.shiftLeadShort, 0) * 10) / 10,
+          totalSeniorGuardShort: Math.round(activeDays.reduce((sum, d) => sum + d.seniorGuardShort, 0) * 10) / 10,
         };
       })
       .filter((obj) => obj.days.length > 0);
@@ -271,7 +274,10 @@ export function GlobalScheduleShortageBell({
                             <> МП −{day.rapidResponseShort} ч</>
                           ) : null}
                           {day.shiftLeadShort > 0 ? (
-                            <> СтМ −{day.shiftLeadShort} ч</>
+                            <> СтСм −{day.shiftLeadShort} ч</>
+                          ) : null}
+                          {day.seniorGuardShort > 0 ? (
+                            <> СтОх −{day.seniorGuardShort} ч</>
                           ) : null}
                         </span>
                         {canDismiss ? (

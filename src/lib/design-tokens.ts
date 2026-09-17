@@ -61,6 +61,11 @@ export const designTokens = {
         border: "#6366F1",
         text: "#312E81",
       },
+      SeniorGuard: {
+        bg: "rgba(13, 148, 136, 0.22)",
+        border: "#0F766E",
+        text: "#115E59",
+      },
     },
   },
   radius: {

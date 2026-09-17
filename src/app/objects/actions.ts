@@ -36,7 +36,7 @@ import {
 } from "../../lib/operations/shift-templates-repository";
 import { activeShiftsSequence } from "../../lib/scheduling/object-shift-templates";
 import { getPreviousCivilDate } from "../../lib/scheduling/shift-template-history";
-import { isGuardPosition, type GuardEmploymentType, type GuardLicenseType, type GuardPosition, type RateUnit, type ShiftKind } from "../../lib/scheduling/types";
+import { isGuardPosition, isShiftKind, type GuardEmploymentType, type GuardLicenseType, type GuardPosition, type RateUnit, type ShiftKind } from "../../lib/scheduling/types";
 
 import {
   createObjectPost,
@@ -307,6 +307,20 @@ const saveShiftTemplatesSchema = z.object({
   stmh5: z.coerce.number().int().min(1).max(24).default(24),
   stmh6: z.coerce.number().int().min(1).max(24).default(24),
   stmh7: z.coerce.number().int().min(1).max(24).default(24),
+  stox1: z.coerce.number().int().min(0).max(24).default(0),
+  stox2: z.coerce.number().int().min(0).max(24).default(0),
+  stox3: z.coerce.number().int().min(0).max(24).default(0),
+  stox4: z.coerce.number().int().min(0).max(24).default(0),
+  stox5: z.coerce.number().int().min(0).max(24).default(0),
+  stox6: z.coerce.number().int().min(0).max(24).default(0),
+  stox7: z.coerce.number().int().min(0).max(24).default(0),
+  stoxh1: z.coerce.number().int().min(1).max(24).default(24),
+  stoxh2: z.coerce.number().int().min(1).max(24).default(24),
+  stoxh3: z.coerce.number().int().min(1).max(24).default(24),
+  stoxh4: z.coerce.number().int().min(1).max(24).default(24),
+  stoxh5: z.coerce.number().int().min(1).max(24).default(24),
+  stoxh6: z.coerce.number().int().min(1).max(24).default(24),
+  stoxh7: z.coerce.number().int().min(1).max(24).default(24),
   postId: z
     .preprocess((v) => (v == null || String(v).trim() === "" ? undefined : String(v).trim()), z.string().uuid().optional()),
 });
@@ -404,6 +418,20 @@ export async function saveShiftTemplatesAction(formData: FormData) {
     stmh5: formData.get("stmh5") ?? 24,
     stmh6: formData.get("stmh6") ?? 24,
     stmh7: formData.get("stmh7") ?? 24,
+    stox1: formData.get("stox1") ?? 0,
+    stox2: formData.get("stox2") ?? 0,
+    stox3: formData.get("stox3") ?? 0,
+    stox4: formData.get("stox4") ?? 0,
+    stox5: formData.get("stox5") ?? 0,
+    stox6: formData.get("stox6") ?? 0,
+    stox7: formData.get("stox7") ?? 0,
+    stoxh1: formData.get("stoxh1") ?? 24,
+    stoxh2: formData.get("stoxh2") ?? 24,
+    stoxh3: formData.get("stoxh3") ?? 24,
+    stoxh4: formData.get("stoxh4") ?? 24,
+    stoxh5: formData.get("stoxh5") ?? 24,
+    stoxh6: formData.get("stoxh6") ?? 24,
+    stoxh7: formData.get("stoxh7") ?? 24,
     postId: formData.get("postId")?.toString().trim() || undefined,
     });
   } catch (error) {
@@ -434,6 +462,10 @@ export async function saveShiftTemplatesAction(formData: FormData) {
       [input.stm1, input.stm2, input.stm3, input.stm4, input.stm5, input.stm6, input.stm7][index] ?? 0,
     shiftLeadShiftHours:
       [input.stmh1, input.stmh2, input.stmh3, input.stmh4, input.stmh5, input.stmh6, input.stmh7][index] ?? 24,
+    shiftsSeniorGuardPerDay:
+      [input.stox1, input.stox2, input.stox3, input.stox4, input.stox5, input.stox6, input.stox7][index] ?? 0,
+    seniorGuardShiftHours:
+      [input.stoxh1, input.stoxh2, input.stoxh3, input.stoxh4, input.stoxh5, input.stoxh6, input.stoxh7][index] ?? 24,
   }));
 
   await replaceShiftTemplatesForObject(input.objectId, perDay, input.effectiveFrom, input.postId ?? null);
@@ -531,7 +563,7 @@ function parseShiftKind(s: FormDataEntryValue | null): ShiftKind | null {
   const v = emptyToNull(s);
   if (v === null) return null;
   if (v === "ReinforcementDay") return "Reinforcement";
-  if (v === "Regular" || v === "Reinforcement" || v === "RapidResponse" || v === "ShiftLead") return v;
+  if (isShiftKind(v)) return v;
   throw new Error("Некорректный тип смены");
 }
 

@@ -1,8 +1,8 @@
 import type { ObjectShiftTemplateRow } from "../operations/shift-templates-repository";
 import { toDateIsoKhabarovsk, getDayKhabarovsk } from "../format/display-date";
-import type { ShiftKind } from "./types";
+import { SHIFT_KINDS, type ShiftKind } from "./types";
 
-export const SHIFT_KIND_ORDER: readonly ShiftKind[] = ["Regular", "Reinforcement", "RapidResponse", "ShiftLead"];
+export const SHIFT_KIND_ORDER: readonly ShiftKind[] = SHIFT_KINDS;
 
 /** Как в `activeShiftsSequence` и UI «Сменность (Шаблон)» на карточке объекта. */
 export const DEFAULT_SHIFTS_PER_DAY = 2;
@@ -13,6 +13,8 @@ export const DEFAULT_RAPID_RESPONSE_SHIFT_HOURS = 24;
 export const DEFAULT_REINFORCEMENT_SHIFT_HOURS = 24;
 export const DEFAULT_SHIFTS_SHIFT_LEAD_PER_DAY = 0;
 export const DEFAULT_SHIFT_LEAD_SHIFT_HOURS = 24;
+export const DEFAULT_SHIFTS_SENIOR_GUARD_PER_DAY = 0;
+export const DEFAULT_SENIOR_GUARD_SHIFT_HOURS = 24;
 
 export type ExpectedShifts = {
   regular: number;
@@ -23,6 +25,8 @@ export type ExpectedShifts = {
   rapidResponseShiftHours: number;
   shiftLead: number;
   shiftLeadShiftHours: number;
+  seniorGuard: number;
+  seniorGuardShiftHours: number;
 };
 
 export function defaultExpectedShiftsForDay(): ExpectedShifts {
@@ -35,6 +39,8 @@ export function defaultExpectedShiftsForDay(): ExpectedShifts {
     rapidResponseShiftHours: DEFAULT_RAPID_RESPONSE_SHIFT_HOURS,
     shiftLead: DEFAULT_SHIFTS_SHIFT_LEAD_PER_DAY,
     shiftLeadShiftHours: DEFAULT_SHIFT_LEAD_SHIFT_HOURS,
+    seniorGuard: DEFAULT_SHIFTS_SENIOR_GUARD_PER_DAY,
+    seniorGuardShiftHours: DEFAULT_SENIOR_GUARD_SHIFT_HOURS,
   };
 }
 
@@ -69,6 +75,7 @@ export function shiftKindsInTemplate(expected: ExpectedShifts): ShiftKind[] {
   if (expected.reinforcement > 0) kinds.push("Reinforcement");
   if (expected.rapidResponse > 0) kinds.push("RapidResponse");
   if (expected.shiftLead > 0) kinds.push("ShiftLead");
+  if (expected.seniorGuard > 0) kinds.push("SeniorGuard");
   return kinds.length > 0 ? kinds : [...SHIFT_KIND_ORDER];
 }
 
@@ -110,11 +117,13 @@ function rowToExpectedShifts(row: ObjectShiftTemplateRow): ExpectedShifts {
     rapidResponseShiftHours: row.rapidResponseShiftHours ?? DEFAULT_RAPID_RESPONSE_SHIFT_HOURS,
     shiftLead: row.shiftsShiftLeadPerDay ?? DEFAULT_SHIFTS_SHIFT_LEAD_PER_DAY,
     shiftLeadShiftHours: row.shiftLeadShiftHours ?? DEFAULT_SHIFT_LEAD_SHIFT_HOURS,
+    seniorGuard: row.shiftsSeniorGuardPerDay ?? DEFAULT_SHIFTS_SENIOR_GUARD_PER_DAY,
+    seniorGuardShiftHours: row.seniorGuardShiftHours ?? DEFAULT_SENIOR_GUARD_SHIFT_HOURS,
   };
 }
 
 /**
- * @deprecated Раньше 0 усиления/МП/СтМ читался как «наследовать».
+ * @deprecated Раньше 0 усиления/МП/СтСм/СтОх читался как «наследовать».
  * UI «Сменность» пишет 0 = тип не нужен — не используй для save/read плана.
  * Оставлено для редких legacy-мерджей; новое поведение — брать current as-is.
  */
@@ -217,6 +226,8 @@ export function weeklyExpectedShiftsFromDateMap(
     rapidResponseShiftHours: perDow.map((v) => v.rapidResponseShiftHours),
     shiftLead: perDow.map((v) => v.shiftLead),
     shiftLeadShiftHours: perDow.map((v) => v.shiftLeadShiftHours),
+    seniorGuard: perDow.map((v) => v.seniorGuard),
+    seniorGuardShiftHours: perDow.map((v) => v.seniorGuardShiftHours),
   };
 }
 
@@ -329,10 +340,15 @@ export function aggregateExpectedShiftParts(parts: ReadonlyArray<ExpectedShifts>
     (sum, part) => sum + part.shiftLead * part.shiftLeadShiftHours,
     0,
   );
+  const seniorGuardHours = parts.reduce(
+    (sum, part) => sum + part.seniorGuard * part.seniorGuardShiftHours,
+    0,
+  );
   const regular = parts.reduce((sum, part) => sum + part.regular, 0);
   const reinforcement = parts.reduce((sum, part) => sum + part.reinforcement, 0);
   const rapidResponse = parts.reduce((sum, part) => sum + part.rapidResponse, 0);
   const shiftLead = parts.reduce((sum, part) => sum + part.shiftLead, 0);
+  const seniorGuard = parts.reduce((sum, part) => sum + part.seniorGuard, 0);
 
   return {
     regular,
@@ -350,6 +366,9 @@ export function aggregateExpectedShiftParts(parts: ReadonlyArray<ExpectedShifts>
     shiftLead,
     shiftLeadShiftHours:
       shiftLead > 0 ? Math.max(1, Math.round(shiftLeadHours / shiftLead)) : DEFAULT_SHIFT_LEAD_SHIFT_HOURS,
+    seniorGuard,
+    seniorGuardShiftHours:
+      seniorGuard > 0 ? Math.max(1, Math.round(seniorGuardHours / seniorGuard)) : DEFAULT_SENIOR_GUARD_SHIFT_HOURS,
   };
 }
 
@@ -363,6 +382,8 @@ export type ActiveShiftsSequenceResult = {
   rapidResponseShiftHours: number[];
   shiftLead: number[];
   shiftLeadShiftHours: number[];
+  seniorGuard: number[];
+  seniorGuardShiftHours: number[];
 };
 
 function pickActiveTemplateRowForDow(
@@ -402,6 +423,8 @@ export function activeShiftsSequence(
   const rapidResponseShiftHours: number[] = [];
   const shiftLead: number[] = [];
   const shiftLeadShiftHours: number[] = [];
+  const seniorGuard: number[] = [];
+  const seniorGuardShiftHours: number[] = [];
 
   for (let dow = 1; dow <= 7; dow++) {
     const best = pickActiveTemplateRowForDow(rows, objectId, dow, referenceCivilDate, postId);
@@ -413,9 +436,22 @@ export function activeShiftsSequence(
     rapidResponseShiftHours.push(best?.rapidResponseShiftHours ?? DEFAULT_RAPID_RESPONSE_SHIFT_HOURS);
     shiftLead.push(best?.shiftsShiftLeadPerDay ?? DEFAULT_SHIFTS_SHIFT_LEAD_PER_DAY);
     shiftLeadShiftHours.push(best?.shiftLeadShiftHours ?? DEFAULT_SHIFT_LEAD_SHIFT_HOURS);
+    seniorGuard.push(best?.shiftsSeniorGuardPerDay ?? DEFAULT_SHIFTS_SENIOR_GUARD_PER_DAY);
+    seniorGuardShiftHours.push(best?.seniorGuardShiftHours ?? DEFAULT_SENIOR_GUARD_SHIFT_HOURS);
   }
 
-  return { regular, reinforcement, shiftHours, reinforcementShiftHours, rapidResponse, rapidResponseShiftHours, shiftLead, shiftLeadShiftHours };
+  return {
+    regular,
+    reinforcement,
+    shiftHours,
+    reinforcementShiftHours,
+    rapidResponse,
+    rapidResponseShiftHours,
+    shiftLead,
+    shiftLeadShiftHours,
+    seniorGuard,
+    seniorGuardShiftHours,
+  };
 }
 
 /** Для карточки шаблона: берём значения версии as-is (0 = тип не нужен). */

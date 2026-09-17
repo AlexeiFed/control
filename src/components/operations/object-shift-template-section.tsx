@@ -23,6 +23,7 @@ type TemplateDraftDay = {
   reinforcementHours: number;
   rapidResponseHours: number;
   shiftLeadHours: number;
+  seniorGuardHours: number;
 };
 
 type TemplateDraft = {
@@ -46,6 +47,10 @@ function buildTemplateDraft(sequence: ActiveShiftsSequenceResult, effectiveFrom:
       shiftLeadHours: templatePartTotalHours(
         sequence.shiftLead[i] ?? 0,
         sequence.shiftLeadShiftHours[i] ?? 24,
+      ),
+      seniorGuardHours: templatePartTotalHours(
+        sequence.seniorGuard[i] ?? 0,
+        sequence.seniorGuardShiftHours[i] ?? 24,
       ),
     })),
   };
@@ -71,7 +76,7 @@ function HoursField({
 }) {
   return (
     <label className="grid gap-1">
-      <span className={`text-[10px] font-semibold uppercase ${labelClassName}`}>{label}</span>
+      <span className={`text-[10px] font-semibold tracking-wide ${labelClassName}`}>{label}</span>
       <div className="relative">
         <input
           type="number"
@@ -191,6 +196,7 @@ export function ObjectShiftTemplateSection({
               const reinforcement = encodeTemplateTotalHours(day.reinforcementHours);
               const rapid = encodeTemplateTotalHours(day.rapidResponseHours);
               const shiftLead = encodeTemplateTotalHours(day.shiftLeadHours);
+              const seniorGuard = encodeTemplateTotalHours(day.seniorGuardHours);
               fd.set(`d${n}`, String(regular.count));
               fd.set(`h${n}`, String(regular.hours));
               fd.set(`r${n}`, String(reinforcement.count));
@@ -199,6 +205,8 @@ export function ObjectShiftTemplateSection({
               fd.set(`mph${n}`, String(rapid.hours));
               fd.set(`stm${n}`, String(shiftLead.count));
               fd.set(`stmh${n}`, String(shiftLead.hours));
+              fd.set(`stox${n}`, String(seniorGuard.count));
+              fd.set(`stoxh${n}`, String(seniorGuard.hours));
             });
             fd.set("noRedirect", "true");
             setIsSavingTemplate(true);
@@ -271,11 +279,20 @@ export function ObjectShiftTemplateSection({
                     </div>
                     <div className="border-b border-app-border/40 pb-2">
                       <HoursField
-                        label="СтМ"
+                        label="СтСм"
                         labelClassName="text-accent-secondary"
                         focusClassName="focus:border-accent-secondary"
                         value={draftDay.shiftLeadHours}
                         onChange={(shiftLeadHours) => patchTemplateDay(i, { shiftLeadHours })}
+                      />
+                    </div>
+                    <div className="border-b border-app-border/40 pb-2">
+                      <HoursField
+                        label="СтОх"
+                        labelClassName="text-status-active"
+                        focusClassName="focus:border-status-active"
+                        value={draftDay.seniorGuardHours}
+                        onChange={(seniorGuardHours) => patchTemplateDay(i, { seniorGuardHours })}
                       />
                     </div>
                     <div>
@@ -318,6 +335,10 @@ export function ObjectShiftTemplateSection({
               templateSequence.shiftLead[i] ?? 0,
               templateSequence.shiftLeadShiftHours[i] ?? 24,
             );
+            const seniorGuardHours = templatePartTotalHours(
+              templateSequence.seniorGuard[i] ?? 0,
+              templateSequence.seniorGuardShiftHours[i] ?? 24,
+            );
             return (
               <div
                 key={day}
@@ -328,7 +349,7 @@ export function ObjectShiftTemplateSection({
                 </span>
                 <div className="flex flex-col items-center">
                   <div className="text-lg font-bold sm:text-xl">{regularHours}</div>
-                  <span className="text-center text-[8px] uppercase leading-tight text-app-muted sm:text-[9px]">
+                    <span className="text-center text-[8px] leading-tight text-app-muted sm:text-[9px]">
                     <span className="sm:hidden">осн. ч</span>
                     <span className="hidden sm:inline">Обычные, ч</span>
                   </span>
@@ -336,7 +357,7 @@ export function ObjectShiftTemplateSection({
                 {reinforcementHours > 0 ? (
                   <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
                     <div className="text-base font-bold text-accent-warning sm:text-lg">{reinforcementHours}</div>
-                    <span className="text-center text-[8px] uppercase leading-tight text-accent-warning sm:text-[9px]">
+                    <span className="text-center text-[8px] leading-tight text-accent-warning sm:text-[9px]">
                       <span className="sm:hidden">ус. ч</span>
                       <span className="hidden sm:inline">Усиление, ч</span>
                     </span>
@@ -345,7 +366,7 @@ export function ObjectShiftTemplateSection({
                 {rapidHours > 0 ? (
                   <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
                     <div className="text-base font-bold text-accent-primary sm:text-lg">{rapidHours}</div>
-                    <span className="text-center text-[8px] uppercase leading-tight text-accent-primary sm:text-[9px]">
+                    <span className="text-center text-[8px] leading-tight text-accent-primary sm:text-[9px]">
                       МП, ч
                     </span>
                   </div>
@@ -353,8 +374,16 @@ export function ObjectShiftTemplateSection({
                 {shiftLeadHours > 0 ? (
                   <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
                     <div className="text-base font-bold text-accent-secondary sm:text-lg">{shiftLeadHours}</div>
-                    <span className="text-center text-[8px] uppercase leading-tight text-accent-secondary sm:text-[9px]">
-                      СтМ, ч
+                    <span className="text-center text-[8px] leading-tight text-accent-secondary sm:text-[9px]">
+                      СтСм, ч
+                    </span>
+                  </div>
+                ) : null}
+                {seniorGuardHours > 0 ? (
+                  <div className="mt-1 flex flex-col items-center border-t border-app-border pt-1">
+                    <div className="text-base font-bold text-status-active sm:text-lg">{seniorGuardHours}</div>
+                    <span className="text-center text-[8px] leading-tight text-status-active sm:text-[9px]">
+                      СтОх, ч
                     </span>
                   </div>
                 ) : null}

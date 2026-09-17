@@ -40,6 +40,8 @@ export type ScheduleDayShortage = {
   rapidResponseShort: number;
   /** Недобор часов старшего смены. */
   shiftLeadShort: number;
+  /** Недобор часов старшего охранника. */
+  seniorGuardShort: number;
   expectedHoursRegular: number;
   regularDayHours: number;
 };
@@ -51,6 +53,7 @@ export type ScheduleObjectShortage = {
   totalReinforcementShort: number;
   totalRapidResponseShort: number;
   totalShiftLeadShort: number;
+  totalSeniorGuardShort: number;
   days: ScheduleDayShortage[];
 };
 
@@ -64,17 +67,22 @@ export type DayPlanMetrics = {
   expectedRapidResponseHours: number;
   expectedShiftLead: number;
   expectedShiftLeadHours: number;
+  expectedSeniorGuard: number;
+  expectedSeniorGuardHours: number;
   reinforcementShiftHours: number;
   rapidResponseShiftHours: number;
   shiftLeadShiftHours: number;
+  seniorGuardShiftHours: number;
   regularDayHours: number;
   reinforcementDayHours: number;
   rapidResponseDayHours: number;
   shiftLeadDayHours: number;
+  seniorGuardDayHours: number;
   regCount: number;
   reinforcementCount: number;
   rapidResponseCount: number;
   shiftLeadCount: number;
+  seniorGuardCount: number;
   hoursShort: number;
   hoursOver: number;
   reinforcementShort: number;
@@ -89,15 +97,20 @@ export type DayPlanMetrics = {
   shiftLeadOver: number;
   shiftLeadHoursShort: number;
   shiftLeadHoursOver: number;
+  seniorGuardShort: number;
+  seniorGuardOver: number;
+  seniorGuardHoursShort: number;
+  seniorGuardHoursOver: number;
 };
 
-/** Есть ли недобор часов (осн/ус/мп/СтМ) относительно плана дня. */
+/** Есть ли недобор часов (осн/ус/мп/СтСм/СтОх) относительно плана дня. */
 export function dayPlanHasHoursShortage(metrics: DayPlanMetrics): boolean {
   return (
     metrics.hoursShort > 0 ||
     metrics.reinforcementHoursShort > 0 ||
     metrics.rapidResponseHoursShort > 0 ||
-    metrics.shiftLeadHoursShort > 0
+    metrics.shiftLeadHoursShort > 0 ||
+    metrics.seniorGuardHoursShort > 0
   );
 }
 
@@ -126,7 +139,17 @@ export function computeDayPlanMetrics(
   const expectedMpHours = expectedMp * norms.rapidResponseShiftHours;
   const expectedShiftLead = norms.shiftLead;
   const expectedShiftLeadHours = expectedShiftLead * norms.shiftLeadShiftHours;
-  if (expectedHoursRegular <= 0 && expectedReinf <= 0 && expectedMp <= 0 && expectedShiftLead <= 0) return null;
+  const expectedSeniorGuard = norms.seniorGuard;
+  const expectedSeniorGuardHours = expectedSeniorGuard * norms.seniorGuardShiftHours;
+  if (
+    expectedHoursRegular <= 0 &&
+    expectedReinf <= 0 &&
+    expectedMp <= 0 &&
+    expectedShiftLead <= 0 &&
+    expectedSeniorGuard <= 0
+  ) {
+    return null;
+  }
 
   // Полный невыход не даёт часов; частичная отработка (workedUntil) — даёт отработанный фрагмент.
   const active = dayShifts.filter((s) => shiftCoverageMinutes(s) > 0);
@@ -134,6 +157,7 @@ export function computeDayPlanMetrics(
   const reinforcementShifts = active.filter((s) => s.shiftKind === "Reinforcement");
   const rapidResponseShifts = active.filter((s) => s.shiftKind === "RapidResponse");
   const shiftLeadShifts = active.filter((s) => s.shiftKind === "ShiftLead");
+  const seniorGuardShifts = active.filter((s) => s.shiftKind === "SeniorGuard");
   const regularDayMinutes = regularShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
   const reinforcementDayMinutes = reinforcementShifts.reduce(
     (sum, s) => sum + shiftCoverageMinutes(s),
@@ -144,13 +168,16 @@ export function computeDayPlanMetrics(
     0,
   );
   const shiftLeadDayMinutes = shiftLeadShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
+  const seniorGuardDayMinutes = seniorGuardShifts.reduce((sum, s) => sum + shiftCoverageMinutes(s), 0);
   const regularDayHours = roundHours(regularDayMinutes / 60);
   const reinforcementDayHours = roundHours(reinforcementDayMinutes / 60);
   const rapidResponseDayHours = roundHours(rapidResponseDayMinutes / 60);
   const shiftLeadDayHours = roundHours(shiftLeadDayMinutes / 60);
+  const seniorGuardDayHours = roundHours(seniorGuardDayMinutes / 60);
   const reinforcementCount = reinforcementShifts.length;
   const rapidResponseCount = rapidResponseShifts.length;
   const shiftLeadCount = shiftLeadShifts.length;
+  const seniorGuardCount = seniorGuardShifts.length;
 
   return {
     expectedHoursRegular: roundHours(expectedHoursRegular),
@@ -160,17 +187,22 @@ export function computeDayPlanMetrics(
     expectedRapidResponseHours: roundHours(expectedMpHours),
     expectedShiftLead,
     expectedShiftLeadHours: roundHours(expectedShiftLeadHours),
+    expectedSeniorGuard,
+    expectedSeniorGuardHours: roundHours(expectedSeniorGuardHours),
     reinforcementShiftHours: norms.reinforcementShiftHours,
     rapidResponseShiftHours: norms.rapidResponseShiftHours,
     shiftLeadShiftHours: norms.shiftLeadShiftHours,
+    seniorGuardShiftHours: norms.seniorGuardShiftHours,
     regularDayHours,
     reinforcementDayHours,
     rapidResponseDayHours,
     shiftLeadDayHours,
+    seniorGuardDayHours,
     regCount: regularShifts.length,
     reinforcementCount,
     rapidResponseCount,
     shiftLeadCount,
+    seniorGuardCount,
     hoursShort: Math.max(0, roundHours(expectedHoursRegular - regularDayHours)),
     hoursOver: Math.max(0, roundHours(regularDayHours - expectedHoursRegular)),
     reinforcementShort: expectedReinf > 0 ? Math.max(0, expectedReinf - reinforcementCount) : 0,
@@ -191,6 +223,12 @@ export function computeDayPlanMetrics(
       expectedShiftLeadHours > 0 ? Math.max(0, roundHours(expectedShiftLeadHours - shiftLeadDayHours)) : 0,
     shiftLeadHoursOver:
       expectedShiftLeadHours > 0 ? Math.max(0, roundHours(shiftLeadDayHours - expectedShiftLeadHours)) : 0,
+    seniorGuardShort: expectedSeniorGuard > 0 ? Math.max(0, expectedSeniorGuard - seniorGuardCount) : 0,
+    seniorGuardOver: expectedSeniorGuard > 0 ? Math.max(0, seniorGuardCount - expectedSeniorGuard) : 0,
+    seniorGuardHoursShort:
+      expectedSeniorGuardHours > 0 ? Math.max(0, roundHours(expectedSeniorGuardHours - seniorGuardDayHours)) : 0,
+    seniorGuardHoursOver:
+      expectedSeniorGuardHours > 0 ? Math.max(0, roundHours(seniorGuardDayHours - expectedSeniorGuardHours)) : 0,
   };
 }
 
@@ -207,6 +245,7 @@ export function computeDayScheduleShortage(
     reinforcementShort: metrics.reinforcementHoursShort,
     rapidResponseShort: metrics.rapidResponseHoursShort,
     shiftLeadShort: metrics.shiftLeadHoursShort,
+    seniorGuardShort: metrics.seniorGuardHoursShort,
     expectedHoursRegular: metrics.expectedHoursRegular,
     regularDayHours: metrics.regularDayHours,
   };
@@ -230,6 +269,7 @@ export function computePostAwareDayShortage(
   let reinforcementShort = 0;
   let rapidResponseShort = 0;
   let shiftLeadShort = 0;
+  let seniorGuardShort = 0;
   let expectedHoursRegular = 0;
   let regularDayHours = 0;
   let any = false;
@@ -246,6 +286,7 @@ export function computePostAwareDayShortage(
     reinforcementShort += metrics.reinforcementHoursShort;
     rapidResponseShort += metrics.rapidResponseHoursShort;
     shiftLeadShort += metrics.shiftLeadHoursShort;
+    seniorGuardShort += metrics.seniorGuardHoursShort;
   }
 
   if (!any) return null;
@@ -254,6 +295,7 @@ export function computePostAwareDayShortage(
     reinforcementShort: roundHours(reinforcementShort),
     rapidResponseShort: roundHours(rapidResponseShort),
     shiftLeadShort: roundHours(shiftLeadShort),
+    seniorGuardShort: roundHours(seniorGuardShort),
     expectedHoursRegular: roundHours(expectedHoursRegular),
     regularDayHours: roundHours(regularDayHours),
   };
@@ -311,6 +353,7 @@ export function computeScheduleShortages(
     let totalReinforcementShort = 0;
     let totalRapidResponseShort = 0;
     let totalShiftLeadShort = 0;
+    let totalSeniorGuardShort = 0;
 
     for (const day of weekDays) {
       const anchorByObjectId = buildOperationalDayAnchorByObjectIdForDate(
@@ -339,6 +382,7 @@ export function computeScheduleShortages(
       totalReinforcementShort += partial.reinforcementShort;
       totalRapidResponseShort += partial.rapidResponseShort;
       totalShiftLeadShort += partial.shiftLeadShort;
+      totalSeniorGuardShort += partial.seniorGuardShort;
       days.push({
         dateIso: day.iso,
         dayLabel: day.label,
@@ -354,6 +398,7 @@ export function computeScheduleShortages(
       totalReinforcementShort: roundHours(totalReinforcementShort),
       totalRapidResponseShort: roundHours(totalRapidResponseShort),
       totalShiftLeadShort: roundHours(totalShiftLeadShort),
+      totalSeniorGuardShort: roundHours(totalSeniorGuardShort),
       days,
     });
   }

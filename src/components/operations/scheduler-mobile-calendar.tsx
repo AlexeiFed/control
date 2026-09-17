@@ -20,7 +20,8 @@ const shiftKindLabel: Record<ShiftKind, string> = {
   Regular: "осн",
   Reinforcement: "ус",
   RapidResponse: "МП",
-  ShiftLead: "СтМ",
+  ShiftLead: "СтСм",
+  SeniorGuard: "СтОх",
 };
 
 export function SchedulerMobileCalendar({

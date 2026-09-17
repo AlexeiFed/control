@@ -232,6 +232,10 @@ ALTER TABLE object_shift_templates
   ADD COLUMN IF NOT EXISTS shifts_shift_lead_per_day int NOT NULL DEFAULT 0 CHECK (shifts_shift_lead_per_day >= 0);
 ALTER TABLE object_shift_templates
   ADD COLUMN IF NOT EXISTS shift_lead_shift_hours int NOT NULL DEFAULT 24 CHECK (shift_lead_shift_hours BETWEEN 1 AND 24);
+ALTER TABLE object_shift_templates
+  ADD COLUMN IF NOT EXISTS shifts_senior_guard_per_day int NOT NULL DEFAULT 0 CHECK (shifts_senior_guard_per_day >= 0);
+ALTER TABLE object_shift_templates
+  ADD COLUMN IF NOT EXISTS senior_guard_shift_hours int NOT NULL DEFAULT 24 CHECK (senior_guard_shift_hours BETWEEN 1 AND 24);
 
 ALTER TABLE IF EXISTS object_shift_templates
   ADD COLUMN IF NOT EXISTS reinforcement_shift_hours int NOT NULL DEFAULT 24 CHECK (reinforcement_shift_hours BETWEEN 1 AND 24);
@@ -261,7 +265,7 @@ CREATE TABLE IF NOT EXISTS object_rate_rules (
   priority int NOT NULL DEFAULT 100,
   days_of_week int[] CHECK (days_of_week IS NULL OR days_of_week <@ ARRAY[1, 2, 3, 4, 5, 6, 7]::int[]),
   is_holiday boolean,
-  shift_kind text CHECK (shift_kind IS NULL OR shift_kind IN ('Regular', 'Reinforcement', 'RapidResponse', 'ShiftLead')),
+  shift_kind text CHECK (shift_kind IS NULL OR shift_kind IN ('Regular', 'Reinforcement', 'RapidResponse', 'ShiftLead', 'SeniorGuard')),
   starts_at time,
   ends_at time,
   position text CHECK (position IS NULL OR position IN ('ShiftLead', 'Guard', 'Curator', 'SeniorGuard')),
@@ -279,7 +283,7 @@ CREATE TABLE IF NOT EXISTS object_rate_rules (
 -- Смены: вид и ручной override ставки
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS shift_kind text NOT NULL DEFAULT 'Regular';
 ALTER TABLE shifts DROP CONSTRAINT IF EXISTS shifts_shift_kind_check;
-ALTER TABLE shifts ADD CONSTRAINT shifts_shift_kind_check CHECK (shift_kind IN ('Regular', 'Reinforcement', 'RapidResponse', 'ShiftLead'));
+ALTER TABLE shifts ADD CONSTRAINT shifts_shift_kind_check CHECK (shift_kind IN ('Regular', 'Reinforcement', 'RapidResponse', 'ShiftLead', 'SeniorGuard'));
 
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS manual_client_rate_cents int CHECK (manual_client_rate_cents IS NULL OR manual_client_rate_cents >= 0);
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS manual_guard_rate_cents int CHECK (manual_guard_rate_cents IS NULL OR manual_guard_rate_cents >= 0);

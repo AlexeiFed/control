@@ -9,17 +9,30 @@ async function getShiftTemplateExtraSelects(): Promise<{
   rapidResponseShiftHours: string;
   shiftsShiftLeadPerDay: string;
   shiftLeadShiftHours: string;
+  shiftsSeniorGuardPerDay: string;
+  seniorGuardShiftHours: string;
   insertReinforcementHoursColumn: boolean;
   insertShiftLeadColumns: boolean;
+  insertSeniorGuardColumns: boolean;
 }> {
-  const [hasShiftHours, hasReinforcementHours, hasRapidResponse, hasRapidResponseHours, hasShiftLead, hasShiftLeadHours] =
-    await Promise.all([
+  const [
+    hasShiftHours,
+    hasReinforcementHours,
+    hasRapidResponse,
+    hasRapidResponseHours,
+    hasShiftLead,
+    hasShiftLeadHours,
+    hasSeniorGuard,
+    hasSeniorGuardHours,
+  ] = await Promise.all([
     tableColumnExists("object_shift_templates", "shift_hours"),
     tableColumnExists("object_shift_templates", "reinforcement_shift_hours"),
     tableColumnExists("object_shift_templates", "shifts_rapid_response_per_day"),
     tableColumnExists("object_shift_templates", "rapid_response_shift_hours"),
     tableColumnExists("object_shift_templates", "shifts_shift_lead_per_day"),
     tableColumnExists("object_shift_templates", "shift_lead_shift_hours"),
+    tableColumnExists("object_shift_templates", "shifts_senior_guard_per_day"),
+    tableColumnExists("object_shift_templates", "senior_guard_shift_hours"),
   ]);
   return {
     shiftHours: hasShiftHours ? "shift_hours" : "24 AS shift_hours",
@@ -34,8 +47,15 @@ async function getShiftTemplateExtraSelects(): Promise<{
       : "24 AS rapid_response_shift_hours",
     shiftsShiftLeadPerDay: hasShiftLead ? "shifts_shift_lead_per_day" : "0 AS shifts_shift_lead_per_day",
     shiftLeadShiftHours: hasShiftLeadHours ? "shift_lead_shift_hours" : "24 AS shift_lead_shift_hours",
+    shiftsSeniorGuardPerDay: hasSeniorGuard
+      ? "shifts_senior_guard_per_day"
+      : "0 AS shifts_senior_guard_per_day",
+    seniorGuardShiftHours: hasSeniorGuardHours
+      ? "senior_guard_shift_hours"
+      : "24 AS senior_guard_shift_hours",
     insertReinforcementHoursColumn: hasReinforcementHours,
     insertShiftLeadColumns: hasShiftLead && hasShiftLeadHours,
+    insertSeniorGuardColumns: hasSeniorGuard && hasSeniorGuardHours,
   };
 }
 
@@ -50,6 +70,8 @@ export type ObjectShiftTemplateRow = {
   rapidResponseShiftHours?: number;
   shiftsShiftLeadPerDay?: number;
   shiftLeadShiftHours?: number;
+  shiftsSeniorGuardPerDay?: number;
+  seniorGuardShiftHours?: number;
   effectiveFrom: string;
   effectiveTo: string | null;
   postId?: string | null;
@@ -68,6 +90,8 @@ type DbRow = {
   rapid_response_shift_hours: number;
   shifts_shift_lead_per_day: number;
   shift_lead_shift_hours: number;
+  shifts_senior_guard_per_day: number;
+  senior_guard_shift_hours: number;
   effective_from: string;
   effective_to: string | null;
   post_id: string | null;
@@ -90,6 +114,8 @@ function mapRow(row: DbRow): ObjectShiftTemplateRow {
     rapidResponseShiftHours: row.rapid_response_shift_hours ?? 24,
     shiftsShiftLeadPerDay: row.shifts_shift_lead_per_day ?? 0,
     shiftLeadShiftHours: row.shift_lead_shift_hours ?? 24,
+    shiftsSeniorGuardPerDay: row.shifts_senior_guard_per_day ?? 0,
+    seniorGuardShiftHours: row.senior_guard_shift_hours ?? 24,
     effectiveFrom: String(row.effective_from).slice(0, 10),
     effectiveTo: row.effective_to ? String(row.effective_to).slice(0, 10) : null,
     postId: row.post_id,
@@ -114,6 +140,8 @@ export async function listShiftTemplatesForObjectIds(objectIds: string[]): Promi
         ${qualifyTemplateSelect(extra.rapidResponseShiftHours)},
         ${qualifyTemplateSelect(extra.shiftsShiftLeadPerDay)},
         ${qualifyTemplateSelect(extra.shiftLeadShiftHours)},
+        ${qualifyTemplateSelect(extra.shiftsSeniorGuardPerDay)},
+        ${qualifyTemplateSelect(extra.seniorGuardShiftHours)},
         t.effective_from::text,
         t.effective_to::text,
         ${hasPostId ? "t.post_id" : "NULL::uuid AS post_id"},
@@ -146,6 +174,8 @@ export async function copyShiftTemplatesToPost(objectId: string, postId: string)
         rapid_response_shift_hours,
         shifts_shift_lead_per_day,
         shift_lead_shift_hours,
+        shifts_senior_guard_per_day,
+        senior_guard_shift_hours,
         effective_from,
         effective_to,
         post_id
@@ -161,6 +191,8 @@ export async function copyShiftTemplatesToPost(objectId: string, postId: string)
         rapid_response_shift_hours,
         shifts_shift_lead_per_day,
         shift_lead_shift_hours,
+        shifts_senior_guard_per_day,
+        senior_guard_shift_hours,
         effective_from,
         effective_to,
         $2::uuid
@@ -186,6 +218,8 @@ export async function replaceShiftTemplatesForObject(
     rapidResponseShiftHours: number;
     shiftsShiftLeadPerDay: number;
     shiftLeadShiftHours: number;
+    shiftsSeniorGuardPerDay: number;
+    seniorGuardShiftHours: number;
   }>,
   effectiveFrom: string,
   postId: string | null = null,
@@ -242,60 +276,52 @@ export async function replaceShiftTemplatesForObject(
     );
     for (const row of perDay) {
       if (extra.insertReinforcementHoursColumn) {
-        const shiftLeadSql = extra.insertShiftLeadColumns
-          ? `shifts_shift_lead_per_day, shift_lead_shift_hours,`
-          : "";
-        const shiftLeadValues = extra.insertShiftLeadColumns ? `, $9, $10` : "";
-        const postIdSql = hasPostId ? `, post_id` : "";
-        const baseParamCount = extra.insertShiftLeadColumns ? 10 : 8;
-        const effectiveFromIndex = baseParamCount + 1;
-        const effectiveToIndex = baseParamCount + 2;
-        const postIdValue = hasPostId ? `, $${baseParamCount + 3}::uuid` : "";
-        const insertParams = extra.insertShiftLeadColumns
-          ? [
-              objectId,
-              row.dayOfWeek,
-              row.shiftsPerDay,
-              row.shiftsReinforcementPerDay,
-              row.shiftHours,
-              row.reinforcementShiftHours,
-              row.shiftsRapidResponsePerDay,
-              row.rapidResponseShiftHours,
-              row.shiftsShiftLeadPerDay,
-              row.shiftLeadShiftHours,
-              effectiveFrom,
-              newEffectiveTo,
-            ]
-          : [
-              objectId,
-              row.dayOfWeek,
-              row.shiftsPerDay,
-              row.shiftsReinforcementPerDay,
-              row.shiftHours,
-              row.reinforcementShiftHours,
-              row.shiftsRapidResponsePerDay,
-              row.rapidResponseShiftHours,
-              effectiveFrom,
-              newEffectiveTo,
-            ];
-        if (hasPostId) insertParams.push(postId);
+        const columns = [
+          "object_id",
+          "day_of_week",
+          "shifts_per_day",
+          "shifts_reinforcement_per_day",
+          "shift_hours",
+          "reinforcement_shift_hours",
+          "shifts_rapid_response_per_day",
+          "rapid_response_shift_hours",
+        ];
+        const insertParams: Array<string | number | null> = [
+          objectId,
+          row.dayOfWeek,
+          row.shiftsPerDay,
+          row.shiftsReinforcementPerDay,
+          row.shiftHours,
+          row.reinforcementShiftHours,
+          row.shiftsRapidResponsePerDay,
+          row.rapidResponseShiftHours,
+        ];
+        if (extra.insertShiftLeadColumns) {
+          columns.push("shifts_shift_lead_per_day", "shift_lead_shift_hours");
+          insertParams.push(row.shiftsShiftLeadPerDay, row.shiftLeadShiftHours);
+        }
+        if (extra.insertSeniorGuardColumns) {
+          columns.push("shifts_senior_guard_per_day", "senior_guard_shift_hours");
+          insertParams.push(row.shiftsSeniorGuardPerDay, row.seniorGuardShiftHours);
+        }
+        columns.push("effective_from", "effective_to");
+        insertParams.push(effectiveFrom, newEffectiveTo);
+        if (hasPostId) {
+          columns.push("post_id");
+          insertParams.push(postId);
+        }
+        const placeholders = columns.map((column, index) => {
+          const n = index + 1;
+          if (column === "effective_from" || column === "effective_to") return `$${n}::date`;
+          if (column === "post_id") return `$${n}::uuid`;
+          return `$${n}`;
+        });
         await client.query(
           `
             INSERT INTO object_shift_templates (
-              object_id,
-              day_of_week,
-              shifts_per_day,
-              shifts_reinforcement_per_day,
-              shift_hours,
-              reinforcement_shift_hours,
-              shifts_rapid_response_per_day,
-              rapid_response_shift_hours,
-              ${shiftLeadSql}
-              effective_from,
-              effective_to
-              ${postIdSql}
+              ${columns.join(",\n              ")}
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8${shiftLeadValues}, $${effectiveFromIndex}::date, $${effectiveToIndex}::date${postIdValue})
+            VALUES (${placeholders.join(", ")})
           `,
           insertParams,
         );

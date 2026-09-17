@@ -34,6 +34,8 @@ describe("object shift templates", () => {
         rapidResponseShiftHours: 12,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       }),
     ).toEqual(["RapidResponse"]);
     expect(
@@ -46,6 +48,8 @@ describe("object shift templates", () => {
         rapidResponseShiftHours: 24,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       }),
     ).toEqual(["Regular", "Reinforcement"]);
   });
@@ -60,6 +64,8 @@ describe("object shift templates", () => {
       rapidResponseShiftHours: 12,
       shiftLead: 0,
       shiftLeadShiftHours: 24,
+      seniorGuard: 0,
+      seniorGuardShiftHours: 24,
     };
     expect(resolveShiftKindForTemplate(expected, "Regular")).toBe("RapidResponse");
     expect(resolveShiftKindForTemplate(expected, "RapidResponse")).toBe("RapidResponse");
@@ -113,6 +119,8 @@ describe("object shift templates", () => {
       rapidResponseShiftHours: 24,
       shiftLead: 0,
       shiftLeadShiftHours: 24,
+      seniorGuard: 0,
+      seniorGuardShiftHours: 24,
     });
     expect(map.o1?.[weekIsos[1]!]).toEqual({
       regular: 2,
@@ -123,6 +131,8 @@ describe("object shift templates", () => {
       rapidResponseShiftHours: 24,
       shiftLead: 0,
       shiftLeadShiftHours: 24,
+      seniorGuard: 0,
+      seniorGuardShiftHours: 24,
     });
   });
 
@@ -227,6 +237,8 @@ describe("object shift templates", () => {
         rapidResponseShiftHours: 24,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       },
       "2026-05-19": {
         regular: 2,
@@ -237,6 +249,8 @@ describe("object shift templates", () => {
         rapidResponseShiftHours: 24,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       },
     });
   });

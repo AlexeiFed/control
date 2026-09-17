@@ -11,6 +11,8 @@ const plan60 = {
   rapidResponseShiftHours: 24,
   shiftLead: 0,
   shiftLeadShiftHours: 24,
+  seniorGuard: 0,
+  seniorGuardShiftHours: 24,
 };
 
 function regularShift(hours: number, id = "s1"): Shift {

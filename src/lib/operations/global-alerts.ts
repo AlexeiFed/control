@@ -40,6 +40,7 @@ export type GlobalAlertDayShortage = {
   reinforcementShort: number;
   rapidResponseShort: number;
   shiftLeadShort: number;
+  seniorGuardShort: number;
   expectedHoursRegular: number;
   regularDayHours: number;
 };
@@ -51,6 +52,7 @@ export type GlobalAlertObjectShortage = {
   totalReinforcementShort: number;
   totalRapidResponseShort: number;
   totalShiftLeadShort: number;
+  totalSeniorGuardShort: number;
   days: GlobalAlertDayShortage[];
 };
 

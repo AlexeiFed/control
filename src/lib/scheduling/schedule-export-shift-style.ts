@@ -49,6 +49,16 @@ export function resolveShiftExportColors(
     };
   }
 
+  if (shiftKind === "SeniorGuard") {
+    const senior = designTokens.color.shiftKind.SeniorGuard;
+    return {
+      fill: senior.bg,
+      border: senior.border,
+      text: senior.text,
+      borderWidth: 2,
+    };
+  }
+
   const lead = designTokens.color.shiftKind.ShiftLead;
   return {
     fill: lead.bg,
@@ -59,9 +69,10 @@ export function resolveShiftExportColors(
 }
 
 const EXPORT_KIND_PRIORITY: Record<ShiftKind, number> = {
-  Reinforcement: 4,
-  RapidResponse: 3,
-  ShiftLead: 2,
+  Reinforcement: 5,
+  RapidResponse: 4,
+  ShiftLead: 3,
+  SeniorGuard: 2,
   Regular: 1,
 };
 

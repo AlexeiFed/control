@@ -227,6 +227,7 @@ function RateRuleFields({ rule, isCreate, defaultEffectiveFrom }: FieldsProps) {
               <option value="Reinforcement">{shiftKindLabels.Reinforcement}</option>
               <option value="RapidResponse">{shiftKindLabels.RapidResponse}</option>
               <option value="ShiftLead">{shiftKindLabels.ShiftLead}</option>
+              <option value="SeniorGuard">{shiftKindLabels.SeniorGuard}</option>
             </select>
           </label>
           <label className={labelClass}>

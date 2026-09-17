@@ -63,13 +63,15 @@ export const shiftKindLabels: Record<ShiftKind, string> = {
   Reinforcement: "Усиление",
   RapidResponse: "МП",
   ShiftLead: "Старший смены",
+  SeniorGuard: "Старший охранник",
 };
 
 export const shiftKindShortLabels: Record<ShiftKind, string> = {
   Regular: "осн",
   Reinforcement: "усил",
   RapidResponse: "мп",
-  ShiftLead: "СтМ",
+  ShiftLead: "СтСм",
+  SeniorGuard: "СтОх",
 };
 
 export const incidentCategoryLabels: Record<IncidentCategory, string> = {

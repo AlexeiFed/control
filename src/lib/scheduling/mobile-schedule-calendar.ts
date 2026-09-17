@@ -85,7 +85,8 @@ export function buildMobileScheduleCards(input: {
         ? metrics.hoursShort +
           metrics.reinforcementHoursShort +
           metrics.rapidResponseHoursShort +
-          metrics.shiftLeadHoursShort
+          metrics.shiftLeadHoursShort +
+          metrics.seniorGuardHoursShort
         : 0;
       const workedHours = roundHours(
         dayShifts.reduce(

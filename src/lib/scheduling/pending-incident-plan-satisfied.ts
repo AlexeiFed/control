@@ -3,7 +3,7 @@ import { computeDayPlanMetrics, dayPlanHasHoursShortage } from "./schedule-short
 import type { Shift } from "./types";
 
 /**
- * План операционных суток закрыт (нет недобора осн/ус/мп/СтМ) —
+ * План операционных суток закрыт (нет недобора осн/ус/мп/СтСм/СтОх) —
  * покрытие есть, даже если у инцидента не проставлен `replaced_by_shift_id`.
  * Без настроенного плана — false (баннер не гасим «вслепую»).
  */

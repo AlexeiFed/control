@@ -21,6 +21,8 @@ const norms: ExpectedShifts = {
   rapidResponseShiftHours: 24,
   shiftLead: 0,
   shiftLeadShiftHours: 24,
+  seniorGuard: 0,
+  seniorGuardShiftHours: 24,
 };
 
 const objects: ReadonlyArray<ScheduleObjectRef> = [{ id: "o1", name: "Объект 1" }];

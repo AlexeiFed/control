@@ -8,7 +8,7 @@ import { DateInput } from "../ui/date-input";
 import { hasPermission, type Role } from "../../lib/auth/rbac";
 import { designTokens } from "../../lib/design-tokens";
 import { rateUnitLabels, shiftKindLabels, shiftKindShortLabels, incidentCategoryLabels } from "../../lib/operations/status-labels";
-import type { Guard, SecurityObject, Shift, ShiftKind } from "../../lib/scheduling/types";
+import { isShiftKind, type Guard, type SecurityObject, type Shift, type ShiftKind } from "../../lib/scheduling/types";
 import { GuardProfileResolver, type GuardProfilePeriodRecord } from "../../lib/guards/profile-periods";
 import {
   formatCompactTimeRangeLocal,
@@ -107,9 +107,7 @@ function readLastUsedQuickAssign(): { startTime?: string; endTime?: string; shif
       startTime: typeof parsed.startTime === "string" ? parsed.startTime : undefined,
       endTime: typeof parsed.endTime === "string" ? parsed.endTime : undefined,
       shiftKind:
-        parsed.shiftKind === "Regular" || parsed.shiftKind === "Reinforcement" || parsed.shiftKind === "RapidResponse" || parsed.shiftKind === "ShiftLead"
-          ? (parsed.shiftKind as ShiftKind)
-          : undefined,
+        isShiftKind(parsed.shiftKind) ? parsed.shiftKind : undefined,
     };
   } catch {
     return null;
@@ -1480,6 +1478,7 @@ export function SchedulerGrid({
                     let planReinforcementHours = 0;
                     let planMpHours = 0;
                     let planShiftLeadHours = 0;
+                    let planSeniorGuardHours = 0;
                     for (const day of weekDays) {
                       const norm = objNorms[day.iso];
                       if (!norm) continue;
@@ -1487,6 +1486,7 @@ export function SchedulerGrid({
                       planReinforcementHours += norm.reinforcement * norm.reinforcementShiftHours;
                       planMpHours += norm.rapidResponse * norm.rapidResponseShiftHours;
                       planShiftLeadHours += norm.shiftLead * norm.shiftLeadShiftHours;
+                      planSeniorGuardHours += norm.seniorGuard * norm.seniorGuardShiftHours;
                     }
                     const objShifts = shifts.filter(
                       (s) => s.objectId === objectItem.id && shiftCoverageMinutes(s) > 0,
@@ -1511,15 +1511,22 @@ export function SchedulerGrid({
                         .filter((s) => s.shiftKind === "ShiftLead")
                         .reduce((sum, s) => sum + shiftCoverageMinutes(s) / 60, 0)) * 10,
                     ) / 10;
+                    const factSeniorGuardHours = Math.round(
+                      (objShifts
+                        .filter((s) => s.shiftKind === "SeniorGuard")
+                        .reduce((sum, s) => sum + shiftCoverageMinutes(s) / 60, 0)) * 10,
+                    ) / 10;
                     const shortHours = Math.max(0, planRegularHours - factRegularHours);
                     const shortReinforcementHours = Math.max(0, planReinforcementHours - factReinforcementHours);
                     const shortMpHours = Math.max(0, planMpHours - factMpHours);
                     const shortShiftLeadHours = Math.max(0, planShiftLeadHours - factShiftLeadHours);
+                    const shortSeniorGuardHours = Math.max(0, planSeniorGuardHours - factSeniorGuardHours);
                     if (
                       planRegularHours === 0 &&
                       planReinforcementHours === 0 &&
                       planMpHours === 0 &&
                       planShiftLeadHours === 0 &&
+                      planSeniorGuardHours === 0 &&
                       objShifts.length === 0
                     ) {
                       return null;
@@ -1584,7 +1591,7 @@ export function SchedulerGrid({
                         ) : null}
                         {planShiftLeadHours > 0 || factShiftLeadHours > 0 ? (
                           <div className="flex items-center justify-between gap-1 tabular-nums">
-                            <span className="text-app-muted">СтМ:</span>
+                            <span className="text-app-muted">СтСм:</span>
                             <span
                               className="font-semibold"
                               style={{
@@ -1595,6 +1602,22 @@ export function SchedulerGrid({
                             >
                               {factShiftLeadHours}
                               {planShiftLeadHours > 0 ? `/${planShiftLeadHours}` : ""} ч
+                            </span>
+                          </div>
+                        ) : null}
+                        {planSeniorGuardHours > 0 || factSeniorGuardHours > 0 ? (
+                          <div className="flex items-center justify-between gap-1 tabular-nums">
+                            <span className="text-app-muted">СтОх:</span>
+                            <span
+                              className="font-semibold"
+                              style={{
+                                color: shortSeniorGuardHours > 0
+                                  ? designTokens.color.accent.warning
+                                  : designTokens.color.accent.primary,
+                              }}
+                            >
+                              {factSeniorGuardHours}
+                              {planSeniorGuardHours > 0 ? `/${planSeniorGuardHours}` : ""} ч
                             </span>
                           </div>
                         ) : null}
@@ -1740,7 +1763,12 @@ export function SchedulerGrid({
                     }
                     if (planMetrics.expectedShiftLead > 0) {
                       emptyCellTooltipParts.push(
-                        `План СтМ: ${planMetrics.expectedShiftLeadHours} ч`,
+                        `План СтСм: ${planMetrics.expectedShiftLeadHours} ч`,
+                      );
+                    }
+                    if (planMetrics.expectedSeniorGuard > 0) {
+                      emptyCellTooltipParts.push(
+                        `План СтОх: ${planMetrics.expectedSeniorGuardHours} ч`,
                       );
                     }
                   }
@@ -1802,7 +1830,12 @@ export function SchedulerGrid({
                               ) : null}
                               {planMetrics.expectedShiftLead > 0 ? (
                                 <p style={{ color: designTokens.color.accent.warning }}>
-                                  СтМ 0/{planMetrics.expectedShiftLeadHours} ч
+                                  СтСм 0/{planMetrics.expectedShiftLeadHours} ч
+                                </p>
+                              ) : null}
+                              {planMetrics.expectedSeniorGuard > 0 ? (
+                                <p style={{ color: designTokens.color.accent.warning }}>
+                                  СтОх 0/{planMetrics.expectedSeniorGuardHours} ч
                                 </p>
                               ) : null}
                             </div>
@@ -1880,7 +1913,7 @@ export function SchedulerGrid({
                                   variant="secondary"
                                   size="sm"
                                   className="!h-auto !min-h-0 !gap-0 !px-0.5 !py-0.5 min-w-0 w-full justify-center text-[9px] font-semibold leading-tight"
-                                  title={`Назначить СтМ · ${emptyCellTooltip}`}
+                                  title={`Назначить СтСм · ${emptyCellTooltip}`}
                                   style={{ borderColor: `${designTokens.color.accent.secondary}66` }}
                                   onClick={() => {
                                     const dayInterval = defaultDayShiftInterval(resolveObjectAnchor(objectItem.id));
@@ -1893,7 +1926,29 @@ export function SchedulerGrid({
                                     });
                                   }}
                                 >
-                                  +СтМ
+                                  +СтСм
+                                </Button>
+                              ) : null}
+                              {planMetrics && planMetrics.expectedSeniorGuard > 0 ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="!h-auto !min-h-0 !gap-0 !px-0.5 !py-0.5 min-w-0 w-full justify-center text-[9px] font-semibold leading-tight"
+                                  title={`Назначить СтОх · ${emptyCellTooltip}`}
+                                  style={{ borderColor: `${designTokens.color.shiftKind.SeniorGuard.border}66` }}
+                                  onClick={() => {
+                                    const dayInterval = defaultDayShiftInterval(resolveObjectAnchor(objectItem.id));
+                                    setQuickAssign({
+                                      objectId: objectItem.id,
+                                      dateIso: day.iso,
+                                      startTime: dayInterval.startTime,
+                                      endTime: dayInterval.endTime,
+                                      shiftKind: "SeniorGuard",
+                                    });
+                                  }}
+                                >
+                                  +СтОх
                                 </Button>
                               ) : null}
                             </div>
@@ -1980,10 +2035,25 @@ export function SchedulerGrid({
                                       ? designTokens.color.accent.warning
                                       : designTokens.color.accent.primary,
                                   }}
-                                  title={`СтМ: ${planMetrics.shiftLeadDayHours}/${planMetrics.expectedShiftLeadHours} ч`}
+                                  title={`СтСм: ${planMetrics.shiftLeadDayHours}/${planMetrics.expectedShiftLeadHours} ч`}
                                 >
-                                  СтМ: {planMetrics.shiftLeadDayHours}/{planMetrics.expectedShiftLeadHours} ч
+                                  СтСм: {planMetrics.shiftLeadDayHours}/{planMetrics.expectedShiftLeadHours} ч
                                   {planMetrics.shiftLeadHoursShort > 0 ? (
+                                    <span className="ml-0.5 text-accent-danger">!</span>
+                                  ) : null}
+                                </p>
+                              ) : null}
+                              {planMetrics.expectedSeniorGuard > 0 ? (
+                                <p
+                                  style={{
+                                    color: planMetrics.seniorGuardHoursShort > 0 || planMetrics.seniorGuardHoursOver > 0
+                                      ? designTokens.color.accent.warning
+                                      : designTokens.color.accent.primary,
+                                  }}
+                                  title={`СтОх: ${planMetrics.seniorGuardDayHours}/${planMetrics.expectedSeniorGuardHours} ч`}
+                                >
+                                  СтОх: {planMetrics.seniorGuardDayHours}/{planMetrics.expectedSeniorGuardHours} ч
+                                  {planMetrics.seniorGuardHoursShort > 0 ? (
                                     <span className="ml-0.5 text-accent-danger">!</span>
                                   ) : null}
                                 </p>
@@ -2003,6 +2073,7 @@ export function SchedulerGrid({
                               const isReinf = shift.shiftKind === "Reinforcement";
                               const isRapid = shift.shiftKind === "RapidResponse";
                               const isShiftLead = shift.shiftKind === "ShiftLead";
+                              const isSeniorGuard = shift.shiftKind === "SeniorGuard";
                               const partial = isPartialAttendance(shift);
                               const fullNoShow = isFullNoShow(shift);
                               const workedWindow = partialAttendanceWindow(shift);
@@ -2025,6 +2096,10 @@ export function SchedulerGrid({
                                 cardSurface = "border-2";
                                 cardStyle.backgroundColor = designTokens.color.shiftKind.ShiftLead.bg;
                                 cardStyle.borderColor = designTokens.color.shiftKind.ShiftLead.border;
+                              } else if (isSeniorGuard) {
+                                cardSurface = "border-2";
+                                cardStyle.backgroundColor = designTokens.color.shiftKind.SeniorGuard.bg;
+                                cardStyle.borderColor = designTokens.color.shiftKind.SeniorGuard.border;
                               } else {
                                 cardSurface = "border";
                                 cardStyle.backgroundColor = designTokens.color.shift.regularCellBg;
@@ -2351,6 +2426,9 @@ export function SchedulerGrid({
                       ) : null}
                       {quickAssignAllowedShiftKinds.includes("ShiftLead") ? (
                         <option value="ShiftLead">{shiftKindLabels.ShiftLead}</option>
+                      ) : null}
+                      {quickAssignAllowedShiftKinds.includes("SeniorGuard") ? (
+                        <option value="SeniorGuard">{shiftKindLabels.SeniorGuard}</option>
                       ) : null}
                     </select>
                   </label>
@@ -2828,7 +2906,7 @@ export function SchedulerGrid({
                                               {formatDurationRuHours(shift.startsAt, shift.endsAt)}
                                             </span>
                                             <div className="flex flex-col items-center gap-0.5 mt-0.5">
-                                              <span className="text-[8px] font-bold text-accent-primary uppercase tracking-tight">
+                                              <span className="text-[8px] font-bold text-accent-primary tracking-tight">
                                                 {(() => {
                                                   const hours = (shift.endsAt.getTime() - shift.startsAt.getTime()) / 3600000;
                                                   const startH = getHoursKhabarovsk(shift.startsAt);
@@ -2842,6 +2920,7 @@ export function SchedulerGrid({
                                                   if (shift.shiftKind === "Reinforcement") return "";
                                                   if (shift.shiftKind === "RapidResponse") return shiftKindShortLabels.RapidResponse;
                                                   if (shift.shiftKind === "ShiftLead") return shiftKindShortLabels.ShiftLead;
+                                                  if (shift.shiftKind === "SeniorGuard") return shiftKindShortLabels.SeniorGuard;
                                                   return "";
                                                 })()}
                                               </span>

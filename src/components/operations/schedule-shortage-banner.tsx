@@ -157,14 +157,25 @@ export function ScheduleShortageBanner({
                             МП −{day.rapidResponseShort} ч
                           </>
                         ) : null}
-                        {day.shiftLeadShort > 0 ? (
-                          <>
-                            {day.hoursShort > 0 || day.reinforcementShort > 0 || day.rapidResponseShort > 0
-                              ? "; "
-                              : " — "}
-                            СтМ −{day.shiftLeadShort} ч
-                          </>
-                        ) : null}
+                          {day.shiftLeadShort > 0 ? (
+                            <>
+                              {day.hoursShort > 0 || day.reinforcementShort > 0 || day.rapidResponseShort > 0
+                                ? "; "
+                                : " — "}
+                              СтСм −{day.shiftLeadShort} ч
+                            </>
+                          ) : null}
+                          {day.seniorGuardShort > 0 ? (
+                            <>
+                              {day.hoursShort > 0 ||
+                              day.reinforcementShort > 0 ||
+                              day.rapidResponseShort > 0 ||
+                              day.shiftLeadShort > 0
+                                ? "; "
+                                : " — "}
+                              СтОх −{day.seniorGuardShort} ч
+                            </>
+                          ) : null}
                       </span>
                     </li>
                   ))}

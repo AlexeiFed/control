@@ -18,6 +18,8 @@ const plan: ShortageDismissPlanSnapshot = {
   rapidResponseShiftHours: 24,
   shiftLead: 1,
   shiftLeadShiftHours: 12,
+  seniorGuard: 0,
+  seniorGuardShiftHours: 24,
 };
 
 const shiftA: ShortageDismissShiftInput = {
@@ -108,6 +110,7 @@ describe("filterShortagesByDismissals", () => {
       totalReinforcementShort: 0,
       totalRapidResponseShort: 0,
       totalShiftLeadShort: 0,
+      totalSeniorGuardShort: 0,
       days: [
         {
           dateIso: "2026-07-20",
@@ -116,6 +119,7 @@ describe("filterShortagesByDismissals", () => {
           reinforcementShort: 0,
           rapidResponseShort: 0,
           shiftLeadShort: 0,
+          seniorGuardShort: 0,
           expectedHoursRegular: 24,
           regularDayHours: 14,
         },
@@ -126,6 +130,7 @@ describe("filterShortagesByDismissals", () => {
           reinforcementShort: 0,
           rapidResponseShort: 0,
           shiftLeadShort: 0,
+          seniorGuardShort: 0,
           expectedHoursRegular: 24,
           regularDayHours: 19,
         },

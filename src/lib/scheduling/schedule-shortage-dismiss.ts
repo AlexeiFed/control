@@ -10,6 +10,8 @@ export type ShortageDismissPlanSnapshot = {
   rapidResponseShiftHours: number;
   shiftLead: number;
   shiftLeadShiftHours: number;
+  seniorGuard: number;
+  seniorGuardShiftHours: number;
 };
 
 export type ShortageDismissShiftInput = {
@@ -57,6 +59,8 @@ export function buildShortageDayFingerprint(input: {
     plan.rapidResponseShiftHours,
     plan.shiftLead,
     plan.shiftLeadShiftHours,
+    plan.seniorGuard,
+    plan.seniorGuardShiftHours,
   ].join("|");
 
   const canonical = `${shiftLines}\nPLAN:${planLine}\npendingIncident=${input.pendingIncident ? "1" : "0"}`;
@@ -87,6 +91,7 @@ export function filterShortagesByDismissals(
       totalReinforcementShort: days.reduce((s, d) => s + d.reinforcementShort, 0),
       totalRapidResponseShort: days.reduce((s, d) => s + d.rapidResponseShort, 0),
       totalShiftLeadShort: days.reduce((s, d) => s + d.shiftLeadShort, 0),
+      totalSeniorGuardShort: days.reduce((s, d) => s + d.seniorGuardShort, 0),
     });
   }
   return out;

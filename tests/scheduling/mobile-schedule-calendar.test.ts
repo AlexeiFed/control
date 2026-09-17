@@ -34,6 +34,8 @@ const fullNorm: ExpectedShifts = {
   rapidResponseShiftHours: 12,
   shiftLead: 0,
   shiftLeadShiftHours: 12,
+  seniorGuard: 0,
+  seniorGuardShiftHours: 24,
 };
 
 function makeInput(shifts: Shift[] = [], norms: Record<string, ExpectedShifts> = {}) {

@@ -9,12 +9,17 @@ export function isGuardPosition(value: string): value is GuardPosition {
 
 export type GuardLicenseType = "None" | "Licensed";
 export type GuardEmploymentType = "Employed" | "Unemployed";
-export type ShiftKind = "Regular" | "Reinforcement" | "RapidResponse" | "ShiftLead";
+export const SHIFT_KINDS = ["Regular", "Reinforcement", "RapidResponse", "ShiftLead", "SeniorGuard"] as const;
+export type ShiftKind = (typeof SHIFT_KINDS)[number];
+
+export function isShiftKind(value: unknown): value is ShiftKind {
+  return typeof value === "string" && (SHIFT_KINDS as readonly string[]).includes(value);
+}
 
 /** Устаревший `ReinforcementDay` в БД приводим к общему усилению. */
 export function normalizeShiftKindFromDb(raw: string | null | undefined): ShiftKind {
   if (raw === "ReinforcementDay") return "Reinforcement";
-  if (raw === "Regular" || raw === "Reinforcement" || raw === "RapidResponse" || raw === "ShiftLead") return raw;
+  if (isShiftKind(raw)) return raw;
   return "Regular";
 }
 

@@ -276,7 +276,7 @@ export function ObjectDetailView({
   const [quickAssign, setQuickAssign] = useState<{
     guardId?: string;
     dateIso: string;
-    shiftKind: "Regular" | "Reinforcement" | "RapidResponse" | "ShiftLead";
+    shiftKind: ShiftKind;
     editingShiftId?: string;
     replaceShiftId?: string;
     replacedGuardName?: string;
@@ -308,7 +308,7 @@ export function ObjectDetailView({
     dateIso: string;
     startTime: string;
     endTime: string;
-    shiftKind: "Regular" | "Reinforcement" | "RapidResponse" | "ShiftLead";
+    shiftKind: ShiftKind;
   } | null>(null);
   const [shiftLogDraft, setShiftLogDraft] = useState<ShiftLogDraft | null>(null);
   const [incidentModeLocal, setIncidentModeLocal] = useState<"full" | "partial">("full");
@@ -1837,7 +1837,7 @@ export function ObjectDetailView({
                       q
                         ? {
                             ...q,
-                            shiftKind: e.target.value as "Regular" | "Reinforcement" | "RapidResponse" | "ShiftLead",
+                            shiftKind: e.target.value as ShiftKind,
                           }
                         : null,
                     );
@@ -1857,6 +1857,9 @@ export function ObjectDetailView({
                   ) : null}
                   {quickAssignAllowedShiftKinds.includes("ShiftLead") ? (
                     <option value="ShiftLead">{shiftKindLabels.ShiftLead}</option>
+                  ) : null}
+                  {quickAssignAllowedShiftKinds.includes("SeniorGuard") ? (
+                    <option value="SeniorGuard">{shiftKindLabels.SeniorGuard}</option>
                   ) : null}
                 </select>
               </div>

@@ -10,7 +10,7 @@ const createShiftSchema = z.object({
   startsAt: z.string().datetime({ offset: true }),
   endsAt: z.string().datetime({ offset: true }),
   replaceShiftId: z.string().uuid().optional(),
-  shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse"]).optional(),
+  shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse", "ShiftLead", "SeniorGuard"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -35,12 +35,7 @@ export async function POST(request: Request) {
       startsAt: new Date(input.startsAt),
       endsAt: new Date(input.endsAt),
       replaceShiftId: input.replaceShiftId,
-      shiftKind:
-        input.shiftKind === "Reinforcement"
-          ? "Reinforcement"
-          : input.shiftKind === "RapidResponse"
-            ? "RapidResponse"
-            : "Regular",
+      shiftKind: input.shiftKind ?? "Regular",
       manualClientRateCents: null,
       manualGuardRateCents: null,
       manualRateUnit: null,

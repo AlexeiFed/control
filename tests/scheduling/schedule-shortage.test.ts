@@ -19,6 +19,8 @@ const fullNorm = {
   rapidResponseShiftHours: 24,
   shiftLead: 0,
   shiftLeadShiftHours: 24,
+  seniorGuard: 0,
+  seniorGuardShiftHours: 24,
 };
 
 describe("schedule-shortage", () => {
@@ -38,6 +40,8 @@ describe("schedule-shortage", () => {
       rapidResponseShiftHours: 24,
       shiftLead: 0,
       shiftLeadShiftHours: 24,
+      seniorGuard: 0,
+      seniorGuardShiftHours: 24,
     });
     expect(metrics?.expectedHoursRegular).toBe(28);
     expect(metrics?.hoursShort).toBe(28);
@@ -53,6 +57,8 @@ describe("schedule-shortage", () => {
       rapidResponseShiftHours: 12,
       shiftLead: 0,
       shiftLeadShiftHours: 24,
+      seniorGuard: 0,
+      seniorGuardShiftHours: 24,
     });
     expect(metrics?.reinforcementShort).toBe(1);
     expect(metrics?.rapidResponseShort).toBe(1);
@@ -69,10 +75,29 @@ describe("schedule-shortage", () => {
       rapidResponseShiftHours: 12,
       shiftLead: 1,
       shiftLeadShiftHours: 8,
+      seniorGuard: 0,
+      seniorGuardShiftHours: 24,
     });
     expect(partial?.reinforcementShort).toBe(12);
     expect(partial?.rapidResponseShort).toBe(12);
     expect(partial?.shiftLeadShort).toBe(8);
+    expect(partial?.hoursShort).toBe(0);
+  });
+
+  it("returns senior guard shortages in hours", () => {
+    const partial = computeDayScheduleShortage([], {
+      regular: 0,
+      reinforcement: 0,
+      shiftHours: 24,
+      reinforcementShiftHours: 24,
+      rapidResponse: 0,
+      rapidResponseShiftHours: 24,
+      shiftLead: 0,
+      shiftLeadShiftHours: 24,
+      seniorGuard: 1,
+      seniorGuardShiftHours: 12,
+    });
+    expect(partial?.seniorGuardShort).toBe(12);
     expect(partial?.hoursShort).toBe(0);
   });
 
@@ -256,6 +281,8 @@ describe("schedule-shortage", () => {
         rapidResponseShiftHours: 24,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       },
     );
     expect(metrics?.regularDayHours).toBe(24);
@@ -295,6 +322,8 @@ describe("schedule-shortage", () => {
         rapidResponseShiftHours: 24,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       },
     );
     expect(metrics?.regularDayHours).toBe(0);
@@ -354,6 +383,8 @@ describe("schedule-shortage", () => {
         rapidResponseShiftHours: 24,
         shiftLead: 0,
         shiftLeadShiftHours: 24,
+        seniorGuard: 0,
+        seniorGuardShiftHours: 24,
       },
     );
     expect(metrics?.regularDayHours).toBe(24);
@@ -399,6 +430,8 @@ describe("schedule-shortage", () => {
           rapidResponseShiftHours: 24,
           shiftLead: 0,
           shiftLeadShiftHours: 24,
+          seniorGuard: 0,
+          seniorGuardShiftHours: 24,
         },
       },
     };
@@ -478,7 +511,6 @@ describe("schedule-shortage", () => {
         shiftsPerDay: 2,
         shiftsReinforcementPerDay: 0,
         shiftHours: 14,
-        rapidResponse: undefined,
         shiftsRapidResponsePerDay: 1,
         rapidResponseShiftHours: 24,
         effectiveFrom: "2026-05-01",

@@ -37,7 +37,7 @@ const createShiftSchema = z.object({
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   replaceShiftId: z.string().uuid().optional(),
   scrollY: scrollYOptionalSchema,
-  shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse", "ShiftLead"]).optional(),
+  shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse", "ShiftLead", "SeniorGuard"]).optional(),
   isNoShow: z.string().optional(),
   manualClientRubles: z.string().optional(),
   manualGuardRubles: z.string().optional(),
@@ -814,7 +814,7 @@ const bulkCreateShiftItemSchema = z.object({
   shiftDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   endTime: z.string().regex(/^\d{2}:\d{2}$/),
-  shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse", "ShiftLead"]),
+  shiftKind: z.enum(["Regular", "Reinforcement", "RapidResponse", "ShiftLead", "SeniorGuard"]),
   postId: z
     .preprocess((v) => (v == null || String(v).trim() === "" ? undefined : String(v).trim()), z.string().uuid().optional()),
 });
