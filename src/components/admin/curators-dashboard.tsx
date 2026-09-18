@@ -10,15 +10,12 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Pencil,
-  Plus,
   Trash2,
   Wallet,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
 import {
   addCuratorWorkEntryAction,
-  createCuratorAction,
-  deleteCuratorAction,
   deleteCuratorWorkEntryAction,
   fetchCuratorDayEntriesAction,
   fetchCuratorMonthAggregatesAction,
@@ -76,7 +73,6 @@ type DayEntry = {
 const manualWorkTypes = [
   "RouteObjects",
   "NightInspection",
-  "ReplacementShift",
   "MonthlySalary",
 ] as const satisfies readonly CuratorWorkType[];
 
@@ -192,7 +188,6 @@ export function CuratorsDashboard({
   const [monthlySalaryRubInput, setMonthlySalaryRubInput] = useState("");
   const [amountRubInput, setAmountRubInput] = useState("");
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteEntryTarget, setDeleteEntryTarget] = useState<{
     id: string;
     curatorName: string;
@@ -462,28 +457,9 @@ export function CuratorsDashboard({
           <aside className="min-w-0 overflow-hidden">
             <div className="rounded-card border border-app-border bg-app-elevated p-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-app-muted">Кураторы</h2>
-              <form action={createCuratorAction} className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-                <input
-                  name="firstName"
-                  required
-                  placeholder="Имя"
-                  className="min-h-[2.25rem] w-full min-w-0 rounded-button border border-app-border bg-app-bg px-2.5 py-1.5 text-sm outline-none focus:border-accent-primary"
-                />
-                <input
-                  name="lastName"
-                  required
-                  placeholder="Фамилия"
-                  className="min-h-[2.25rem] w-full min-w-0 rounded-button border border-app-border bg-app-bg px-2.5 py-1.5 text-sm outline-none focus:border-accent-primary"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="shrink-0"
-                >
-                  <Plus className="size-3.5" />
-                  Добавить
-                </Button>
-              </form>
+              <p className="mt-2 text-xs text-app-muted">
+                Список берётся из должности «Куратор» в карточке охранника. Уволенные сюда не попадают.
+              </p>
 
               <ul className="mt-4 max-h-[620px] space-y-2 overflow-y-auto pr-1">
                 {curators.map((c) => {
@@ -522,12 +498,13 @@ export function CuratorsDashboard({
                             aria-label="Выплачено"
                           />
                           <input
-                            type="number"
+                            className="h-7 w-16 rounded-button border border-app-border bg-app-bg px-1.5 text-[11px] tabular-nums outline-none focus:border-accent-primary"
                             min={0}
-                            step={1}
-                            title="Сумма выплаты, ₽"
-                            value={payment.paidAmountRub || ""}
-                            placeholder="₽"
+                            onBlur={(ev) => {
+                              const raw = ev.target.value;
+                              const paidAmountRub = raw === "" ? 0 : Math.max(0, Math.round(Number(raw) || 0));
+                              void saveCuratorPayment(c.id, { paidAmountRub });
+                            }}
                             onChange={(ev) => {
                               const raw = ev.target.value;
                               const paidAmountRub = raw === "" ? 0 : Math.max(0, Math.round(Number(raw) || 0));
@@ -536,35 +513,18 @@ export function CuratorsDashboard({
                                 [c.id]: { ...payment, paidAmountRub },
                               }));
                             }}
-                            onBlur={(ev) => {
-                              const raw = ev.target.value;
-                              const paidAmountRub = raw === "" ? 0 : Math.max(0, Math.round(Number(raw) || 0));
-                              void saveCuratorPayment(c.id, { paidAmountRub });
-                            }}
-                            className="h-7 w-16 rounded-button border border-app-border bg-app-bg px-1.5 text-[11px] tabular-nums outline-none focus:border-accent-primary"
+                            placeholder="₽"
+                            step={1}
+                            title="Сумма выплаты, ₽"
+                            type="number"
+                            value={payment.paidAmountRub || ""}
                           />
                         </div>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            setDeleteEntryTarget(null);
-                            setDeleteTarget({
-                              id: c.id,
-                              name: `${c.lastName} ${c.firstName}`.trim(),
-                            });
-                          }}
-                          variant="icon"
-                          size="icon"
-                          className="size-7 shrink-0 text-accent-danger hover:bg-accent-danger/10"
-                          aria-label="Удалить куратора"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
                       </div>
                     </li>
                   );
                 })}
-                {curators.length === 0 ? <p className="text-sm text-app-muted">Добавьте первого куратора.</p> : null}
+                {curators.length === 0 ? <p className="text-sm text-app-muted">Нет активных кураторов. Назначьте должность в карточке охранника.</p> : null}
               </ul>
             </div>
           </aside>
@@ -745,7 +705,6 @@ export function CuratorsDashboard({
                           <Button
                             type="button"
                             onClick={() => {
-                              setDeleteTarget(null);
                               setDeleteEntryTarget({
                                 id: e.id,
                                 curatorName: e.curatorName,
@@ -859,7 +818,10 @@ export function CuratorsDashboard({
                         }}
                         className="rounded-button border border-app-border bg-app-bg px-3 py-2 text-sm outline-none focus:border-accent-primary"
                       >
-                        {manualWorkTypes.map((k) => (
+                        {(workType === "ReplacementShift"
+                          ? ([...manualWorkTypes, "ReplacementShift"] as const)
+                          : manualWorkTypes
+                        ).map((k) => (
                           <option key={k} value={k}>
                             {curatorWorkTypeLabels[k]}
                           </option>
@@ -1033,25 +995,6 @@ export function CuratorsDashboard({
             </div>
 
             <div className="rounded-lg border border-app-border bg-app-bg/40 p-4">
-              <div className="text-sm font-medium text-app-text">{curatorWorkTypeLabels.ReplacementShift}</div>
-              <label className="mt-3 grid gap-1 text-xs text-app-muted">
-                Ставка за час (₽/ч)
-                <input
-                  type="number"
-                  min={0}
-                  max={9_999_999}
-                  step={1}
-                  value={tariffs.replacementHourlyRub}
-                  onChange={(ev) =>
-                    setTariffs((t) => ({ ...t, replacementHourlyRub: clampTariffInt(ev.target.value) }))
-                  }
-                  className="min-h-[2.25rem] w-full max-w-xs rounded-button border border-app-border bg-app-bg px-2.5 py-1.5 text-sm tabular-nums outline-none focus:border-accent-primary"
-                />
-              </label>
-              <p className="mt-2 text-[11px] text-app-muted/80">Ручная замена охранника: часы × ставка.</p>
-            </div>
-
-            <div className="rounded-lg border border-app-border bg-app-bg/40 p-4">
               <div className="text-sm font-medium text-app-text">{curatorWorkTypeLabels.ScheduleRegular}</div>
               <label className="mt-3 grid gap-1 text-xs text-app-muted">
                 Доплата за час дежурства (₽/ч)
@@ -1145,57 +1088,6 @@ export function CuratorsDashboard({
                 >
                   {isSavingEntry ? "Удаление…" : "Удалить"}
                 </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {deleteTarget ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-            role="dialog"
-            aria-modal
-            aria-labelledby="curator-delete-title"
-          >
-            <motion.div
-              initial={{ scale: 0.96, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.96, opacity: 0 }}
-              className="w-full max-w-md rounded-card border border-app-border bg-app-surface p-6 shadow-glow"
-            >
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="size-6 shrink-0 text-accent-warning" />
-                <div>
-                  <h2 id="curator-delete-title" className="text-lg font-semibold">
-                    Удалить куратора?
-                  </h2>
-                  <p className="mt-2 text-sm text-app-muted">
-                    {deleteTarget.name} — будут удалены все начисления этого куратора. Действие необратимо.
-                  </p>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  onClick={() => setDeleteTarget(null)}
-                  variant="secondary"
-                >
-                  Отмена
-                </Button>
-                <form action={deleteCuratorAction}>
-                  <input type="hidden" name="id" value={deleteTarget.id} />
-                  <Button
-                    type="submit"
-                    variant="danger"
-                  >
-                    Удалить
-                  </Button>
-                </form>
               </div>
             </motion.div>
           </motion.div>

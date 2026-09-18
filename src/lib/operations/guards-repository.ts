@@ -1248,28 +1248,48 @@ export async function listGuardStatusesByIds(
   return out;
 }
 
-export async function listGuardEmployedOnByIds(
+export type GuardPayrollFacts = {
+  employedOn: string | null;
+  dismissedOn: string | null;
+};
+
+export async function listGuardPayrollFactsByIds(
   ids: ReadonlyArray<string>,
-): Promise<Map<string, string | null>> {
-  const out = new Map<string, string | null>();
+): Promise<Map<string, GuardPayrollFacts>> {
+  const out = new Map<string, GuardPayrollFacts>();
   if (ids.length === 0) return out;
 
-  const hasEmployedOn = await resolveGuardsOptionalColumn("employed_on");
-  if (!hasEmployedOn) {
-    for (const id of ids) out.set(id, null);
-    return out;
-  }
+  const [hasEmployedOn, hasDismissedOn] = await Promise.all([
+    resolveGuardsOptionalColumn("employed_on"),
+    resolveGuardsOptionalColumn("dismissed_on"),
+  ]);
+  const employedSel = hasEmployedOn ? "employed_on::text AS employed_on" : "NULL::text AS employed_on";
+  const dismissedSel = hasDismissedOn ? "dismissed_on::text AS dismissed_on" : "NULL::text AS dismissed_on";
 
-  const rows = await query<{ id: string; employed_on: string | null }>(
+  const rows = await query<{ id: string; employed_on: string | null; dismissed_on: string | null }>(
     `
-      SELECT id, employed_on::text AS employed_on
+      SELECT id, ${employedSel}, ${dismissedSel}
       FROM guards
       WHERE id = ANY($1::uuid[])
     `,
     [[...ids]],
   );
-  for (const id of ids) out.set(id, null);
-  for (const row of rows) out.set(row.id, row.employed_on);
+  for (const id of ids) out.set(id, { employedOn: null, dismissedOn: null });
+  for (const row of rows) {
+    out.set(row.id, {
+      employedOn: row.employed_on,
+      dismissedOn: row.dismissed_on,
+    });
+  }
+  return out;
+}
+
+export async function listGuardEmployedOnByIds(
+  ids: ReadonlyArray<string>,
+): Promise<Map<string, string | null>> {
+  const facts = await listGuardPayrollFactsByIds(ids);
+  const out = new Map<string, string | null>();
+  for (const [id, fact] of facts) out.set(id, fact.employedOn);
   return out;
 }
 

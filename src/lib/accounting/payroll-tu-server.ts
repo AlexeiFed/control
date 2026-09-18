@@ -6,6 +6,7 @@ import {
   splitPersonsForPayrollTu,
   type PayrollTuDailyEntry,
   type PayrollTuData,
+  type PayrollTuEmploymentPeriod,
   type PayrollTuPreview,
 } from "./payroll-tu";
 import { listTimesheetEntries } from "./timesheet-entries-repository";
@@ -14,7 +15,8 @@ import {
   monthKeysForPayrollMonth,
   padTimesheetQueryRange,
 } from "./timesheet-operational-day";
-import { listGuardEmployedOnByIds } from "../operations/guards-repository";
+import { listGuardPayrollFactsByIds } from "../operations/guards-repository";
+import { listProfilePeriodsForGuards } from "../operations/guard-profile-periods-repository";
 import { getTimesheetSnapshot } from "../operations/scheduler-repository";
 import { dateIsoInPayrollMonth } from "../payroll/advance-period";
 import type { TimesheetRow } from "../scheduling/timesheet";
@@ -36,7 +38,28 @@ export async function buildPayrollTuExportData(input: {
     listTimesheetEntries(padded.start, padded.end),
   ]);
 
-  const employedOnByGuardId = await listGuardEmployedOnByIds(snapshot.guards.map((g) => g.id));
+  const guardIds = snapshot.guards.map((g) => g.id);
+  const [payrollFacts, profilePeriods] = await Promise.all([
+    listGuardPayrollFactsByIds(guardIds),
+    listProfilePeriodsForGuards(guardIds),
+  ]);
+  const employedOnByGuardId = new Map(
+    [...payrollFacts.entries()].map(([id, fact]) => [id, fact.employedOn] as const),
+  );
+  const dismissedOnByGuardId = new Map(
+    [...payrollFacts.entries()].map(([id, fact]) => [id, fact.dismissedOn] as const),
+  );
+  const employmentPeriodsByGuardId = new Map<string, PayrollTuEmploymentPeriod[]>();
+  for (const period of profilePeriods) {
+    if (period.periodKind !== "employment") continue;
+    const list = employmentPeriodsByGuardId.get(period.guardId) ?? [];
+    list.push({
+      effectiveFrom: period.effectiveFrom,
+      effectiveTo: period.effectiveTo,
+      employmentType: period.employmentType,
+    });
+    employmentPeriodsByGuardId.set(period.guardId, list);
+  }
   const opDay = await loadTimesheetOperationalDayContext(
     snapshot.objects,
     monthKeysForPayrollMonth(input.year, input.monthIndex0),
@@ -52,7 +75,9 @@ export async function buildPayrollTuExportData(input: {
     position: guard.position,
     employmentType: guard.employmentType,
     employedOn: employedOnByGuardId.get(guard.id) ?? null,
+    dismissedOn: payrollFacts.get(guard.id)?.dismissedOn ?? null,
     status: guard.status,
+    employmentPeriods: employmentPeriodsByGuardId.get(guard.id) ?? [],
   }));
 
   const { office, guards } = splitPersonsForPayrollTu({
@@ -72,6 +97,7 @@ export async function buildPayrollTuExportData(input: {
     timesheetRows,
     guardIdByName,
     employedOnByGuardId,
+    dismissedOnByGuardId,
     month,
     opDay.resolveRowDateIso,
   );
@@ -79,6 +105,7 @@ export async function buildPayrollTuExportData(input: {
     rows: timesheetRows,
     guardIdByName,
     employedOnByGuardId,
+    dismissedOnByGuardId,
     month,
     includedGuardIds,
     resolveOperationalDateIso: opDay.resolveRowDateIso,
@@ -116,6 +143,7 @@ function aggregateGuardDailyTotalsFromRows(
   rows: TimesheetRow[],
   guardIdByName: Map<string, string>,
   employedOnByGuardId: Map<string, string | null | undefined>,
+  dismissedOnByGuardId: Map<string, string | null | undefined>,
   month: { year: number; monthIndex0: number },
   resolveOperationalDateIso: (row: TimesheetRow) => string,
 ): Map<string, PayrollTuDailyEntry[]> {
@@ -128,7 +156,8 @@ function aggregateGuardDailyTotalsFromRows(
     const day = Number(dateIso.slice(8, 10));
     if (!Number.isFinite(day)) continue;
     const employedOn = employedOnByGuardId.get(guardId);
-    if (!dayIncludedInPayrollTu(day, employedOn, month.year, month.monthIndex0)) continue;
+    const dismissedOn = dismissedOnByGuardId.get(guardId);
+    if (!dayIncludedInPayrollTu(day, employedOn, month.year, month.monthIndex0, dismissedOn)) continue;
 
     const bucket = byGuard.get(guardId) ?? [];
     const existing = bucket.find((entry) => entry.day === day);

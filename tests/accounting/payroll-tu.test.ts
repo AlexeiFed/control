@@ -57,11 +57,100 @@ describe("payroll-tu", () => {
     expect(split.guards[0]?.name).toBe("Охранник Б");
   });
 
+  it("excludes dismissed and returned unemployed from later months", () => {
+    const split = splitPersonsForPayrollTu({
+      year: 2026,
+      monthIndex0: 8,
+      guards: [
+        {
+          id: "1",
+          name: "Куратор А",
+          position: "Curator",
+          employmentType: "Employed",
+          employedOn: "2020-01-01",
+          status: "Active",
+        },
+        {
+          id: "4",
+          name: "Коваленко Денис",
+          position: "Curator",
+          employmentType: "Employed",
+          employedOn: "2020-01-01",
+          dismissedOn: "2026-08-01",
+          status: "Dismissed",
+        },
+        {
+          id: "5",
+          name: "Банаев Александр",
+          position: "Guard",
+          employmentType: "Unemployed",
+          employedOn: "2026-04-22",
+          dismissedOn: "2026-06-30",
+          status: "Active",
+          employmentPeriods: [
+            { effectiveFrom: "2020-01-01", effectiveTo: "2026-06-30", employmentType: "Employed" },
+            { effectiveFrom: "2026-08-02", effectiveTo: null, employmentType: "Unemployed" },
+          ],
+        },
+      ],
+    });
+
+    expect(split.office.map((row) => row.name)).toEqual(["Куратор А"]);
+    expect(split.guards).toHaveLength(0);
+  });
+
   it("includes guards employed mid-month", () => {
     expect(isEmployedAtMonth("Employed", "2026-05-16", 2026, 4)).toBe(true);
     expect(isEmployedAtMonth("Employed", "2026-06-01", 2026, 4)).toBe(false);
     expect(isEmployedAtMonth("Unemployed", null, 2026, 4)).toBe(false);
-    expect(isEmployedAtMonth("Unemployed", "2026-06-16", 2026, 5)).toBe(true);
+    expect(isEmployedAtMonth("Unemployed", "2026-06-16", 2026, 5)).toBe(false);
+  });
+
+  it("excludes dismissed before the payroll month even with an open Employed period", () => {
+    expect(
+      isEmployedAtMonth("Employed", "2025-11-16", 2026, 8, {
+        status: "Dismissed",
+        dismissedOn: "2026-08-03",
+        employmentPeriods: [
+          { effectiveFrom: "2025-11-16", effectiveTo: null, employmentType: "Employed" },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isEmployedAtMonth("Employed", "2026-02-01", 2026, 8, {
+        status: "Dismissed",
+        dismissedOn: "2026-08-25",
+        employmentPeriods: [
+          { effectiveFrom: "2026-02-01", effectiveTo: null, employmentType: "Employed" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+
+  it("includes a guard dismissed during the payroll month", () => {
+    expect(
+      isEmployedAtMonth("Employed", "2026-01-01", 2026, 8, {
+        status: "Dismissed",
+        dismissedOn: "2026-09-15",
+        employmentPeriods: [
+          { effectiveFrom: "2026-01-01", effectiveTo: "2026-09-15", employmentType: "Employed" },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("excludes returned Б/У without official employment even with stale employedOn", () => {
+    expect(
+      isEmployedAtMonth("Unemployed", "2026-04-22", 2026, 8, {
+        status: "Active",
+        dismissedOn: "2026-06-30",
+        employmentPeriods: [
+          { effectiveFrom: "2020-01-01", effectiveTo: "2026-06-30", employmentType: "Employed" },
+          { effectiveFrom: "2026-08-02", effectiveTo: null, employmentType: "Unemployed" },
+        ],
+      }),
+    ).toBe(false);
   });
 
   it("uses salary from db fields, not daily entries", () => {

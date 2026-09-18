@@ -1,11 +1,10 @@
 import { query } from "../db/pool";
 import {
   DEFAULT_CURATOR_TARIFFS,
-  isScheduleCuratorWorkType,
   type CuratorTariffs,
   type CuratorWorkType,
 } from "../curators/work-entry-amount";
-import { createCuratorWithGuard, ensureAllCuratorGuardsLinked } from "./curators-guards-link";
+import { ensureAllCuratorGuardsLinked } from "./curators-guards-link";
 
 export type CuratorRecord = {
   id: string;
@@ -167,15 +166,12 @@ export async function listCuratorsWithTotals(): Promise<CuratorRecord[]> {
       INNER JOIN curators c ON c.guard_id = g.id
       LEFT JOIN curator_work_entries e ON e.curator_id = c.id
       WHERE g.position = 'Curator'
+        AND g.status NOT IN ('Dismissed', 'Inactive')
       GROUP BY g.id, c.id, g.first_name, g.last_name
       ORDER BY g.last_name ASC, g.first_name ASC
     `,
   );
   return rows.map(mapCurator);
-}
-
-export async function createCurator(input: { firstName: string; lastName: string }): Promise<string> {
-  return createCuratorWithGuard(input);
 }
 
 export async function deleteCurator(id: string): Promise<void> {

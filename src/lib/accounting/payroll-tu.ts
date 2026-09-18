@@ -53,6 +53,7 @@ export type PayrollTuPersonInput = {
   salaryFirstHalfRub?: number;
   salarySecondHalfRub?: number;
   employedOn?: string | null;
+  dismissedOn?: string | null;
   status?: Guard["status"];
 };
 
@@ -61,9 +62,18 @@ export function dayIncludedInPayrollTu(
   employedOn: string | null | undefined,
   year: number,
   monthIndex0: number,
+  dismissedOn?: string | null,
 ): boolean {
-  if (!employedOn) return true;
   const monthKey = monthKeyFromParts(year, monthIndex0);
+  if (dismissedOn) {
+    const dismissedIso = dismissedOn.slice(0, 10);
+    if (dismissedIso < `${monthKey}-01`) return false;
+    if (dismissedIso.startsWith(monthKey)) {
+      const dismissedDay = Number(dismissedIso.slice(8, 10));
+      if (Number.isFinite(dismissedDay) && day > dismissedDay) return false;
+    }
+  }
+  if (!employedOn) return true;
   if (!employedOn.startsWith(monthKey)) return true;
   const employedDay = Number(employedOn.slice(8, 10));
   return Number.isFinite(employedDay) ? day >= employedDay : true;
@@ -74,12 +84,13 @@ export function shiftIncludedInPayrollTu(
   employedOn: string | null | undefined,
   month: PayrollMonthContext,
   operationalDateIso?: string,
+  dismissedOn?: string | null,
 ): boolean {
   const dateIso =
     operationalDateIso ?? localDateKeyInTimeZone(new Date(startsAt), DEFAULT_SHIFT_TIMEZONE);
   if (!dateIsoInPayrollMonth(dateIso, month)) return false;
   const day = Number(dateIso.slice(8, 10));
-  return dayIncludedInPayrollTu(day, employedOn, month.year, month.monthIndex0);
+  return dayIncludedInPayrollTu(day, employedOn, month.year, month.monthIndex0, dismissedOn);
 }
 
 /** Суммы 1–15 и 16–30 из guard_amount_cents табеля — как в сводке табеля, без усреднений. */
@@ -87,6 +98,7 @@ export function buildPayrollTuSalaryByGuardId(input: {
   rows: TimesheetRow[];
   guardIdByName: Map<string, string>;
   employedOnByGuardId: Map<string, string | null | undefined>;
+  dismissedOnByGuardId?: Map<string, string | null | undefined>;
   month: PayrollMonthContext;
   includedGuardIds: ReadonlySet<string>;
   resolveOperationalDateIso?: (row: TimesheetRow) => string;
@@ -101,7 +113,8 @@ export function buildPayrollTuSalaryByGuardId(input: {
       input.resolveOperationalDateIso?.(row) ??
       localDateKeyInTimeZone(new Date(row.startsAt), DEFAULT_SHIFT_TIMEZONE);
     const employedOn = input.employedOnByGuardId.get(guardId);
-    if (!shiftIncludedInPayrollTu(row.startsAt, employedOn, input.month, dateIso)) continue;
+    const dismissedOn = input.dismissedOnByGuardId?.get(guardId);
+    if (!shiftIncludedInPayrollTu(row.startsAt, employedOn, input.month, dateIso, dismissedOn)) continue;
 
     const bucket = centsByGuard.get(guardId) ?? { first: 0, second: 0 };
     if (dateIsoBelongsToHalf(dateIso, "first", input.month)) {
@@ -122,19 +135,65 @@ export function buildPayrollTuSalaryByGuardId(input: {
   return result;
 }
 
+export type PayrollTuEmploymentPeriod = {
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  employmentType: GuardEmploymentType | null;
+};
+
+export type PayrollTuEmploymentExtras = {
+  status?: Guard["status"];
+  dismissedOn?: string | null;
+  employmentPeriods?: ReadonlyArray<PayrollTuEmploymentPeriod>;
+};
+
+function monthBoundsIso(year: number, monthIndex0: number): { startIso: string; endIso: string } {
+  const monthKey = monthKeyFromParts(year, monthIndex0);
+  const monthEndDay = getDaysInMonth(year, monthIndex0);
+  return {
+    startIso: `${monthKey}-01`,
+    endIso: `${monthKey}-${String(monthEndDay).padStart(2, "0")}`,
+  };
+}
+
+function employedPeriodOverlapsMonth(
+  period: PayrollTuEmploymentPeriod,
+  monthStartIso: string,
+  monthEndIso: string,
+  dismissedOn?: string | null,
+): boolean {
+  if (period.employmentType !== "Employed") return false;
+  const from = period.effectiveFrom.slice(0, 10);
+  const rawTo = period.effectiveTo?.slice(0, 10) ?? null;
+  const to =
+    dismissedOn && (rawTo == null || dismissedOn < rawTo) ? dismissedOn : rawTo;
+  return from <= monthEndIso && (to == null || to >= monthStartIso);
+}
+
 export function isEmployedAtMonth(
   employmentType: GuardEmploymentType,
   employedOn: string | null | undefined,
   year: number,
   monthIndex0: number,
+  extras: PayrollTuEmploymentExtras = {},
 ): boolean {
-  const monthKey = monthKeyFromParts(year, monthIndex0);
-  const monthEndDay = getDaysInMonth(year, monthIndex0);
-  const monthEndIso = `${monthKey}-${String(monthEndDay).padStart(2, "0")}`;
+  const { startIso: monthStartIso, endIso: monthEndIso } = monthBoundsIso(year, monthIndex0);
+  const dismissedOn = extras.dismissedOn?.slice(0, 10) ?? null;
 
-  if (employedOn) {
-    if (employedOn > monthEndIso) return false;
-    return true;
+  if (dismissedOn && dismissedOn < monthStartIso) return false;
+  if (extras.status === "Dismissed" && !dismissedOn) return false;
+
+  const periods = extras.employmentPeriods ?? [];
+  if (periods.length > 0) {
+    return periods.some((period) =>
+      employedPeriodOverlapsMonth(period, monthStartIso, monthEndIso, dismissedOn),
+    );
+  }
+
+  if (employedOn && employedOn > monthEndIso) return false;
+
+  if (extras.status === "Dismissed") {
+    return employmentType === "Employed";
   }
 
   return employmentType === "Employed";
@@ -177,7 +236,9 @@ export function splitPersonsForPayrollTu(input: {
     position: GuardPosition;
     employmentType: GuardEmploymentType;
     employedOn?: string | null;
+    dismissedOn?: string | null;
     status: Guard["status"];
+    employmentPeriods?: ReadonlyArray<PayrollTuEmploymentPeriod>;
   }>;
   year: number;
   monthIndex0: number;
@@ -189,13 +250,20 @@ export function splitPersonsForPayrollTu(input: {
   const guardRows: PayrollTuPersonInput[] = [];
 
   for (const person of input.guards) {
-    if (!isEmployedAtMonth(person.employmentType, person.employedOn, input.year, input.monthIndex0)) {
+    if (
+      !isEmployedAtMonth(person.employmentType, person.employedOn, input.year, input.monthIndex0, {
+        status: person.status,
+        dismissedOn: person.dismissedOn,
+        employmentPeriods: person.employmentPeriods,
+      })
+    ) {
       continue;
     }
     const row: PayrollTuPersonInput = {
       name: person.name,
       daily: [],
       employedOn: person.employedOn,
+      dismissedOn: person.dismissedOn,
       status: person.status,
     };
     if (person.position === "Curator") {
@@ -221,7 +289,9 @@ export function buildPayrollTuRow(
 ): PayrollTuRow {
   const daysInMonth = getDaysInMonth(year, monthIndex0);
   const employedOn = person.employedOn?.slice(0, 10) ?? null;
+  const dismissedOn = person.dismissedOn?.slice(0, 10) ?? null;
   const employedDay = employedDayInMonth(employedOn, year, monthIndex0);
+  const dismissedDay = employedDayInMonth(dismissedOn, year, monthIndex0);
   const days = new Map<number, PayrollTuDayCell>();
   let totalHours = 0;
   let workDaysCount = 0;
@@ -229,6 +299,7 @@ export function buildPayrollTuRow(
   for (const entry of person.daily) {
     if (entry.day < 1 || entry.day > daysInMonth) continue;
     if (employedDay != null && entry.day < employedDay) continue;
+    if (dismissedDay != null && entry.day > dismissedDay) continue;
 
     if (entry.hours > 0) {
       totalHours = round2(totalHours + entry.hours);

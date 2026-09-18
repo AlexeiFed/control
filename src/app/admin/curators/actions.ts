@@ -13,9 +13,7 @@ import {
 import { backfillCuratorShiftEntries } from "../../../lib/curators/sync-shift-entry";
 import { formatDisplayDateFromIso } from "../../../lib/format/display-date";
 import {
-  createCurator,
   createWorkEntry,
-  deleteCurator,
   deleteCuratorWorkEntryById,
   getCuratorTariffs,
   getWorkEntryById,
@@ -53,29 +51,6 @@ function monthBoundsFromYearMonthIndex0(year: number, monthIndex0: number): { st
   return { start, endExclusive };
 }
 
-export async function createCuratorAction(formData: FormData) {
-  const session = await requireSession();
-  assertPermission(session.user.role, "curators:manage");
-
-  const firstName = z.string().trim().min(1).max(120).parse(formData.get("firstName"));
-  const lastName = z.string().trim().min(1).max(120).parse(formData.get("lastName"));
-
-  await createCurator({ firstName, lastName });
-  revalidatePath("/admin/curators");
-  revalidatePath("/guards");
-  redirect("/admin/curators");
-}
-
-export async function deleteCuratorAction(formData: FormData) {
-  const session = await requireSession();
-  assertPermission(session.user.role, "curators:manage");
-
-  const id = z.string().uuid().parse(formData.get("id"));
-  await deleteCurator(id);
-  revalidatePath("/admin/curators");
-  redirect("/admin/curators");
-}
-
 const addEntrySchema = z.object({
   curatorId: z.string().uuid(),
   workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -101,6 +76,9 @@ export async function addCuratorWorkEntryAction(formData: FormData) {
   });
 
   const workType = parsed.workType as CuratorWorkType;
+  if (workType === "ReplacementShift") {
+    throw new Error("Тип «Замена охранника в смене» больше не используется");
+  }
   let hours: number | null = null;
   let amountRub: number;
 

@@ -9,6 +9,7 @@ export async function ensureAllCuratorGuardsLinked(): Promise<void> {
       SET guard_id = g.id
       FROM guards g
       WHERE g.position = 'Curator'
+        AND g.status NOT IN ('Dismissed', 'Inactive')
         AND c.guard_id IS NULL
         AND lower(trim(c.first_name)) = lower(trim(g.first_name))
         AND lower(trim(c.last_name)) = lower(trim(g.last_name))
@@ -21,6 +22,7 @@ export async function ensureAllCuratorGuardsLinked(): Promise<void> {
       SELECT g.first_name, g.last_name, g.id
       FROM guards g
       WHERE g.position = 'Curator'
+        AND g.status NOT IN ('Dismissed', 'Inactive')
         AND NOT EXISTS (SELECT 1 FROM curators c WHERE c.guard_id = g.id)
     `,
   );
