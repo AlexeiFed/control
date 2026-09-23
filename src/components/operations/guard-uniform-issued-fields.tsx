@@ -18,6 +18,9 @@ type Props = {
   defaultTshirtIssued?: boolean;
   defaultTshirtSize?: number | null;
   defaultTshirtIssuedOn?: string | null;
+  defaultPoloIssued?: boolean;
+  defaultPoloSize?: number | null;
+  defaultPoloIssuedOn?: string | null;
   /** компактные классы для create-формы */
   compact?: boolean;
   fieldClassName: string;
@@ -63,11 +66,15 @@ export function GuardUniformIssuedFields({
   defaultTshirtIssued = false,
   defaultTshirtSize = null,
   defaultTshirtIssuedOn = null,
+  defaultPoloIssued = false,
+  defaultPoloSize = null,
+  defaultPoloIssuedOn = null,
   compact = false,
   fieldClassName,
 }: Props) {
   const [issued, setIssued] = useState(defaultIssued);
   const [tshirtIssued, setTshirtIssued] = useState(defaultTshirtIssued);
+  const [poloIssued, setPoloIssued] = useState(defaultPoloIssued);
 
   return (
     <div
@@ -164,6 +171,47 @@ export function GuardUniformIssuedFields({
               required
               name="tshirtIssuedOn"
               defaultValue={defaultTshirtIssuedOn ?? ""}
+              className={fieldClassName}
+            />
+          </label>
+        </div>
+      ) : null}
+      <label className="flex items-center gap-2 text-sm text-app-muted">
+        <input
+          type="checkbox"
+          name="poloIssued"
+          value="on"
+          checked={poloIssued}
+          onChange={(e) => {
+            const next = e.target.checked;
+            if (!next && poloIssued) {
+              if (!window.confirm("Снять отметку и очистить данные выдачи поло?")) {
+                return;
+              }
+            }
+            setPoloIssued(next);
+          }}
+          className="size-4"
+        />
+        Выдано поло
+      </label>
+      {poloIssued ? (
+        <div className={compact ? "grid gap-2 sm:grid-cols-2" : "grid gap-4 md:grid-cols-2"}>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-app-muted font-medium">Размер</span>
+            <UniformSizeSelect
+              name="poloSize"
+              required
+              defaultValue={uniformSizeToFormValue(defaultPoloSize)}
+              className={fieldClassName}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-app-muted font-medium">Дата выдачи</span>
+            <DateInput
+              required
+              name="poloIssuedOn"
+              defaultValue={defaultPoloIssuedOn ?? ""}
               className={fieldClassName}
             />
           </label>

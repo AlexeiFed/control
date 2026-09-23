@@ -24,6 +24,10 @@ function row(partial: Partial<GuardListRow>): GuardListRow {
     tshirtSize: null,
     tshirtIssuedOn: null,
     tshirtReturnedOn: null,
+    poloIssued: false,
+    poloSize: null,
+    poloIssuedOn: null,
+    poloReturnedOn: null,
     position: "Guard",
     licenseType: "Licensed",
     licenseGrade: 5,
@@ -73,6 +77,7 @@ describe("filterGuardsForRegistryTable", () => {
       hasCar: "",
       hasUniform: "",
       hasTshirt: "",
+      hasPolo: "",
       objectId: "",
       status: "",
     });
@@ -89,6 +94,7 @@ describe("filterGuardsForRegistryTable", () => {
       hasCar: "yes",
       hasUniform: "",
       hasTshirt: "",
+      hasPolo: "",
       objectId: "",
       status: "",
     });
@@ -131,6 +137,7 @@ describe("filterGuardsForRegistryTable", () => {
         hasCar: "",
         hasUniform: "no",
         hasTshirt: "",
+        hasPolo: "",
         objectId: "",
         status: "",
       });
@@ -146,6 +153,7 @@ describe("filterGuardsForRegistryTable", () => {
         hasCar: "",
         hasUniform: "yes",
         hasTshirt: "",
+        hasPolo: "",
         objectId: "",
         status: "",
       });
@@ -162,6 +170,7 @@ describe("filterGuardsForRegistryTable", () => {
         hasCar: "",
         hasUniform: "yes",
         hasTshirt: "",
+        hasPolo: "",
         objectId: "",
         status: "",
       });
@@ -201,6 +210,7 @@ describe("filterGuardsForRegistryTable", () => {
         hasCar: "",
         hasUniform: "",
         hasTshirt: "yes",
+        hasPolo: "",
         objectId: "",
         status: "",
       });
@@ -216,10 +226,47 @@ describe("filterGuardsForRegistryTable", () => {
         hasCar: "",
         hasUniform: "",
         hasTshirt: "no",
+        hasPolo: "",
         objectId: "",
         status: "",
       });
       expect(result.map((g) => g.id)).toEqual(["only-uniform", "none"]);
+    });
+  });
+
+  describe("filters by polo issued independently of uniform and tshirt", () => {
+    const poloGuards = [
+      row({
+        id: "only-polo",
+        poloIssued: true,
+        poloSize: 3,
+        poloIssuedOn: "2026-09-01",
+        uniformIssued: false,
+        tshirtIssued: false,
+      }),
+      row({
+        id: "only-tshirt",
+        tshirtIssued: true,
+        tshirtSize: 4,
+        tshirtIssuedOn: "2026-06-01",
+        poloIssued: false,
+      }),
+    ];
+
+    it("includes polo-only guards when hasPolo is yes", () => {
+      const result = filterGuardsForRegistryTable(poloGuards, {
+        query: "",
+        position: "",
+        licenseType: "",
+        employed: "",
+        hasCar: "",
+        hasUniform: "",
+        hasTshirt: "",
+        hasPolo: "yes",
+        objectId: "",
+        status: "",
+      });
+      expect(result.map((g) => g.id)).toEqual(["only-polo"]);
     });
   });
 });

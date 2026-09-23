@@ -15,7 +15,7 @@ import { isIncidentCompanionShiftLog } from "../scheduling/guard-service-history
 import { normalizeGuardFilters, type GuardFilterInput } from "./guard-filters";
 import { toDateIsoKhabarovsk } from "../format/display-date";
 import type { UniformCondition } from "../format/uniform";
-import { normalizeTshirtReturn, normalizeUniformReturn } from "../format/uniform";
+import { normalizePoloReturn, normalizeTshirtReturn, normalizeUniformReturn } from "../format/uniform";
 
 /** Кэш колонок `guards` (один information_schema на процесс). */
 let guardsColumnSetCache: Set<string> | null = null;
@@ -188,6 +188,34 @@ export async function getGuardsTshirtIssuedSelect(
   ].join(",\n          ");
 }
 
+export async function getGuardsPoloIssuedSelect(
+  mode: GuardsPhoneSelectMode = "aliased",
+): Promise<string> {
+  const has = await resolveGuardsOptionalColumn("polo_issued");
+  if (!has) {
+    return [
+      "false AS polo_issued",
+      "NULL::smallint AS polo_size",
+      "NULL::date AS polo_issued_on",
+      "NULL::date AS polo_returned_on",
+    ].join(",\n          ");
+  }
+  if (mode === "aliased") {
+    return [
+      "g.polo_issued",
+      "g.polo_size",
+      "g.polo_issued_on::text AS polo_issued_on",
+      "g.polo_returned_on::text AS polo_returned_on",
+    ].join(",\n          ");
+  }
+  return [
+    "polo_issued",
+    "polo_size",
+    "polo_issued_on::text AS polo_issued_on",
+    "polo_returned_on::text AS polo_returned_on",
+  ].join(",\n          ");
+}
+
 export async function getGuardsBirthDateSelect(
   mode: GuardsPhoneSelectMode = "aliased",
 ): Promise<"g.birth_date::text AS birth_date" | "birth_date::text AS birth_date" | "NULL::text AS birth_date"> {
@@ -225,6 +253,10 @@ export type GuardListRow = {
   tshirtSize: number | null;
   tshirtIssuedOn: string | null;
   tshirtReturnedOn: string | null;
+  poloIssued: boolean;
+  poloSize: number | null;
+  poloIssuedOn: string | null;
+  poloReturnedOn: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   licenseGrade: number | null;
@@ -268,6 +300,10 @@ type GuardRow = {
   tshirt_size: number | null;
   tshirt_issued_on: string | null;
   tshirt_returned_on: string | null;
+  polo_issued: boolean;
+  polo_size: number | null;
+  polo_issued_on: string | null;
+  polo_returned_on: string | null;
   position: GuardPosition;
   license_type: string | null;
   license_grade: number | null;
@@ -327,6 +363,9 @@ export type CreateGuardInput = {
   tshirtIssued?: boolean;
   tshirtSize?: number | null;
   tshirtIssuedOn?: string | null;
+  poloIssued?: boolean;
+  poloSize?: number | null;
+  poloIssuedOn?: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -354,6 +393,9 @@ export type UpdateGuardProfileInput = {
   tshirtIssued?: boolean;
   tshirtSize?: number | null;
   tshirtIssuedOn?: string | null;
+  poloIssued?: boolean;
+  poloSize?: number | null;
+  poloIssuedOn?: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -512,6 +554,52 @@ export async function returnGuardTshirt(guardId: string, returnedOn: string): Pr
     throw new Error("Дата сдачи не может быть раньше даты выдачи");
   }
   await saveGuardTshirtIssuedFields(guardId, fields);
+}
+
+async function saveGuardPoloIssuedFields(
+  guardId: string,
+  input: {
+    poloIssued: boolean;
+    poloSize: number | null;
+    poloIssuedOn: string | null;
+    poloReturnedOn?: string | null;
+  },
+): Promise<void> {
+  const has = await resolveGuardsOptionalColumn("polo_issued");
+  if (!has) return;
+  await query(
+    `
+      UPDATE guards
+      SET
+        polo_issued = $2,
+        polo_size = $3,
+        polo_issued_on = $4::date,
+        polo_returned_on = CASE
+          WHEN $2::boolean THEN NULL
+          WHEN $5::date IS NOT NULL THEN $5::date
+          ELSE polo_returned_on
+        END
+      WHERE id = $1
+    `,
+    [
+      guardId,
+      input.poloIssued,
+      input.poloSize,
+      input.poloIssuedOn,
+      input.poloReturnedOn ?? null,
+    ],
+  );
+}
+
+export async function returnGuardPolo(guardId: string, returnedOn: string): Promise<void> {
+  const details = await getGuardDetails(guardId);
+  if (!details) throw new Error("Охранник не найден");
+  if (!details.poloIssued) throw new Error("Поло не выдано");
+  const fields = normalizePoloReturn({ returnedOn });
+  if (details.poloIssuedOn && fields.poloReturnedOn && fields.poloReturnedOn < details.poloIssuedOn) {
+    throw new Error("Дата сдачи не может быть раньше даты выдачи");
+  }
+  await saveGuardPoloIssuedFields(guardId, fields);
 }
 
 async function saveGuardComplianceFields(
@@ -961,6 +1049,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
   const uniformHeightSel = await getGuardsUniformHeightSelect("aliased");
   const uniformIssuedSel = await getGuardsUniformIssuedSelect("aliased");
   const tshirtIssuedSel = await getGuardsTshirtIssuedSelect("aliased");
+  const poloIssuedSel = await getGuardsPoloIssuedSelect("aliased");
   const birthDateSel = await getGuardsBirthDateSelect("aliased");
   const middleNameSel = await getGuardsMiddleNameSelect("aliased");
   const hasCarSel = await getGuardsHasCarSelect("aliased");
@@ -1036,6 +1125,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${uniformHeightSel},
           ${uniformIssuedSel},
           ${tshirtIssuedSel},
+          ${poloIssuedSel},
           g.position,
           g.license_type,
           ${licenseGradeSel},
@@ -1090,6 +1180,7 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
           ${uniformHeightSel},
           ${uniformIssuedSel},
           ${tshirtIssuedSel},
+          ${poloIssuedSel},
           g.position,
           g.license_type,
           ${licenseGradeSel},
@@ -1504,6 +1595,11 @@ export async function createGuard(input: CreateGuardInput): Promise<string> {
     tshirtSize: input.tshirtSize ?? null,
     tshirtIssuedOn: input.tshirtIssuedOn ?? null,
   });
+  await saveGuardPoloIssuedFields(guardId, {
+    poloIssued: input.poloIssued ?? false,
+    poloSize: input.poloSize ?? null,
+    poloIssuedOn: input.poloIssuedOn ?? null,
+  });
 
   const dismissedOn = input.dismissedOn ?? null;
   if (input.status === "Dismissed" && dismissedOn) {
@@ -1854,6 +1950,11 @@ export async function updateGuardProfile(input: UpdateGuardProfileInput): Promis
     tshirtSize: input.tshirtSize ?? null,
     tshirtIssuedOn: input.tshirtIssuedOn ?? null,
   });
+  await saveGuardPoloIssuedFields(input.guardId, {
+    poloIssued: input.poloIssued ?? false,
+    poloSize: input.poloSize ?? null,
+    poloIssuedOn: input.poloIssuedOn ?? null,
+  });
 }
 
 export async function deleteGuard(guardId: string): Promise<void> {
@@ -1985,6 +2086,10 @@ export type GuardDetails = {
   tshirtSize: number | null;
   tshirtIssuedOn: string | null;
   tshirtReturnedOn: string | null;
+  poloIssued: boolean;
+  poloSize: number | null;
+  poloIssuedOn: string | null;
+  poloReturnedOn: string | null;
   position: GuardPosition;
   licenseType: GuardLicenseType | null;
   employmentType: GuardEmploymentType;
@@ -2011,6 +2116,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     uniformHeightSel,
     uniformIssuedSel,
     tshirtIssuedSel,
+    poloIssuedSel,
     birthDateSel,
     middleNameSel,
     hasCarSel,
@@ -2024,6 +2130,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     getGuardsUniformHeightSelect("aliased"),
     getGuardsUniformIssuedSelect("aliased"),
     getGuardsTshirtIssuedSelect("aliased"),
+    getGuardsPoloIssuedSelect("aliased"),
     getGuardsBirthDateSelect("aliased"),
     getGuardsMiddleNameSelect("aliased"),
     getGuardsHasCarSelect("aliased"),
@@ -2079,6 +2186,10 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     tshirt_size: number | null;
     tshirt_issued_on: string | null;
     tshirt_returned_on: string | null;
+    polo_issued: boolean;
+    polo_size: number | null;
+    polo_issued_on: string | null;
+    polo_returned_on: string | null;
     position: GuardPosition;
     license_type: string | null;
     employment_type: GuardEmploymentType;
@@ -2111,6 +2222,7 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
         ${uniformHeightSel},
         ${uniformIssuedSel},
         ${tshirtIssuedSel},
+        ${poloIssuedSel},
         g.position,
         g.license_type,
         g.employment_type,
@@ -2164,6 +2276,10 @@ export async function getGuardDetails(guardId: string): Promise<GuardDetails | n
     tshirtSize: first.tshirt_size ?? null,
     tshirtIssuedOn: first.tshirt_issued_on ?? null,
     tshirtReturnedOn: first.tshirt_returned_on ?? null,
+    poloIssued: first.polo_issued ?? false,
+    poloSize: first.polo_size ?? null,
+    poloIssuedOn: first.polo_issued_on ?? null,
+    poloReturnedOn: first.polo_returned_on ?? null,
     position: first.position ?? "Guard",
     licenseType: (first.license_type as GuardLicenseType | null) ?? null,
     employmentType: first.employment_type ?? "Unemployed",
@@ -2324,6 +2440,10 @@ function mapGuardRow(row: GuardRow): GuardListRow {
     tshirtSize: row.tshirt_size ?? null,
     tshirtIssuedOn: row.tshirt_issued_on ?? null,
     tshirtReturnedOn: row.tshirt_returned_on ?? null,
+    poloIssued: row.polo_issued ?? false,
+    poloSize: row.polo_size ?? null,
+    poloIssuedOn: row.polo_issued_on ?? null,
+    poloReturnedOn: row.polo_returned_on ?? null,
     position: row.position ?? "Guard",
     licenseType: (row.license_type as GuardLicenseType | null) ?? null,
     licenseGrade: row.license_grade ?? null,

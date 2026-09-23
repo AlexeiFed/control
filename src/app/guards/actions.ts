@@ -10,8 +10,10 @@ import type { GuardEmploymentType, GuardLicenseType, GuardPosition } from "../..
 import { isValidRuPhone, normalizeRuPhoneForStorage } from "../../lib/format/phone-ru";
 import {
   isValidUniformSizeStored,
+  normalizePoloIssuedFields,
   normalizeUniformIssuedFields,
   normalizeTshirtIssuedFields,
+  parsePoloIssuedFromForm,
   parseTshirtIssuedFromForm,
   parseUniformCondition,
   parseUniformSizeFormValue,
@@ -36,6 +38,7 @@ import {
   getGuardDetails,
   isGuardAssignedToObject,
   listGuardObjectAssignments,
+  returnGuardPolo,
   returnGuardToWork,
   returnGuardTshirt,
   returnGuardUniform,
@@ -206,6 +209,7 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
 
     let issuedFields;
     let tshirtFields;
+    let poloFields;
     try {
       issuedFields = normalizeUniformIssuedFields({
         issued: uniformIssued,
@@ -217,6 +221,11 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
         issued: parseTshirtIssuedFromForm(formData),
         size: parseUniformSizeFormValue(formData.get("tshirtSize")),
         issuedOn: String(formData.get("tshirtIssuedOn") ?? ""),
+      });
+      poloFields = normalizePoloIssuedFields({
+        issued: parsePoloIssuedFromForm(formData),
+        size: parseUniformSizeFormValue(formData.get("poloSize")),
+        issuedOn: String(formData.get("poloIssuedOn") ?? ""),
       });
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "Ошибка данных формы" };
@@ -240,6 +249,9 @@ export async function createGuardAction(formData: FormData): Promise<CreateGuard
         tshirtIssued: tshirtFields.tshirtIssued,
         tshirtSize: tshirtFields.tshirtSize,
         tshirtIssuedOn: tshirtFields.tshirtIssuedOn,
+        poloIssued: poloFields.poloIssued,
+        poloSize: poloFields.poloSize,
+        poloIssuedOn: poloFields.poloIssuedOn,
         position,
         licenseType: licenseForDb(input.licenseType),
         employmentType: input.employmentType,
@@ -493,6 +505,36 @@ export async function returnGuardTshirtAction(formData: FormData): Promise<Retur
   }
 }
 
+const returnPoloSchema = z.object({
+  guardId: z.string().uuid(),
+  returnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Укажите дату сдачи поло"),
+});
+
+export async function returnGuardPoloAction(formData: FormData): Promise<ReturnGuardUniformResult> {
+  try {
+    const session = await requireSession();
+    assertPermission(session.user.role, "guards:manage");
+
+    const input = returnPoloSchema.parse({
+      guardId: formData.get("guardId"),
+      returnedOn: formData.get("returnedOn"),
+    });
+
+    await returnGuardPolo(input.guardId, input.returnedOn);
+    revalidatePath("/guards");
+    revalidatePath(`/guards/${input.guardId}`);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: formatZodError(error) };
+    }
+    if (error instanceof Error && error.message) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: false, error: "Не удалось отметить сдачу поло" };
+  }
+}
+
 const objectAssignmentSchema = z.object({
   guardId: z.string().uuid(),
   objectId: z.string().uuid(),
@@ -700,6 +742,7 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
 
     let issuedFields;
     let tshirtFields;
+    let poloFields;
     try {
       issuedFields = normalizeUniformIssuedFields({
         issued: uniformIssued,
@@ -711,6 +754,11 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
         issued: parseTshirtIssuedFromForm(formData),
         size: parseUniformSizeFormValue(formData.get("tshirtSize")),
         issuedOn: String(formData.get("tshirtIssuedOn") ?? ""),
+      });
+      poloFields = normalizePoloIssuedFields({
+        issued: parsePoloIssuedFromForm(formData),
+        size: parseUniformSizeFormValue(formData.get("poloSize")),
+        issuedOn: String(formData.get("poloIssuedOn") ?? ""),
       });
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "Ошибка данных формы" };
@@ -732,6 +780,9 @@ export async function updateGuardProfileAction(formData: FormData): Promise<Upda
       tshirtIssued: tshirtFields.tshirtIssued,
       tshirtSize: tshirtFields.tshirtSize,
       tshirtIssuedOn: tshirtFields.tshirtIssuedOn,
+      poloIssued: poloFields.poloIssued,
+      poloSize: poloFields.poloSize,
+      poloIssuedOn: poloFields.poloIssuedOn,
       position: existing.position,
       licenseType,
       employmentType,

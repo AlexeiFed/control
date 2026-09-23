@@ -3,12 +3,17 @@ import {
   formatUniformConditionLabel,
   formatUniformIssuedTooltip,
   formatUniformSizeDisplay,
+  formatPoloIssuedTooltip,
+  formatPoloStatusDisplay,
   formatTshirtIssuedTooltip,
   formatTshirtStatusDisplay,
+  normalizePoloIssuedFields,
+  normalizePoloReturn,
   normalizeUniformIssuedFields,
   normalizeUniformReturn,
   normalizeTshirtIssuedFields,
   normalizeTshirtReturn,
+  parsePoloIssuedFromForm,
   parseTshirtIssuedFromForm,
   parseUniformCondition,
   parseUniformSizeFormValue,
@@ -233,6 +238,81 @@ describe("tshirt issued", () => {
         returnedOn: null,
       }),
     ).toBe("Нет");
+  });
+});
+
+describe("polo issued", () => {
+  it("clears fields when not issued", () => {
+    expect(
+      normalizePoloIssuedFields({
+        issued: false,
+        size: 3,
+        issuedOn: "2026-09-01",
+      }),
+    ).toEqual({
+      poloIssued: false,
+      poloSize: null,
+      poloIssuedOn: null,
+      poloReturnedOn: null,
+    });
+  });
+
+  it("requires size and date when issued", () => {
+    expect(() =>
+      normalizePoloIssuedFields({
+        issued: true,
+        size: null,
+        issuedOn: "2026-09-01",
+      }),
+    ).toThrow(/размер/i);
+  });
+
+  it("keeps size and date when issued", () => {
+    expect(
+      normalizePoloIssuedFields({
+        issued: true,
+        size: 3,
+        issuedOn: "2026-09-01",
+      }),
+    ).toEqual({
+      poloIssued: true,
+      poloSize: 3,
+      poloIssuedOn: "2026-09-01",
+      poloReturnedOn: null,
+    });
+  });
+
+  it("сдаёт поло: снимает выдачу и фиксирует дату сдачи", () => {
+    expect(normalizePoloReturn({ returnedOn: "2026-09-20" })).toEqual({
+      poloIssued: false,
+      poloSize: null,
+      poloIssuedOn: null,
+      poloReturnedOn: "2026-09-20",
+    });
+  });
+
+  it("читает чекбокс поло независимо от формы и футболки", () => {
+    const withPolo = new FormData();
+    withPolo.set("poloIssued", "on");
+    expect(parsePoloIssuedFromForm(withPolo)).toBe(true);
+
+    const withoutPolo = new FormData();
+    withoutPolo.set("tshirtIssued", "on");
+    expect(parsePoloIssuedFromForm(withoutPolo)).toBe(false);
+  });
+
+  it("строит tooltip и статус выдачи поло", () => {
+    expect(formatPoloIssuedTooltip({ size: 3, issuedOn: "2026-09-01" })).toBe(
+      "Размер: M, дата: 01.09.2026",
+    );
+    expect(
+      formatPoloStatusDisplay({
+        issued: true,
+        size: 3,
+        issuedOn: "2026-09-01",
+        returnedOn: null,
+      }),
+    ).toBe("M · 01.09.2026");
   });
 });
 

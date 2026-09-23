@@ -38,7 +38,11 @@ import {
   guardLicenseLabels,
   guardPositionLabels,
 } from "../../lib/operations/status-labels";
-import { formatTshirtIssuedTooltip, formatUniformIssuedTooltip } from "../../lib/format/uniform";
+import {
+  formatPoloIssuedTooltip,
+  formatTshirtIssuedTooltip,
+  formatUniformIssuedTooltip,
+} from "../../lib/format/uniform";
 import { GuardStatusCell } from "./guard-status-cell";
 import { GuardTableObjectsCell } from "./guard-table-objects-cell";
 import { StickyHorizontalScroll } from "../ui/sticky-horizontal-scroll";
@@ -228,6 +232,28 @@ function renderCell(
                   ? formatTshirtIssuedTooltip({
                       size: guard.tshirtSize,
                       issuedOn: guard.tshirtIssuedOn,
+                    })
+                  : undefined
+              }
+            >
+              да
+            </span>
+          ) : (
+            <span className="text-app-muted">нет</span>
+          )}
+        </td>
+      );
+    case "polo":
+      return (
+        <td key={columnId} className={guardTableTdClass}>
+          {guard.poloIssued ? (
+            <span
+              className="cursor-default text-status-active"
+              title={
+                guard.poloSize != null && guard.poloIssuedOn
+                  ? formatPoloIssuedTooltip({
+                      size: guard.poloSize,
+                      issuedOn: guard.poloIssuedOn,
                     })
                   : undefined
               }

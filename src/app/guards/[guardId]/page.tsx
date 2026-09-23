@@ -20,6 +20,7 @@ import {
 } from "../../../lib/operations/status-labels";
 import { designTokens } from "../../../lib/design-tokens";
 import {
+  formatPoloStatusDisplay,
   formatTshirtStatusDisplay,
   formatUniformConditionLabel,
   formatUniformSizeDisplay,
@@ -236,13 +237,24 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
                   returnedOn: guard.tshirtReturnedOn,
                 })}
               </span>
-              {guard.uniformIssued || guard.tshirtIssued ? (
+              <span className="text-app-muted">Выдано поло:</span>
+              <span className="font-semibold text-app-text">
+                {formatPoloStatusDisplay({
+                  issued: guard.poloIssued,
+                  size: guard.poloSize,
+                  issuedOn: guard.poloIssuedOn,
+                  returnedOn: guard.poloReturnedOn,
+                })}
+              </span>
+              {guard.uniformIssued || guard.tshirtIssued || guard.poloIssued ? (
                 <GuardUniformReturnControl
                   guardId={guard.id}
                   uniformIssued={guard.uniformIssued}
                   uniformIssuedOn={guard.uniformIssuedOn}
                   tshirtIssued={guard.tshirtIssued}
                   tshirtIssuedOn={guard.tshirtIssuedOn}
+                  poloIssued={guard.poloIssued}
+                  poloIssuedOn={guard.poloIssuedOn}
                 />
               ) : null}
             </div>

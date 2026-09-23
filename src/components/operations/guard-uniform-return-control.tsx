@@ -2,7 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { returnGuardTshirtAction, returnGuardUniformAction } from "../../app/guards/actions";
+import {
+  returnGuardPoloAction,
+  returnGuardTshirtAction,
+  returnGuardUniformAction,
+} from "../../app/guards/actions";
 import { toDateIsoKhabarovsk } from "../../lib/format/display-date";
 import { toast } from "../../store/toast-store";
 import { DateInput } from "../ui/date-input";
@@ -13,6 +17,8 @@ type Props = {
   uniformIssuedOn: string | null;
   tshirtIssued: boolean;
   tshirtIssuedOn: string | null;
+  poloIssued: boolean;
+  poloIssuedOn: string | null;
 };
 
 export function GuardUniformReturnControl({
@@ -21,13 +27,17 @@ export function GuardUniformReturnControl({
   uniformIssuedOn,
   tshirtIssued,
   tshirtIssuedOn,
+  poloIssued,
+  poloIssuedOn,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [uniformReturnedOn, setUniformReturnedOn] = useState(() => toDateIsoKhabarovsk(new Date()));
   const [tshirtReturnedOn, setTshirtReturnedOn] = useState(() => toDateIsoKhabarovsk(new Date()));
+  const [poloReturnedOn, setPoloReturnedOn] = useState(() => toDateIsoKhabarovsk(new Date()));
   const [uniformChecked, setUniformChecked] = useState(false);
   const [tshirtChecked, setTshirtChecked] = useState(false);
+  const [poloChecked, setPoloChecked] = useState(false);
 
   function submitUniform() {
     if (!uniformReturnedOn) {
@@ -103,7 +113,44 @@ export function GuardUniformReturnControl({
     });
   }
 
-  if (!uniformIssued && !tshirtIssued) return null;
+  function submitPolo() {
+    if (!poloReturnedOn) {
+      setPoloChecked(false);
+      toast({
+        variant: "error",
+        title: "Укажите дату сдачи",
+        message: "Выберите дату или введите её вручную (дд.мм.гггг)",
+        durationMs: 3500,
+      });
+      return;
+    }
+    const formData = new FormData();
+    formData.set("guardId", guardId);
+    formData.set("returnedOn", poloReturnedOn);
+
+    startTransition(async () => {
+      const result = await returnGuardPoloAction(formData);
+      if (!result.ok) {
+        setPoloChecked(false);
+        toast({
+          variant: "error",
+          title: "Не удалось сдать поло",
+          message: result.error,
+          durationMs: 4500,
+        });
+        return;
+      }
+      router.refresh();
+      toast({
+        variant: "success",
+        title: "Поло сдано",
+        message: "Отметка о выдаче снята",
+        durationMs: 3200,
+      });
+    });
+  }
+
+  if (!uniformIssued && !tshirtIssued && !poloIssued) return null;
 
   return (
     <div className="col-span-2 mt-1 flex flex-col gap-3 rounded-button border border-app-border bg-app-bg/60 p-2.5">
@@ -158,6 +205,34 @@ export function GuardUniformReturnControl({
               min={tshirtIssuedOn ?? undefined}
               disabled={isPending}
               onChange={setTshirtReturnedOn}
+              className="min-h-9 rounded-button border border-app-border bg-app-surface px-3 py-1.5 text-sm outline-none focus:border-accent-primary"
+            />
+          </label>
+        </div>
+      ) : null}
+      {poloIssued ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <label className="flex min-h-9 items-center gap-2 text-sm text-app-text">
+            <input
+              type="checkbox"
+              checked={poloChecked}
+              disabled={isPending}
+              onChange={(event) => {
+                if (!event.target.checked) return;
+                setPoloChecked(true);
+                submitPolo();
+              }}
+              className="size-4"
+            />
+            Поло сдано
+          </label>
+          <label className="grid min-w-0 flex-1 gap-1 text-xs text-app-muted">
+            Дата сдачи
+            <DateInput
+              value={poloReturnedOn}
+              min={poloIssuedOn ?? undefined}
+              disabled={isPending}
+              onChange={setPoloReturnedOn}
               className="min-h-9 rounded-button border border-app-border bg-app-surface px-3 py-1.5 text-sm outline-none focus:border-accent-primary"
             />
           </label>

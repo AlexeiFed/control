@@ -136,6 +136,18 @@ export function GuardRegistryTableFiltersPanel({
           </select>
         </FilterCell>
 
+        <FilterCell label="Поло">
+          <select
+            value={filters.hasPolo}
+            onChange={(e) => onChange({ hasPolo: e.target.value as YesNoFilter })}
+            className={fieldClass}
+          >
+            <option value="">—</option>
+            <option value="yes">да</option>
+            <option value="no">нет</option>
+          </select>
+        </FilterCell>
+
         <FilterCell label="Статус">
           <select
             value={filters.status}

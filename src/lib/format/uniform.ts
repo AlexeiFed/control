@@ -253,3 +253,81 @@ export function normalizeTshirtReturn(input: { returnedOn: string }): TshirtIssu
     tshirtReturnedOn: returnedOn,
   };
 }
+
+export function parsePoloIssuedFromForm(formData: FormData): boolean {
+  return formData.get("poloIssued") === "on";
+}
+
+export function formatPoloIssuedTooltip(input: { size: number; issuedOn: string }): string {
+  return `Размер: ${formatUniformSizeDisplay(input.size)}, дата: ${formatDisplayDateFromIso(input.issuedOn)}`;
+}
+
+export function formatPoloStatusDisplay(input: {
+  issued: boolean;
+  size: number | null;
+  issuedOn: string | null;
+  returnedOn: string | null;
+}): string {
+  if (input.issued) {
+    return (
+      [
+        input.size != null ? formatUniformSizeDisplay(input.size) : null,
+        input.issuedOn ? formatDisplayDateFromIso(input.issuedOn) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || "Да"
+    );
+  }
+  if (input.returnedOn) {
+    return `Нет · сдано ${formatDisplayDateFromIso(input.returnedOn)}`;
+  }
+  return "Нет";
+}
+
+export type PoloIssuedNormalized = {
+  poloIssued: boolean;
+  poloSize: number | null;
+  poloIssuedOn: string | null;
+  poloReturnedOn: string | null;
+};
+
+export function normalizePoloIssuedFields(input: {
+  issued: boolean;
+  size: number | null | undefined;
+  issuedOn: string | null | undefined;
+}): PoloIssuedNormalized {
+  if (!input.issued) {
+    return {
+      poloIssued: false,
+      poloSize: null,
+      poloIssuedOn: null,
+      poloReturnedOn: null,
+    };
+  }
+  if (input.size == null || !isValidUniformSizeStored(input.size)) {
+    throw new Error("Укажите размер поло");
+  }
+  const issuedOn = typeof input.issuedOn === "string" ? input.issuedOn.trim() : "";
+  if (!issuedOn) {
+    throw new Error("Укажите дату выдачи поло");
+  }
+  return {
+    poloIssued: true,
+    poloSize: input.size,
+    poloIssuedOn: issuedOn,
+    poloReturnedOn: null,
+  };
+}
+
+export function normalizePoloReturn(input: { returnedOn: string }): PoloIssuedNormalized {
+  const returnedOn = input.returnedOn.trim();
+  if (!returnedOn || !ISO_DATE_RE.test(returnedOn)) {
+    throw new Error("Укажите дату сдачи поло");
+  }
+  return {
+    poloIssued: false,
+    poloSize: null,
+    poloIssuedOn: null,
+    poloReturnedOn: returnedOn,
+  };
+}

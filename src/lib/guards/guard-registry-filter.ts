@@ -11,6 +11,7 @@ export type GuardRegistryTableFilters = {
   hasCar: YesNoFilter;
   hasUniform: YesNoFilter;
   hasTshirt: YesNoFilter;
+  hasPolo: YesNoFilter;
   objectId: string;
   status: GuardStatus | "";
 };
@@ -23,6 +24,7 @@ export const emptyGuardRegistryTableFilters: GuardRegistryTableFilters = {
   hasCar: "",
   hasUniform: "",
   hasTshirt: "",
+  hasPolo: "",
   objectId: "",
   status: "",
 };
@@ -51,6 +53,9 @@ export function filterGuardsForRegistryTable(
     const tshirt = guard.tshirtIssued;
     if (filters.hasTshirt === "yes" && !tshirt) return false;
     if (filters.hasTshirt === "no" && tshirt) return false;
+    const polo = guard.poloIssued;
+    if (filters.hasPolo === "yes" && !polo) return false;
+    if (filters.hasPolo === "no" && polo) return false;
     if (filters.objectId && !guard.objectIds.includes(filters.objectId)) return false;
     if (filters.status && guard.status !== filters.status) return false;
     return true;
@@ -66,6 +71,7 @@ export function hasActiveGuardRegistryFilters(filters: GuardRegistryTableFilters
     filters.hasCar !== "" ||
     filters.hasUniform !== "" ||
     filters.hasTshirt !== "" ||
+    filters.hasPolo !== "" ||
     filters.objectId !== "" ||
     filters.status !== ""
   );

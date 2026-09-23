@@ -25,6 +25,10 @@ function row(partial: Partial<GuardListRow>): GuardListRow {
     tshirtSize: null,
     tshirtIssuedOn: null,
     tshirtReturnedOn: null,
+    poloIssued: false,
+    poloSize: null,
+    poloIssuedOn: null,
+    poloReturnedOn: null,
     position: "Guard",
     licenseType: "Licensed",
     licenseGrade: 4,
@@ -66,6 +70,9 @@ describe("guard-registry-export", () => {
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Футболка выдана")]).toBe("нет");
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Размер футболки")]).toBe("");
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи футболки")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Поло выдано")]).toBe("нет");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Размер поло")]).toBe("");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи поло")]).toBe("");
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Объекты")]).toBe("Объект 1");
   });
 
@@ -99,6 +106,23 @@ describe("guard-registry-export", () => {
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Футболка выдана")]).toBe("да");
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Размер футболки")]).toBe("L");
     expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи футболки")]).toBe("01.06.2026");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Поло выдано")]).toBe("нет");
+  });
+
+  it("exports polo even when uniform and tshirt are not issued", () => {
+    const exported = buildGuardRegistryExportRow(
+      row({
+        uniformIssued: false,
+        tshirtIssued: false,
+        poloIssued: true,
+        poloSize: 3,
+        poloIssuedOn: "2026-09-01",
+      }),
+      0,
+    );
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Поло выдано")]).toBe("да");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Размер поло")]).toBe("M");
+    expect(exported[GUARD_REGISTRY_EXPORT_HEADERS.indexOf("Дата выдачи поло")]).toBe("01.09.2026");
   });
 
   it("exports expired trainee as not trainee", () => {
@@ -126,6 +150,9 @@ describe("guard-registry-export", () => {
         "Футболка выдана",
         "Размер футболки",
         "Дата выдачи футболки",
+        "Поло выдано",
+        "Размер поло",
+        "Дата выдачи поло",
         "Номер удостоверения",
         "Номер личной карточки",
       ]),

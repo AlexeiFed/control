@@ -202,6 +202,9 @@ export function GuardProfileEditor({ guard }: GuardProfileEditorProps) {
           defaultTshirtIssued={guard.tshirtIssued}
           defaultTshirtSize={guard.tshirtSize}
           defaultTshirtIssuedOn={guard.tshirtIssuedOn}
+          defaultPoloIssued={guard.poloIssued}
+          defaultPoloSize={guard.poloSize}
+          defaultPoloIssuedOn={guard.poloIssuedOn}
           fieldClassName={fieldClass}
         />
 

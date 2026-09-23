@@ -18,6 +18,7 @@ export type GuardRegistryColumnId =
   | "car"
   | "uniform"
   | "tshirt"
+  | "polo"
   | "objects"
   | "status"
   | "dismissedOn"
@@ -56,6 +57,7 @@ export const DEFAULT_GUARD_REGISTRY_COLUMN_ORDER: GuardRegistryColumnId[] = [
   "car",
   "uniform",
   "tshirt",
+  "polo",
   "objects",
   "status",
   "dismissedOn",
@@ -70,6 +72,7 @@ export function isGuardRegistryColumnId(value: string): value is GuardRegistryCo
 
 export function normalizeGuardRegistryColumnOrder(raw: unknown): GuardRegistryColumnId[] {
   if (!Array.isArray(raw)) return [...DEFAULT_GUARD_REGISTRY_COLUMN_ORDER];
+  const rawHadPolo = raw.includes("polo");
   const draggable = raw.filter(
     (id): id is GuardRegistryColumnId =>
       typeof id === "string" && isGuardRegistryColumnId(id) && !GUARD_REGISTRY_PINNED_COLUMNS.includes(id as GuardRegistryColumnId),
@@ -83,6 +86,12 @@ export function normalizeGuardRegistryColumnOrder(raw: unknown): GuardRegistryCo
   if (order.includes("firstName") && !order.includes("middleName")) {
     const firstNameIndex = order.indexOf("firstName");
     order.splice(firstNameIndex + 1, 0, "middleName");
+  }
+  if (!rawHadPolo && order.includes("tshirt")) {
+    const withoutPolo: GuardRegistryColumnId[] = order.filter((id) => id !== "polo");
+    const tshirtIndex = withoutPolo.indexOf("tshirt");
+    withoutPolo.splice(tshirtIndex + 1, 0, "polo");
+    order = withoutPolo;
   }
   return order;
 }
@@ -215,6 +224,7 @@ export const GUARD_REGISTRY_COLUMN_META: Record<GuardRegistryColumnId, GuardRegi
   car: { id: "car", label: "Авто", draggable: true },
   uniform: { id: "uniform", label: "Форма", draggable: true },
   tshirt: { id: "tshirt", label: "Футболка", draggable: true },
+  polo: { id: "polo", label: "Поло", draggable: true },
   objects: { id: "objects", label: "Объекты", draggable: true },
   status: { id: "status", label: "Статус", draggable: true },
   dismissedOn: {
