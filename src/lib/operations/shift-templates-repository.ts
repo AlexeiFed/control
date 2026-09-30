@@ -123,8 +123,14 @@ function mapRow(row: DbRow): ObjectShiftTemplateRow {
   };
 }
 
-export async function listShiftTemplatesForObjectIds(objectIds: string[]): Promise<ObjectShiftTemplateRow[]> {
-  if (objectIds.length === 0) return [];
+export async function listAllShiftTemplates(): Promise<ObjectShiftTemplateRow[]> {
+  return listShiftTemplatesForObjectIds(null);
+}
+
+export async function listShiftTemplatesForObjectIds(
+  objectIds: readonly string[] | null,
+): Promise<ObjectShiftTemplateRow[]> {
+  if (objectIds && objectIds.length === 0) return [];
   const extra = await getShiftTemplateExtraSelects();
   const hasPostId = await tableColumnExists("object_shift_templates", "post_id");
   const rows = await query<DbRow>(
@@ -148,10 +154,10 @@ export async function listShiftTemplatesForObjectIds(objectIds: string[]): Promi
         ${hasPostId ? "p.month" : "NULL::text"} AS post_month
       FROM object_shift_templates t
       ${hasPostId ? "LEFT JOIN object_posts p ON p.id = t.post_id" : ""}
-      WHERE t.object_id = ANY($1::uuid[])
+      ${objectIds ? "WHERE t.object_id = ANY($1::uuid[])" : ""}
       ORDER BY t.object_id, t.day_of_week, t.effective_from ASC
     `,
-    [objectIds],
+    objectIds ? [[...objectIds]] : [],
   );
   return rows.map(mapRow);
 }

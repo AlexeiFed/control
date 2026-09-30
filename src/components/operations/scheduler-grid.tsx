@@ -1069,6 +1069,25 @@ export function SchedulerGrid({
     referenceShiftForRates?.selectedRateRuleId,
   ]);
 
+  const shiftsByObjectId = useMemo(() => {
+    const map = new Map<string, Shift[]>();
+    for (const shift of shifts) {
+      const list = map.get(shift.objectId);
+      if (list) list.push(shift);
+      else map.set(shift.objectId, [shift]);
+    }
+    return map;
+  }, [shifts]);
+
+  const coveringShiftsByObjectId = useMemo(() => {
+    const map = new Map<string, Shift[]>();
+    for (const [objectId, list] of shiftsByObjectId) {
+      const covering = list.filter((shift) => shiftCoverageMinutes(shift) > 0);
+      if (covering.length > 0) map.set(objectId, covering);
+    }
+    return map;
+  }, [shiftsByObjectId]);
+
   const selectedGuard = activeGuards.find((item) => item.id === selectedGuardId);
   const selectedTableObject = tableObjectId
     ? objects.find((item) => item.id === tableObjectId)
@@ -1080,13 +1099,13 @@ export function SchedulerGrid({
     if (hideEmptyObjects) {
       const weekEndMs = weekStart.getTime() + 14 * 24 * 3_600_000;
       list = list.filter((obj) => {
-        const hasShifts = shifts.some(
-          (s) =>
-            s.objectId === obj.id &&
-            !s.isNoShow &&
-            s.startsAt.getTime() < weekEndMs &&
-            s.endsAt.getTime() > weekStart.getTime(),
-        );
+        const hasShifts =
+          shiftsByObjectId.get(obj.id)?.some(
+            (s) =>
+              !s.isNoShow &&
+              s.startsAt.getTime() < weekEndMs &&
+              s.endsAt.getTime() > weekStart.getTime(),
+          ) ?? false;
         if (hasShifts) return true;
         const norms = expectedShiftsByObjectDay[obj.id];
         if (!norms) return false;
@@ -1096,7 +1115,7 @@ export function SchedulerGrid({
       });
     }
     return list;
-  }, [objects, tableObjectId, hideEmptyObjects, shifts, weekStart, expectedShiftsByObjectDay]);
+  }, [objects, tableObjectId, hideEmptyObjects, shiftsByObjectId, weekStart, expectedShiftsByObjectDay]);
   const mobileScheduleCards = buildMobileScheduleCards({
     objects: visibleObjects,
     guards,
@@ -1488,9 +1507,7 @@ export function SchedulerGrid({
                       planShiftLeadHours += norm.shiftLead * norm.shiftLeadShiftHours;
                       planSeniorGuardHours += norm.seniorGuard * norm.seniorGuardShiftHours;
                     }
-                    const objShifts = shifts.filter(
-                      (s) => s.objectId === objectItem.id && shiftCoverageMinutes(s) > 0,
-                    );
+                    const objShifts = coveringShiftsByObjectId.get(objectItem.id) ?? [];
                     const factRegularHours = Math.round(
                       (objShifts
                         .filter((s) => s.shiftKind === "Regular")

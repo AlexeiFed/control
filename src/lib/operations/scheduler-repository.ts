@@ -48,6 +48,11 @@ import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
 import { loadPostIdsByObjectMonthForDays } from "./object-posts-repository";
 import { listObjectRateRulesForObjects, type ObjectRateRuleRecord } from "./object-rate-rules-repository";
 import { getGuardsHasCarSelect, getGuardsPhoneSelect } from "./guards-repository";
+import {
+  scheduleSyncShiftDerivedEntries,
+  scheduleSyncShiftDerivedEntriesMany,
+  scheduleSyncTimesheetEntry,
+} from "../scheduling/sync-shift-derived";
 
 type GuardRow = {
   id: string;
@@ -137,13 +142,15 @@ export function getMonthRangeKhabarovsk(year: number, monthIndex0: number): { st
 
 /** Охранники с хотя бы одной сменой на объекте в указанном локальном календарном месяце. */
 export async function listScheduledGuardsByObjectForLocalMonth(
-  objectIds: ReadonlyArray<string>,
+  objectIds: readonly string[] | null,
   year: number,
   monthIndex0: number,
 ): Promise<Record<string, ObjectMonthScheduledGuard[]>> {
   const empty: Record<string, ObjectMonthScheduledGuard[]> = {};
-  for (const id of objectIds) empty[id] = [];
-  if (objectIds.length === 0) return empty;
+  if (objectIds && objectIds.length === 0) return empty;
+  if (objectIds) {
+    for (const id of objectIds) empty[id] = [];
+  }
 
   const { start, end } = getMonthRangeKhabarovsk(year, monthIndex0);
 
@@ -158,15 +165,14 @@ export async function listScheduledGuardsByObjectForLocalMonth(
       FROM shifts s
       INNER JOIN guards g ON g.id = s.guard_id
       WHERE s.ends_at > $1 AND s.starts_at < $2
-        AND s.object_id = ANY($3::uuid[])
+        ${objectIds ? "AND s.object_id = ANY($3::uuid[])" : ""}
       ORDER BY s.object_id, g.last_name, g.first_name, g.id
     `,
-    [start, end, objectIds],
+    objectIds ? [start, end, [...objectIds]] : [start, end],
   );
 
   for (const row of rows) {
-    const bucket = empty[row.object_id];
-    if (!bucket) continue;
+    const bucket = (empty[row.object_id] ??= []);
     const displayName = `${row.last_name} ${row.first_name}`.trim();
     bucket.push({ guardId: row.guard_id, displayName });
   }
@@ -241,7 +247,7 @@ async function loadSchedulerSnapshotRaw(weekStartIso: string): Promise<Scheduler
     getShiftSelectedRateRuleSelect(),
   ]);
 
-  const [guardsRows, objectsRows, shiftsRows, logsRows] = await Promise.all([
+  const [guardsRows, objectsRows, shiftsRows] = await Promise.all([
     query<GuardRow>(
       `
         SELECT
@@ -290,37 +296,14 @@ async function loadSchedulerSnapshotRaw(weekStartIso: string): Promise<Scheduler
       `,
       [shiftQueryStart.toISOString(), shiftQueryEndExclusive.toISOString()],
     ),
-    query<ShiftLogRow>(
-      `
-        SELECT
-          l.id,
-          l.shift_id,
-          l.author_user_id,
-          l.created_at,
-          l.note,
-          l.incident_level,
-          l.accounted_at,
-          o.name AS object_name,
-          g.last_name AS guard_last_name,
-          g.first_name AS guard_first_name,
-          s.starts_at AS shift_starts_at,
-          s.ends_at AS shift_ends_at
-        FROM shift_logs l
-        INNER JOIN shifts s ON s.id = l.shift_id
-        INNER JOIN security_objects o ON o.id = s.object_id
-        INNER JOIN guards g ON g.id = s.guard_id
-        ORDER BY l.created_at DESC
-        LIMIT 300
-      `,
-    ),
   ]);
 
-  return { guardsRows, objectsRows, shiftsRows, logsRows };
+  return { guardsRows, objectsRows, shiftsRows, logsRows: [] };
 }
 
 const getSchedulerSnapshotRawCached = unstable_cache(
   (weekStartIso: string) => loadSchedulerSnapshotRaw(weekStartIso),
-  ["scheduler-snapshot:v1"],
+  ["scheduler-snapshot:v2"],
   {
     tags: ["scheduler", "shifts", "directory"],
     revalidate: 60,
@@ -424,12 +407,16 @@ export async function deleteShiftLog(logId: string): Promise<{ shiftId: string }
   );
   const row = rows[0];
   if (!row) throw new Error("Запись журнала не найдена");
-  const { syncTimesheetEntryFromShiftSafe } = await import("../accounting/sync-timesheet-entry");
-  await syncTimesheetEntryFromShiftSafe(row.shift_id);
+  scheduleSyncTimesheetEntry(row.shift_id);
   return { shiftId: row.shift_id };
 }
 
-export async function listShiftsInLocalRange(rangeStart: Date, rangeEnd: Date): Promise<Shift[]> {
+export async function listShiftsInLocalRange(
+  rangeStart: Date,
+  rangeEnd: Date,
+  objectIds?: readonly string[] | null,
+): Promise<Shift[]> {
+  if (objectIds && objectIds.length === 0) return [];
   const [incidentSel, rateRuleSel] = await Promise.all([
     getShiftIncidentSelectColumns(),
     getShiftSelectedRateRuleSelect(),
@@ -445,11 +432,95 @@ export async function listShiftsInLocalRange(rangeStart: Date, rangeEnd: Date): 
         ${incidentSel}
       FROM shifts
       WHERE ends_at > $1 AND starts_at < $2
+        ${objectIds ? "AND object_id = ANY($3::uuid[])" : ""}
+      ORDER BY starts_at ASC
+    `,
+    objectIds
+      ? [rangeStart.toISOString(), rangeEnd.toISOString(), [...objectIds]]
+      : [rangeStart.toISOString(), rangeEnd.toISOString()],
+  );
+  return rows.map(mapDbShiftRow);
+}
+
+const DAY_MS = 24 * 60 * 60_000;
+
+/** Окно смен для недобора недели: −3 суток до понедельника и +3 после конца недели. */
+export function shortageShiftRange(weekStart: Date, visibleDayCount = 7): { start: Date; end: Date } {
+  return {
+    start: new Date(weekStart.getTime() - 3 * DAY_MS),
+    end: new Date(weekStart.getTime() + (visibleDayCount + 3) * DAY_MS),
+  };
+}
+
+/** Объекты и смены окна без справочника охранников и журнала. Для недобора и баннеров. */
+export async function loadScheduleObjectsAndShifts(input: {
+  rangeStart: Date;
+  rangeEnd: Date;
+  objectIds?: readonly string[];
+}): Promise<{ objects: SecurityObject[]; shifts: Shift[] }> {
+  const objectIds = input.objectIds ? [...input.objectIds] : null;
+  if (objectIds && objectIds.length === 0) return { objects: [], shifts: [] };
+
+  const [objectsRows, shifts] = await Promise.all([
+    query<ObjectRow>(
+      `
+        SELECT id, name, address, status, operational_day_start_time::text AS operational_day_start_time
+        FROM security_objects
+        ${objectIds ? "WHERE id = ANY($1::uuid[])" : ""}
+        ORDER BY name
+      `,
+      objectIds ? [objectIds] : [],
+    ),
+    listShiftsInLocalRange(input.rangeStart, input.rangeEnd, objectIds),
+  ]);
+
+  return {
+    objects: objectsRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      address: row.address,
+      status: row.status,
+      operationalDayStartTime: normalizeOperationalAnchorTime(row.operational_day_start_time),
+    })),
+    shifts,
+  };
+}
+
+export type ShiftSpanRow = {
+  id: string;
+  guardId: string;
+  objectId: string;
+  startsAt: string;
+  endsAt: string;
+  isNoShow: boolean;
+};
+
+/** Узкие поля для проверки занятости: без комментариев инцидентов и ставок. */
+export async function listShiftSpansInLocalRange(rangeStart: Date, rangeEnd: Date): Promise<ShiftSpanRow[]> {
+  const rows = await query<{
+    id: string;
+    guard_id: string;
+    object_id: string;
+    starts_at: string | Date;
+    ends_at: string | Date;
+    is_no_show: boolean;
+  }>(
+    `
+      SELECT id, guard_id, object_id, starts_at, ends_at, is_no_show
+      FROM shifts
+      WHERE ends_at > $1 AND starts_at < $2
       ORDER BY starts_at ASC
     `,
     [rangeStart.toISOString(), rangeEnd.toISOString()],
   );
-  return rows.map(mapDbShiftRow);
+  return rows.map((row) => ({
+    id: row.id,
+    guardId: row.guard_id,
+    objectId: row.object_id,
+    startsAt: new Date(row.starts_at).toISOString(),
+    endsAt: new Date(row.ends_at).toISOString(),
+    isNoShow: row.is_no_show ?? false,
+  }));
 }
 
 type TimesheetIncidentCountRaw = { shift_id: string; count: number };
@@ -937,8 +1008,7 @@ export async function updateShiftAssignment(input: {
   );
   if (!updated[0]) throw new Error("Не удалось обновить смену");
 
-  const { syncShiftDerivedEntries } = await import("../scheduling/sync-shift-derived");
-  await syncShiftDerivedEntries(input.shiftId, "schedule-sync");
+  scheduleSyncShiftDerivedEntries(input.shiftId, "schedule-sync");
 
   return { objectId: input.objectId };
 }
@@ -995,6 +1065,8 @@ export async function createShiftAssignment(input: {
   manualRateReason: string;
   selectedRateRuleId?: string | null;
   isNoShow?: boolean;
+  /** Массовое создание само ставит одну пачку синхронизации после всех INSERT. */
+  skipDerivedSync?: boolean;
 }): Promise<CreateShiftAssignmentResult> {
   const phoneSel = await getGuardsPhoneSelect("direct");
   const hasCarSel = await getGuardsHasCarSelect("direct");
@@ -1032,8 +1104,7 @@ export async function createShiftAssignment(input: {
       [input.replaceShiftId, input.guardId],
     );
     if (updated[0]) {
-      const { syncShiftDerivedEntries } = await import("../scheduling/sync-shift-derived");
-      await syncShiftDerivedEntries(updated[0].id, "schedule-sync");
+      if (!input.skipDerivedSync) scheduleSyncShiftDerivedEntries(updated[0].id, "schedule-sync");
       return { shiftId: updated[0].id, appendNoShowLog: true };
     }
     const current = await query<{ id: string; is_no_show: boolean }>(
@@ -1043,8 +1114,7 @@ export async function createShiftAssignment(input: {
     const row = current[0];
     if (!row) throw new Error("Смена не найдена или охранник не совпадает");
     if (row.is_no_show) {
-      const { syncShiftDerivedEntries } = await import("../scheduling/sync-shift-derived");
-      await syncShiftDerivedEntries(row.id, "schedule-sync");
+      if (!input.skipDerivedSync) scheduleSyncShiftDerivedEntries(row.id, "schedule-sync");
       return { shiftId: row.id, appendNoShowLog: false };
     }
     throw new Error("Не удалось отметить невыход");
@@ -1189,8 +1259,7 @@ export async function createShiftAssignment(input: {
     }
 
     await client.query("COMMIT");
-    const { syncShiftDerivedEntries } = await import("../scheduling/sync-shift-derived");
-    await syncShiftDerivedEntries(row.id, "schedule-sync");
+    if (!input.skipDerivedSync) scheduleSyncShiftDerivedEntries(row.id, "schedule-sync");
     return { shiftId: row.id };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -1313,6 +1382,7 @@ export async function cloneObjectWeekShifts(input: {
   );
 
   const result: CloneWeekShiftsResult = { created: 0, skipped: [] };
+  const createdIds: string[] = [];
 
   for (const row of sourceRows) {
     const newStartsAt = new Date(new Date(row.starts_at).getTime() + deltaMs);
@@ -1323,7 +1393,7 @@ export async function cloneObjectWeekShifts(input: {
       continue;
     }
     try {
-      await createShiftAssignment({
+      const created = await createShiftAssignment({
         guardId: row.guard_id,
         objectId: row.object_id,
         postId: row.post_id,
@@ -1336,7 +1406,9 @@ export async function cloneObjectWeekShifts(input: {
         manualRateReason: row.manual_rate_reason ?? "",
         isNoShow: false,
         selectedRateRuleId: row.selected_rate_rule_id ?? null,
+        skipDerivedSync: true,
       });
+      createdIds.push(created.shiftId);
       existingKeys.add(dedupKey);
       result.created += 1;
     } catch (error) {
@@ -1347,6 +1419,7 @@ export async function cloneObjectWeekShifts(input: {
     }
   }
 
+  scheduleSyncShiftDerivedEntriesMany(createdIds, "schedule-sync");
   return result;
 }
 
@@ -1376,10 +1449,11 @@ export type BulkCreateShiftsResult = {
  */
 export async function bulkCreateShifts(items: ReadonlyArray<BulkShiftSpec>): Promise<BulkCreateShiftsResult> {
   const result: BulkCreateShiftsResult = { created: 0, skipped: [] };
+  const createdIds: string[] = [];
   for (const item of items) {
     const dateIso = toDateIsoKhabarovsk(item.startsAt);
     try {
-      await createShiftAssignment({
+      const created = await createShiftAssignment({
         guardId: item.guardId,
         objectId: item.objectId,
         postId: item.postId ?? null,
@@ -1392,7 +1466,9 @@ export async function bulkCreateShifts(items: ReadonlyArray<BulkShiftSpec>): Pro
         manualRateUnit: null,
         manualRateReason: "",
         isNoShow: false,
+        skipDerivedSync: true,
       });
+      createdIds.push(created.shiftId);
       result.created += 1;
     } catch (error) {
       result.skipped.push({
@@ -1402,6 +1478,7 @@ export async function bulkCreateShifts(items: ReadonlyArray<BulkShiftSpec>): Pro
       });
     }
   }
+  scheduleSyncShiftDerivedEntriesMany(createdIds, "schedule-sync");
   return result;
 }
 
@@ -1977,11 +2054,10 @@ export async function recordShiftIncident(input: {
     client.release();
   }
 
-  const { syncShiftDerivedEntries } = await import("../scheduling/sync-shift-derived");
-  await syncShiftDerivedEntries(input.shiftId, input.authorUserId);
-  if (replacementShiftId) {
-    await syncShiftDerivedEntries(replacementShiftId, input.authorUserId);
-  }
+  scheduleSyncShiftDerivedEntriesMany(
+    [input.shiftId, replacementShiftId].filter((id): id is string => Boolean(id)),
+    input.authorUserId,
+  );
 }
 
 export async function createShiftLog(input: {
@@ -2000,7 +2076,6 @@ export async function createShiftLog(input: {
   );
   const row = rows[0];
   if (!row) throw new Error("Не удалось создать запись журнала");
-  const { syncTimesheetEntryFromShiftSafe } = await import("../accounting/sync-timesheet-entry");
-  await syncTimesheetEntryFromShiftSafe(input.shiftId);
+  scheduleSyncTimesheetEntry(input.shiftId);
   return mapShiftLogRow(row);
 }

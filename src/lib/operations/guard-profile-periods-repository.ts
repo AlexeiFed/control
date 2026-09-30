@@ -159,6 +159,15 @@ const loadAllProfilePeriodsCached = unstable_cache(
   { tags: ["timesheet", "scheduler", "guards", "directory"], revalidate: 300 },
 );
 
+export async function listAllProfilePeriods(): Promise<GuardProfilePeriodRecord[]> {
+  try {
+    return await loadAllProfilePeriodsCached();
+  } catch (error) {
+    if (isUndefinedColumnOrTableError(error)) return [];
+    throw error;
+  }
+}
+
 export async function buildGuardProfileResolver(guardIds: string[]): Promise<GuardProfileResolver> {
   if (guardIds.length === 0) return new GuardProfileResolver([]);
   try {

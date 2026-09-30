@@ -9,7 +9,8 @@ src/db/migrations/20260610_guard_profile_periods.sql
 src/db/migrations/20260611_object_shift_template_extra_columns.sql
 src/db/migrations/20260612_reinforcement_shift_hours.sql
 src/db/migrations/20260615_guard_advance_payments.sql
-src/db/migrations/20260703_object_rate_rules_shift_lead.sql
+# 20260703 не повторять: затирает CHECK без SeniorGuard и падает на уже существующих ставках.
 src/db/migrations/20260704_timesheet_shift_entries.sql
 src/db/migrations/20260907_guard_license_personal_card_numbers.sql
 src/db/migrations/20260917_senior_guard_shift_kind.sql
+src/db/migrations/20260930_shift_lookup_indexes.sql

@@ -1147,15 +1147,16 @@ export async function listGuards(filtersInput: GuardFilterInput = {}): Promise<G
         FROM guards g
         LEFT JOIN guard_object_assignments goa ON goa.guard_id = g.id
         LEFT JOIN security_objects so ON so.id = goa.object_id
-        LEFT JOIN LATERAL (
+        LEFT JOIN (
           SELECT
+            s.guard_id,
             COUNT(*)::int AS week_shift_count,
             SUM(EXTRACT(EPOCH FROM (s.ends_at - s.starts_at)) / 60)::int AS week_minutes
           FROM shifts s
-          WHERE s.guard_id = g.id
-            AND s.ends_at > date_trunc('week', now())
+          WHERE s.ends_at > date_trunc('week', now())
             AND s.starts_at < date_trunc('week', now()) + interval '7 days'
-        ) ws ON true
+          GROUP BY s.guard_id
+        ) ws ON ws.guard_id = g.id
         ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
         GROUP BY g.id, ws.week_shift_count, ws.week_minutes
         ORDER BY g.last_name, g.first_name

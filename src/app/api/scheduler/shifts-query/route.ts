@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
 import {
+  listShiftSpansInLocalRange,
   listShiftsForGuardsInLocalMonth,
   listShiftsInLocalRange,
 } from "../../../../lib/operations/scheduler-repository";
@@ -57,6 +58,32 @@ export async function GET(request: Request) {
         parsed.year,
         parsed.month - 1,
       );
+    } else if (start && end && url.searchParams.get("view") === "span") {
+      const parsed = rangeSchema.parse({ start, end });
+      const spans = await listShiftSpansInLocalRange(new Date(parsed.start), new Date(parsed.end));
+      return NextResponse.json({
+        ok: true,
+        shifts: spans.map((span) => ({
+          id: span.id,
+          guardId: span.guardId,
+          objectId: span.objectId,
+          postId: null,
+          startsAt: span.startsAt,
+          endsAt: span.endsAt,
+          shiftKind: "Regular",
+          manualClientRateCents: null,
+          manualGuardRateCents: null,
+          manualRateUnit: null,
+          manualRateReason: "",
+          isNoShow: span.isNoShow,
+          incidentCategory: null,
+          incidentComment: "",
+          incidentWorkedUntilAt: null,
+          incidentRecordedAt: null,
+          replacedByShiftId: null,
+          selectedRateRuleId: null,
+        })),
+      });
     } else if (start && end) {
       const parsed = rangeSchema.parse({ start, end });
       shifts = await listShiftsInLocalRange(new Date(parsed.start), new Date(parsed.end));

@@ -45,7 +45,7 @@ export default async function GuardDetailsPage({ params, searchParams }: GuardDe
   const { guardId } = await params;
   const { date } = (await searchParams) ?? {};
 
-  // Только лёгкие данные — shell стримится сразу; смены/история — в Suspense.
+  // Только карточка из БД. Часы и история догружаются клиентом после отрисовки.
   const [guard, profilePeriods] = await Promise.all([
     getGuardDetails(guardId),
     listGuardProfilePeriods(guardId),

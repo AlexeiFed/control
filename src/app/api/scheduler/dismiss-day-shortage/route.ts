@@ -9,7 +9,7 @@ import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
-import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
+import { loadScheduleObjectsAndShifts, shortageShiftRange } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
 import { loadPostIdsByObjectMonthForDays } from "../../../../lib/operations/object-posts-repository";
 import { upsertShortageDismissal, loadMonthlyOperationalOverridesForDays } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
@@ -55,7 +55,12 @@ export async function POST(request: Request) {
       civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60_000)),
     );
 
-    const snapshot = await getSchedulerSnapshot(weekStart);
+    const range = shortageShiftRange(weekStart, visibleDayCount);
+    const snapshot = await loadScheduleObjectsAndShifts({
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      objectIds: [objectId],
+    });
     const object = snapshot.objects.find((o) => o.id === objectId);
     if (!object) {
       return NextResponse.json({ ok: false, error: "object_not_found" }, { status: 400 });

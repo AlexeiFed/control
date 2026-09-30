@@ -388,6 +388,24 @@ export async function syncTimesheetEntryFromShiftSafe(shiftId: string): Promise<
   }
 }
 
+/** Пересчёт нескольких смен одним набором ставок/праздников/профилей. */
+export async function syncTimesheetEntriesForShiftIds(shiftIds: readonly string[]): Promise<void> {
+  const ids = [...new Set(shiftIds.filter(Boolean))];
+  if (ids.length === 0) return;
+  try {
+    const loadedRows = await loadShiftsForTimesheetSync(`WHERE s.id = ANY($1::uuid[])`, [ids]);
+    await syncLoadedShiftRows(loadedRows);
+    const loadedIds = new Set(loadedRows.map((row) => row.id));
+    const missing = ids.filter((id) => !loadedIds.has(id));
+    if (missing.length > 0) {
+      await query(`DELETE FROM timesheet_shift_entries WHERE shift_id = ANY($1::uuid[])`, [missing]);
+    }
+  } catch (error) {
+    if (isUndefinedColumnOrTableError(error)) return;
+    console.error("[timesheet-sync] batch", error);
+  }
+}
+
 async function listShiftIdsForQuery(sql: string, params: unknown[]): Promise<string[]> {
   const rows = await query<{ id: string }>(sql, params);
   return rows.map((row) => row.id);

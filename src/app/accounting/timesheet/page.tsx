@@ -29,7 +29,7 @@ import {
   listProfilePeriodsForGuards,
 } from "../../../lib/operations/guard-profile-periods-repository";
 import { listGuardsByIds } from "../../../lib/operations/guards-repository";
-import { getTimesheetSnapshot } from "../../../lib/operations/scheduler-repository";
+import { listObjectOperationalAnchors } from "../../../lib/operations/objects-repository";
 
 type TimesheetPageProps = {
   searchParams?: Promise<{
@@ -68,18 +68,16 @@ export default async function TimesheetPage({ searchParams }: TimesheetPageProps
   const queryRange =
     month && !week ? padTimesheetQueryRange(rangeStart, rangeEnd) : { start: rangeStart, end: rangeEnd };
 
-  const [rowsRawPadded, filterOptions, snapshot] = await Promise.all([
+  const [rowsRawPadded, filterOptions, objectAnchors] = await Promise.all([
     listTimesheetEntries(queryRange.start, queryRange.end, { guardId, objectId }),
     listTimesheetFilterOptions(),
-    month
-      ? getTimesheetSnapshot(queryRange.start, queryRange.end, { guardId, objectId })
-      : Promise.resolve(null),
+    month ? listObjectOperationalAnchors() : Promise.resolve([]),
   ]);
 
   const opDay =
-    month && snapshot
+    month
       ? await loadTimesheetOperationalDayContext(
-          snapshot.objects,
+          objectAnchors,
           monthKeysForPayrollMonth(month.year, month.monthIndex),
         )
       : null;

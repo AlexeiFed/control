@@ -181,10 +181,11 @@ export async function getObjectRateRule(ruleId: string): Promise<ObjectRateRuleR
   }
 }
 
-export async function listObjectRateRulesForObjects(objectIds: string[]): Promise<ObjectRateRuleRecord[]> {
-  if (objectIds.length === 0) return [];
+async function queryObjectRateRules(objectIds: readonly string[] | null): Promise<ObjectRateRuleRecord[]> {
+  if (objectIds && objectIds.length === 0) return [];
   try {
     const daysSel = await getObjectRateRulesDaysSelect();
+    const filtered = objectIds != null;
     const rows = await query<DbRow>(
       `
         SELECT
@@ -207,16 +208,24 @@ export async function listObjectRateRulesForObjects(objectIds: string[]): Promis
           effective_from::text,
           effective_to::text
         FROM object_rate_rules
-        WHERE object_id = ANY($1::uuid[])
+        ${filtered ? "WHERE object_id = ANY($1::uuid[])" : ""}
         ORDER BY object_id, priority DESC, name ASC
       `,
-      [objectIds],
+      filtered ? [[...objectIds]] : [],
     );
     return rows.map(mapRow);
   } catch (error) {
     if (!isUndefinedColumnOrTableError(error)) throw error;
     return [];
   }
+}
+
+export async function listObjectRateRulesForObjects(objectIds: string[]): Promise<ObjectRateRuleRecord[]> {
+  return queryObjectRateRules(objectIds);
+}
+
+export async function listAllObjectRateRules(): Promise<ObjectRateRuleRecord[]> {
+  return queryObjectRateRules(null);
 }
 
 export type CreateObjectRateRuleInput = {

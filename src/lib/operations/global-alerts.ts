@@ -6,7 +6,7 @@ import {
   listGuardsForPeriodicCheckReminders,
   listGuardsWithBirthdayToday,
 } from "./guards-repository";
-import { getSchedulerSnapshot, listPendingIncidentReplacements } from "./scheduler-repository";
+import { listPendingIncidentReplacements, loadScheduleObjectsAndShifts, shortageShiftRange } from "./scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
 import { loadPostIdsByObjectMonthForDays } from "./object-posts-repository";
 import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDays } from "./schedule-shortage-dismissals-repository";
@@ -158,7 +158,11 @@ async function loadScheduleShortages(): Promise<{
     };
   });
 
-  const snapshot = await getSchedulerSnapshot(weekStart);
+  const range = shortageShiftRange(weekStart, visibleDayCount);
+  const snapshot = await loadScheduleObjectsAndShifts({
+    rangeStart: range.start,
+    rangeEnd: range.end,
+  });
   const objectIds = snapshot.objects.map((o) => o.id);
   const templates =
     objectIds.length > 0 ? await listShiftTemplatesForObjectIds(objectIds) : [];

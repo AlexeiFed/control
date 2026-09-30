@@ -10,8 +10,8 @@ import {
   listMonthlyOperationalDayStarts,
   monthKeysFromDateIsos,
 } from "./object-monthly-settings-repository";
-import { getSchedulerSnapshot } from "./scheduler-repository";
-import { listShiftTemplatesForObjectIds } from "./shift-templates-repository";
+import { loadScheduleObjectsAndShifts, shortageShiftRange } from "./scheduler-repository";
+import { listShiftTemplatesForObjectIds, type ObjectShiftTemplateRow } from "./shift-templates-repository";
 import { loadPostIdsByObjectMonthForDays } from "./object-posts-repository";
 
 export async function loadMonthlyOperationalOverridesForDays(
@@ -130,30 +130,63 @@ function currentWeekDayIsos(): string[] {
  * Использует тот же снимок и ту же логику фингерпринтов, что и GET /shortages и POST /dismiss-day-shortage —
  * клиент никогда не должен просто доверять сохранённым в БД строкам без пересчёта.
  */
+type ShortageDismissPreload = {
+  objects: ReadonlyArray<ScheduleObjectRef>;
+  shifts: ReadonlyArray<Shift>;
+  templates: ReadonlyArray<ObjectShiftTemplateRow>;
+  postIdsByObjectMonth: Map<string, string[]>;
+};
+
 export async function buildCurrentWeekValidShortageDismissKeySet(
   objectIds: ReadonlyArray<string> = [],
+  preloaded?: ShortageDismissPreload,
 ): Promise<{ weekDayIsos: string[]; validKeys: Set<string> }> {
   const weekDayIsos = currentWeekDayIsos();
   const weekStart = getMondayWeekStartKhabarovsk();
-  const snapshot = await getSchedulerSnapshot(weekStart);
-  const objects =
-    objectIds.length > 0 ? snapshot.objects.filter((o) => objectIds.includes(o.id)) : snapshot.objects;
-  const scopedObjectIds = objects.map((o) => o.id);
+  const idSet = objectIds.length > 0 ? new Set(objectIds) : null;
 
+  let objects: ReadonlyArray<ScheduleObjectRef>;
+  let shifts: ReadonlyArray<Shift>;
+  let templates: ReadonlyArray<ObjectShiftTemplateRow>;
+  let postIdsByObjectMonth: Map<string, string[]>;
+
+  if (preloaded) {
+    objects = idSet ? preloaded.objects.filter((objectItem) => idSet.has(objectItem.id)) : preloaded.objects;
+    shifts = idSet ? preloaded.shifts.filter((shift) => idSet.has(shift.objectId)) : preloaded.shifts;
+    templates = preloaded.templates;
+    postIdsByObjectMonth = preloaded.postIdsByObjectMonth;
+  } else {
+    const range = shortageShiftRange(weekStart, weekDayIsos.length);
+    const snapshot = await loadScheduleObjectsAndShifts({
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      objectIds: objectIds.length > 0 ? objectIds : undefined,
+    });
+    objects = snapshot.objects;
+    shifts = snapshot.shifts;
+    const scopedIds = objects.map((objectItem) => objectItem.id);
+    templates =
+      scopedIds.length > 0 ? await listShiftTemplatesForObjectIds(scopedIds) : [];
+    postIdsByObjectMonth = await loadPostIdsByObjectMonthForDays(scopedIds, weekDayIsos);
+  }
+
+  const scopedObjectIds = objects.map((objectItem) => objectItem.id);
   if (scopedObjectIds.length === 0) return { weekDayIsos, validKeys: new Set() };
 
-  const templates = await listShiftTemplatesForObjectIds(scopedObjectIds);
-  const [expectedByObjectDay, storedDismissals, monthlyOperationalOverrides] = await Promise.all([
-    loadPostIdsByObjectMonthForDays(scopedObjectIds, weekDayIsos).then((postIdsByObjectMonth) =>
-      buildExpectedShiftsByObjectAndDay(scopedObjectIds, weekDayIsos, templates, postIdsByObjectMonth),
-    ),
+  const [storedDismissals, monthlyOperationalOverrides] = await Promise.all([
     listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[6]!),
     loadMonthlyOperationalOverridesForDays(scopedObjectIds, weekDayIsos),
   ]);
+  const expectedByObjectDay = buildExpectedShiftsByObjectAndDay(
+    scopedObjectIds,
+    weekDayIsos,
+    templates,
+    postIdsByObjectMonth,
+  );
 
   const validKeys = buildValidShortageDismissKeySet({
     objects,
-    shifts: snapshot.shifts,
+    shifts,
     expectedByObjectDay,
     weekDayIsos,
     storedDismissals,

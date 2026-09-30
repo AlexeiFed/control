@@ -2,17 +2,17 @@ import { SchedulerGridLazy } from "../../components/operations/scheduler-grid-la
 import { assertPermission, hasPermission } from "../../lib/auth/rbac";
 import { requireSession } from "../../lib/auth/session";
 import { loadHolidayDateSetForLocalRange } from "../../lib/rates/holiday-calendar";
-import { listObjectRateRulesForObjects } from "../../lib/operations/object-rate-rules-repository";
+import { listAllObjectRateRules } from "../../lib/operations/object-rate-rules-repository";
 import { listGuardObjectIdsByGuardId } from "../../lib/operations/guards-repository";
-import { listProfilePeriodsForGuards } from "../../lib/operations/guard-profile-periods-repository";
+import { listAllProfilePeriods } from "../../lib/operations/guard-profile-periods-repository";
 import {
   getSchedulerSnapshot,
   listScheduledGuardsByObjectForLocalMonth,
 } from "../../lib/operations/scheduler-repository";
-import { listShiftTemplatesForObjectIds } from "../../lib/operations/shift-templates-repository";
-import { loadPostIdsByObjectMonthForDays } from "../../lib/operations/object-posts-repository";
+import { listAllShiftTemplates } from "../../lib/operations/shift-templates-repository";
+import { loadPostIdsForDays } from "../../lib/operations/object-posts-repository";
 import { buildCurrentWeekValidShortageDismissKeySet } from "../../lib/operations/schedule-shortage-dismissals-repository";
-import { formatMonthYearLongRu, toDateIso, getKhabarovskComponents, toDateIsoKhabarovsk } from "../../lib/format/display-date";
+import { formatMonthYearLongRu, toDateIso, getKhabarovskComponents, toDateIsoKhabarovsk, getMondayWeekStartKhabarovsk } from "../../lib/format/display-date";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../lib/scheduling/object-shift-templates";
 import { bulkCreateShiftsAction, cloneObjectWeekShiftsAction, createShiftAction, createShiftLogAction } from "./actions";
 
@@ -36,35 +36,39 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
   const weekDayIsos = Array.from({ length: visibleDayCount }, (_, index) =>
     civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60 * 1000)),
   );
-  const [snapshot, holidayDateKeys] = await Promise.all([
-    getSchedulerSnapshot(weekStart),
-    loadHolidayDateSetForLocalRange(weekStart, weekEndExclusive),
-  ]);
+  const khWeek = getKhabarovskComponents(weekStart);
+  const [snapshot, holidayDateKeys, rateRules, templates, guardsScheduledByObjectMonth, guardObjectIdsByGuardId, profilePeriods, postIdsByObjectMonth] =
+    await Promise.all([
+      getSchedulerSnapshot(weekStart),
+      loadHolidayDateSetForLocalRange(weekStart, weekEndExclusive),
+      canReadRates || canAssignShifts ? listAllObjectRateRules() : Promise.resolve([]),
+      listAllShiftTemplates(),
+      listScheduledGuardsByObjectForLocalMonth(null, khWeek.year, khWeek.month0),
+      listGuardObjectIdsByGuardId(),
+      listAllProfilePeriods(),
+      loadPostIdsForDays(weekDayIsos),
+    ]);
   const objectIds = snapshot.objects.map((o) => o.id);
-  const rateRules =
-    (canReadRates || canAssignShifts) && objectIds.length > 0 ? await listObjectRateRulesForObjects(objectIds) : [];
+  const objectIdSet = new Set(objectIds);
+  const guardIdSet = new Set(snapshot.guards.map((guard) => guard.id));
   const rateRulesByObjectId: Record<string, (typeof rateRules)[number][]> = {};
   for (const rule of rateRules) {
+    if (!objectIdSet.has(rule.objectId)) continue;
     if (!rateRulesByObjectId[rule.objectId]) rateRulesByObjectId[rule.objectId] = [];
     rateRulesByObjectId[rule.objectId]!.push(rule);
   }
-  const [templates, guardsScheduledByObjectMonth, guardObjectIdsByGuardId, profilePeriods, shortageDismissState] =
-    await Promise.all([
-      objectIds.length > 0 ? listShiftTemplatesForObjectIds(objectIds) : Promise.resolve([]),
-      listScheduledGuardsByObjectForLocalMonth(
-        objectIds, 
-        getKhabarovskComponents(weekStart).year, 
-        getKhabarovskComponents(weekStart).month0
-      ),
-      listGuardObjectIdsByGuardId(),
-      snapshot.guards.length > 0
-        ? listProfilePeriodsForGuards(snapshot.guards.map((g) => g.id))
-        : Promise.resolve([]),
-      objectIds.length > 0
-        ? buildCurrentWeekValidShortageDismissKeySet(objectIds)
-        : Promise.resolve({ weekDayIsos: [] as string[], validKeys: new Set<string>() }),
-    ]);
-  const postIdsByObjectMonth = await loadPostIdsByObjectMonthForDays(objectIds, weekDayIsos);
+  const viewingCurrentWeek = weekStart.getTime() === getMondayWeekStartKhabarovsk().getTime();
+  const shortageDismissState = await buildCurrentWeekValidShortageDismissKeySet(
+    objectIds,
+    viewingCurrentWeek
+      ? {
+          objects: snapshot.objects,
+          shifts: snapshot.shifts,
+          templates,
+          postIdsByObjectMonth,
+        }
+      : undefined,
+  );
   const expectedShiftsByObjectDay = buildExpectedShiftsByObjectAndDay(
     objectIds,
     weekDayIsos,
@@ -72,8 +76,7 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
     postIdsByObjectMonth,
   );
   const dismissedShortageKeys = Array.from(shortageDismissState.validKeys);
-  const kh = getKhabarovskComponents(weekStart);
-  const objectMonthTitle = formatMonthYearLongRu(kh.year, kh.month0);
+  const objectMonthTitle = formatMonthYearLongRu(khWeek.year, khWeek.month0);
   return (
     <main
       className="grid min-h-screen gap-4 bg-app-bg p-3 text-app-text [--scheduler-page-padding:0.75rem] md:gap-6 md:p-6 md:[--scheduler-page-padding:1.5rem]"
@@ -88,7 +91,7 @@ export default async function SchedulerPage({ searchParams }: SchedulerPageProps
         shifts={snapshot.shifts}
         holidayDateKeys={holidayDateKeys}
         rateRulesByObjectId={rateRulesByObjectId}
-        profilePeriods={profilePeriods}
+        profilePeriods={profilePeriods.filter((period) => guardIdSet.has(period.guardId))}
         expectedShiftsByObjectDay={expectedShiftsByObjectDay}
         guardsScheduledOnObjectByMonth={guardsScheduledByObjectMonth}
         guardObjectIdsByGuardId={guardObjectIdsByGuardId}

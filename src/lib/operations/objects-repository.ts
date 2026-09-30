@@ -73,6 +73,21 @@ function mapObjectRow(row: ObjectRow): Omit<ObjectListRow, "guardsCount" | "guar
 }
 
 /** Лёгкий список объектов для назначения охраннику (без агрегаций смен/охранников). */
+export async function listObjectOperationalAnchors(): Promise<
+  Array<{ id: string; operationalDayStartTime: string }>
+> {
+  const rows = await query<{ id: string; operational_day_start_time: string }>(
+    `
+      SELECT id, operational_day_start_time::text AS operational_day_start_time
+      FROM security_objects
+    `,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    operationalDayStartTime: normalizeOperationalAnchorTime(row.operational_day_start_time),
+  }));
+}
+
 export async function listObjectsForAssignment(): Promise<ObjectListRow[]> {
   const rows = await query<{
     id: string;
@@ -136,15 +151,16 @@ export async function listObjects(): Promise<ObjectListRow[]> {
         COALESCE(ws.week_guard_count, 0)::text AS week_guard_count
       FROM security_objects so
       LEFT JOIN guard_object_assignments goa ON goa.object_id = so.id
-      LEFT JOIN LATERAL (
+      LEFT JOIN (
         SELECT
+          s.object_id,
           COUNT(*)::int AS week_shift_count,
           COUNT(DISTINCT s.guard_id)::int AS week_guard_count
         FROM shifts s
-        WHERE s.object_id = so.id
-          AND s.ends_at > date_trunc('week', now())
+        WHERE s.ends_at > date_trunc('week', now())
           AND s.starts_at < date_trunc('week', now()) + interval '7 days'
-      ) ws ON true
+        GROUP BY s.object_id
+      ) ws ON ws.object_id = so.id
       GROUP BY
         so.id,
         so.operational_day_start_time,

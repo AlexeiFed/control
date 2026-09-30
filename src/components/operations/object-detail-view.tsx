@@ -496,7 +496,7 @@ export function ObjectDetailView({
     );
     try {
       const res = await fetch(
-        `/api/scheduler/shifts-query?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEndExclusive.toISOString())}`,
+        `/api/scheduler/shifts-query?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEndExclusive.toISOString())}&view=span`,
         { credentials: "same-origin" },
       );
       if (!res.ok || epoch !== availabilityEpochRef.current) return;

@@ -104,7 +104,10 @@ CREATE INDEX IF NOT EXISTS guards_name_idx ON guards (last_name, first_name);
 CREATE INDEX IF NOT EXISTS guards_status_idx ON guards (status);
 CREATE INDEX IF NOT EXISTS security_objects_name_idx ON security_objects (name);
 CREATE INDEX IF NOT EXISTS shifts_guard_time_idx ON shifts (guard_id, starts_at, ends_at);
+CREATE INDEX IF NOT EXISTS shifts_guard_starts_at_idx ON shifts (guard_id, starts_at);
+CREATE INDEX IF NOT EXISTS shifts_object_starts_at_idx ON shifts (object_id, starts_at);
 CREATE INDEX IF NOT EXISTS shift_logs_shift_created_idx ON shift_logs (shift_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS shift_logs_created_at_idx ON shift_logs (created_at DESC);
 
 -- Расширение охранников (ставки, должности, стажировка)
 ALTER TABLE guards ADD COLUMN IF NOT EXISTS phone text NOT NULL DEFAULT '';

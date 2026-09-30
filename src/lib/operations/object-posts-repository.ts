@@ -78,6 +78,27 @@ export async function listPostIdsByObjectMonth(
   return map;
 }
 
+/** Посты всех объектов за месяцы указанных дат. Ключ `objectId|YYYY-MM`. */
+export async function loadPostIdsForDays(dateIsos: readonly string[]): Promise<Map<string, string[]>> {
+  const months = monthKeysFromDateIsos(dateIsos);
+  const map = new Map<string, string[]>();
+  if (months.length === 0) return map;
+  const rows = await query<{ object_id: string; month: string; id: string }>(
+    `SELECT object_id::text, month, id::text
+     FROM object_posts
+     WHERE month = ANY($1::text[])
+     ORDER BY object_id, month, created_at ASC`,
+    [[...months]],
+  );
+  for (const row of rows) {
+    const key = `${row.object_id}|${row.month}`;
+    const list = map.get(key);
+    if (list) list.push(row.id);
+    else map.set(key, [row.id]);
+  }
+  return map;
+}
+
 export async function loadPostIdsByObjectMonthForDays(
   objectIds: readonly string[],
   dateIsos: readonly string[],

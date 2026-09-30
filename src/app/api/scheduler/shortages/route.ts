@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import { assertPermission, ForbiddenError } from "../../../../lib/auth/rbac";
 import { requireSession } from "../../../../lib/auth/session";
-import { getSchedulerSnapshot } from "../../../../lib/operations/scheduler-repository";
+import { loadScheduleObjectsAndShifts, shortageShiftRange } from "../../../../lib/operations/scheduler-repository";
 import { listShiftTemplatesForObjectIds } from "../../../../lib/operations/shift-templates-repository";
 import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDays } from "../../../../lib/operations/schedule-shortage-dismissals-repository";
 import { loadPostIdsByObjectMonthForDays } from "../../../../lib/operations/object-posts-repository";
@@ -43,7 +43,11 @@ export async function GET() {
       };
     });
 
-    const snapshot = await getSchedulerSnapshot(weekStart);
+    const range = shortageShiftRange(weekStart, visibleDayCount);
+    const snapshot = await loadScheduleObjectsAndShifts({
+      rangeStart: range.start,
+      rangeEnd: range.end,
+    });
     const objectIds = snapshot.objects.map((o) => o.id);
 
     const templates = objectIds.length > 0 
