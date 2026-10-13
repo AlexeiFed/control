@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Bell, BellRing, AlertTriangle, X } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { addDaysToIsoDate, SHORTAGE_CONTROL_DAY_COUNT } from "../../lib/format/display-date";
 import { designTokens } from "../../lib/design-tokens";
 import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
 import { toast } from "../../store/toast-store";
@@ -69,6 +70,9 @@ export function GlobalScheduleShortageBell({
   const controlled = controlledShortages !== undefined;
   const rawShortages = controlled ? controlledShortages : internalShortages;
   const weekStartIso = controlled ? (controlledWeekStartIso ?? "") : internalWeekStartIso;
+  const weekEndIso = weekStartIso
+    ? addDaysToIsoDate(weekStartIso, SHORTAGE_CONTROL_DAY_COUNT - 1)
+    : "";
   const [hovered, setHovered] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(() => new Set());
@@ -220,9 +224,10 @@ export function GlobalScheduleShortageBell({
           </div>
 
           <p className="mb-4 text-[15px] leading-snug text-app-muted">
-            {weekStartIso ? (
+            {weekStartIso && weekEndIso ? (
               <>
-                Текущая неделя с {weekStartIso.slice(8, 10)}.{weekStartIso.slice(5, 7)}.{" "}
+                Контроль с {weekStartIso.slice(8, 10)}.{weekStartIso.slice(5, 7)} по {weekEndIso.slice(8, 10)}.
+                {weekEndIso.slice(5, 7)}.{" "}
               </>
             ) : null}
             {shortages.length} {pluralObjects(shortages.length)} без полных смен.

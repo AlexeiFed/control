@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { hasPermission, type Role } from "../auth/rbac";
-import { formatDisplayDateFromIso, formatWeekdayDayLabel, getMondayWeekStartKhabarovsk, toDateIsoKhabarovsk } from "../format/display-date";
+import { formatDisplayDateFromIso, formatWeekdayDayLabel, getMondayWeekStartKhabarovsk, shortageControlDates, SHORTAGE_CONTROL_DAY_COUNT, toDateIsoKhabarovsk } from "../format/display-date";
 import {
   listGuardsForMedicalCommissionReminders,
   listGuardsForPeriodicCheckReminders,
@@ -146,19 +146,14 @@ async function loadScheduleShortages(): Promise<{
   weekStartIso: string;
 }> {
   const weekStart = getMondayWeekStartKhabarovsk();
-  const visibleDayCount = 7;
-  const weekDayIsos = Array.from({ length: visibleDayCount }, (_, index) =>
-    civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60_000)),
-  );
-  const weekDays = Array.from({ length: visibleDayCount }, (_, index) => {
-    const date = new Date(weekStart.getTime() + index * 24 * 60 * 60_000);
-    return {
-      iso: toDateIsoKhabarovsk(date),
-      label: formatWeekdayDayLabel(date),
-    };
-  });
+  const controlDates = shortageControlDates(weekStart);
+  const weekDayIsos = controlDates.map((date) => civilDateKeyFromDate(date));
+  const weekDays = controlDates.map((date) => ({
+    iso: toDateIsoKhabarovsk(date),
+    label: formatWeekdayDayLabel(date),
+  }));
 
-  const range = shortageShiftRange(weekStart, visibleDayCount);
+  const range = shortageShiftRange(weekStart, SHORTAGE_CONTROL_DAY_COUNT);
   const snapshot = await loadScheduleObjectsAndShifts({
     rangeStart: range.start,
     rangeEnd: range.end,
@@ -199,7 +194,7 @@ async function loadScheduleShortages(): Promise<{
 
 const getGlobalAlertsCached = unstable_cache(
   (role: string) => loadGlobalAlertsForRole(role as Role),
-  ["global-alerts:v5"],
+  ["global-alerts:v6"],
   {
     tags: ["global-alerts", "scheduler", "shifts", "guards", "directory"],
     revalidate: 180,

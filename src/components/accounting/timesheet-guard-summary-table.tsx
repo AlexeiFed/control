@@ -2,6 +2,7 @@
 
 import { useState, type JSX, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { GuardProfileLink } from "../guards/guard-profile-link";
 import type { AttendanceIncidentLine } from "../../lib/scheduling/timesheet";
 import { designTokens } from "../../lib/design-tokens";
 import type { GuardPayrollHalfSummary } from "../../lib/payroll/timesheet-payroll-summary";
@@ -39,6 +40,7 @@ export type GuardObjectSummaryRow = {
 };
 
 export type GuardObjectGroup = {
+  guardId?: string;
   guardName: string;
   items: GuardObjectSummaryRow[];
 };
@@ -104,6 +106,7 @@ export function TimesheetGuardSummaryTable({
         <GuardSummaryRow
           key={`${group.guardName}-single`}
           guardName={group.guardName}
+          guardId={group.guardId}
           objectCell={<span className="text-app-muted">{item.objectName}</span>}
           item={item}
           showPayrollHalves={showPayrollHalves}
@@ -122,19 +125,22 @@ export function TimesheetGuardSummaryTable({
         key={`${group.guardName}-summary`}
         guardName={group.guardName}
         guardNameCell={
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 text-left font-medium outline-none transition hover:text-accent-primary focus-visible:ring-2 focus-visible:ring-accent-primary/40"
-            onClick={() => toggleGuard(group.guardName)}
-            aria-expanded={isExpanded}
-          >
-            {isExpanded ? (
-              <ChevronDown className="size-4 shrink-0 text-app-muted" aria-hidden />
-            ) : (
-              <ChevronRight className="size-4 shrink-0 text-app-muted" aria-hidden />
-            )}
-            <span>{group.guardName}</span>
-          </button>
+          <span className="inline-flex items-center gap-1">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 text-left font-medium outline-none transition hover:text-accent-primary focus-visible:ring-2 focus-visible:ring-accent-primary/40"
+              onClick={() => toggleGuard(group.guardName)}
+              aria-expanded={isExpanded}
+            >
+              {isExpanded ? (
+                <ChevronDown className="size-4 shrink-0 text-app-muted" aria-hidden />
+              ) : (
+                <ChevronRight className="size-4 shrink-0 text-app-muted" aria-hidden />
+              )}
+              <span>{group.guardName}</span>
+            </button>
+            {group.guardId ? <GuardProfileLink guardId={group.guardId} /> : null}
+          </span>
         }
         objectCell={
           isMulti ? (
@@ -324,9 +330,10 @@ function GuardSummaryMobileCard({
         hasUnpriced ? { boxShadow: `inset 3px 0 0 0 ${designTokens.color.accent.warning}` } : undefined
       }
     >
+      <div className="flex items-start gap-1 p-3">
       <button
         type="button"
-        className="flex w-full items-start gap-2 p-3 text-left outline-none transition hover:bg-app-elevated/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary/40"
+        className="flex min-w-0 flex-1 items-start gap-2 text-left outline-none transition hover:text-accent-primary focus-visible:ring-2 focus-visible:ring-accent-primary/40 disabled:hover:text-inherit"
         onClick={canExpand ? onToggle : undefined}
         aria-expanded={canExpand ? expanded : undefined}
         disabled={!canExpand}
@@ -365,6 +372,12 @@ function GuardSummaryMobileCard({
           ) : null}
         </div>
       </button>
+      {group.guardId ? (
+        <span className="mt-0.5 shrink-0">
+          <GuardProfileLink guardId={group.guardId} />
+        </span>
+      ) : null}
+      </div>
 
       {expanded ? (
         <div className="space-y-3 border-t border-app-border px-3 pb-3 pt-2">
@@ -499,6 +512,7 @@ function TwoLineHeader({ title, subtitle }: { title: string; subtitle: string })
 
 type GuardSummaryRowProps = {
   guardName: string;
+  guardId?: string;
   guardNameCell?: ReactNode;
   objectCell: ReactNode;
   item: GuardObjectSummaryRow;
@@ -516,6 +530,7 @@ type GuardSummaryRowProps = {
 
 function GuardSummaryRow({
   guardName,
+  guardId,
   guardNameCell,
   objectCell,
   item,
@@ -540,7 +555,14 @@ function GuardSummaryRow({
       {hideGuardName ? (
         <td className="px-4 py-3" aria-hidden />
       ) : (
-        <td className="px-4 py-3">{guardNameCell ?? <span className="font-medium">{guardName}</span>}</td>
+        <td className="px-4 py-3">
+          {guardNameCell ?? (
+            <span className="inline-flex items-center gap-1 font-medium">
+              <span>{guardName}</span>
+              {guardId ? <GuardProfileLink guardId={guardId} /> : null}
+            </span>
+          )}
+        </td>
       )}
       <td className="px-4 py-3">{objectCell}</td>
       <td className="px-4 py-3 text-center text-app-muted">{item.shiftsCount}</td>

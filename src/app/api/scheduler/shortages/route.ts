@@ -12,7 +12,7 @@ import { filterShortagesByStoredDismissals, loadMonthlyOperationalOverridesForDa
 import { loadPostIdsByObjectMonthForDays } from "../../../../lib/operations/object-posts-repository";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate } from "../../../../lib/scheduling/object-shift-templates";
 import { computeScheduleShortages } from "../../../../lib/scheduling/schedule-shortage";
-import { getMondayWeekStartKhabarovsk, toDateIsoKhabarovsk, formatWeekdayDayLabel } from "../../../../lib/format/display-date";
+import { formatWeekdayDayLabel, getMondayWeekStartKhabarovsk, shortageControlDates, SHORTAGE_CONTROL_DAY_COUNT, toDateIsoKhabarovsk } from "../../../../lib/format/display-date";
 
 export async function GET() {
   const session = await requireSession();
@@ -28,22 +28,15 @@ export async function GET() {
 
   try {
     const weekStart = getMondayWeekStartKhabarovsk();
-    // Только текущая календарная неделя пн–вс.
-    const visibleDayCount = 7;
-    const weekDayIsos = Array.from({ length: visibleDayCount }, (_, index) =>
-      civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60 * 1000)),
-    );
+    // Контроль недобора: пн текущей недели … следующий пн включительно.
+    const controlDates = shortageControlDates(weekStart);
+    const weekDayIsos = controlDates.map((date) => civilDateKeyFromDate(date));
+    const weekDays = controlDates.map((date) => ({
+      iso: toDateIsoKhabarovsk(date),
+      label: formatWeekdayDayLabel(date),
+    }));
 
-    const weekDays = Array.from({ length: visibleDayCount }, (_, index) => {
-      const date = new Date(weekStart.getTime() + index * 24 * 60 * 60_000);
-      const iso = toDateIsoKhabarovsk(date);
-      return {
-        iso,
-        label: formatWeekdayDayLabel(date),
-      };
-    });
-
-    const range = shortageShiftRange(weekStart, visibleDayCount);
+    const range = shortageShiftRange(weekStart, SHORTAGE_CONTROL_DAY_COUNT);
     const snapshot = await loadScheduleObjectsAndShifts({
       rangeStart: range.start,
       rangeEnd: range.end,

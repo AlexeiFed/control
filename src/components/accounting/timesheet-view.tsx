@@ -505,6 +505,7 @@ function buildExportHref(filters: TimesheetViewProps["filters"], kind: "client" 
 }
 
 type GuardObjectSummaryRow = {
+  guardId?: string;
   guardName: string;
   objectName: string;
   shiftsCount: number;
@@ -528,6 +529,7 @@ function buildGuardObjectSummary(rows: TimesheetRow[]): GuardObjectSummaryRow[] 
     const objectKey = row.objectId ?? `name:${row.objectName}`;
     const key = `${row.guardName}||${objectKey}`;
     const current = map.get(key) ?? {
+      guardId: row.guardId,
       guardName: row.guardName,
       objectName: row.objectName,
       shiftsCount: 0,
@@ -581,7 +583,9 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function groupGuardObjects(rows: GuardObjectSummaryRow[]): Array<{ guardName: string; items: GuardObjectSummaryRow[] }> {
+function groupGuardObjects(
+  rows: GuardObjectSummaryRow[],
+): Array<{ guardId?: string; guardName: string; items: GuardObjectSummaryRow[] }> {
   const groups = new Map<string, GuardObjectSummaryRow[]>();
   for (const row of rows) {
     const bucket = groups.get(row.guardName) ?? [];
@@ -590,5 +594,9 @@ function groupGuardObjects(rows: GuardObjectSummaryRow[]): Array<{ guardName: st
   }
   return Array.from(groups.entries())
     .sort(([a], [b]) => (a || "").localeCompare(b || "", "ru-RU"))
-    .map(([guardName, items]) => ({ guardName, items }));
+    .map(([guardName, items]) => ({
+      guardName,
+      guardId: items.find((item) => item.guardId)?.guardId,
+      items,
+    }));
 }

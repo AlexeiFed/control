@@ -18,7 +18,7 @@ import { buildOperationalDayAnchorByObjectIdForDate } from "../../../../lib/sche
 import { shiftBelongsToOperationalDayColumn } from "../../../../lib/scheduling/operational-day-timeline";
 import { aggregatePlanSnapshot, shiftToDismissInput } from "../../../../lib/scheduling/build-shortage-dismiss-state";
 import { buildShortageDayFingerprint } from "../../../../lib/scheduling/schedule-shortage-dismiss";
-import { khabarovskWeekRangeContaining } from "../../../../lib/format/display-date";
+import { khabarovskWeekRangeContaining, shortageControlDates, SHORTAGE_CONTROL_DAY_COUNT } from "../../../../lib/format/display-date";
 
 const bodySchema = z.object({
   objectId: z.string().uuid(),
@@ -50,12 +50,9 @@ export async function POST(request: Request) {
 
   try {
     const { start: weekStart } = khabarovskWeekRangeContaining(dateIso);
-    const visibleDayCount = 7;
-    const weekDayIsos = Array.from({ length: visibleDayCount }, (_, index) =>
-      civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60_000)),
-    );
+    const weekDayIsos = shortageControlDates(weekStart).map((date) => civilDateKeyFromDate(date));
 
-    const range = shortageShiftRange(weekStart, visibleDayCount);
+    const range = shortageShiftRange(weekStart, SHORTAGE_CONTROL_DAY_COUNT);
     const snapshot = await loadScheduleObjectsAndShifts({
       rangeStart: range.start,
       rangeEnd: range.end,

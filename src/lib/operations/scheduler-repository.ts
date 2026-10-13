@@ -15,7 +15,7 @@ import {
   formatMinutesAsHours,
   localDatesSpannedByShift,
 } from "../scheduling/guard-daily-load";
-import { addDaysToIsoDate, formatDisplayDateLocal, parseIsoDateKhabarovskOrNull, toDateIsoKhabarovsk } from "../format/display-date";
+import { addDaysToIsoDate, formatDisplayDateLocal, getKhabarovskComponents, parseIsoDateKhabarovskOrNull, SHORTAGE_CONTROL_DAY_COUNT, toDateIsoKhabarovsk } from "../format/display-date";
 import {
   currentMonthStartIsoKhabarovsk,
   isShiftDateInCurrentOrFutureMonth,
@@ -444,8 +444,8 @@ export async function listShiftsInLocalRange(
 
 const DAY_MS = 24 * 60 * 60_000;
 
-/** Окно смен для недобора недели: −3 суток до понедельника и +3 после конца недели. */
-export function shortageShiftRange(weekStart: Date, visibleDayCount = 7): { start: Date; end: Date } {
+/** Окно смен для недобора: −3 суток до понедельника и +3 после конца контроля (пн–следующий пн). */
+export function shortageShiftRange(weekStart: Date, visibleDayCount = SHORTAGE_CONTROL_DAY_COUNT): { start: Date; end: Date } {
   return {
     start: new Date(weekStart.getTime() - 3 * DAY_MS),
     end: new Date(weekStart.getTime() + (visibleDayCount + 3) * DAY_MS),
@@ -1019,6 +1019,8 @@ export async function listShiftsForObjectInLocalMonth(
   monthIndex0: number,
 ): Promise<Shift[]> {
   const { start, end } = getMonthRangeKhabarovsk(year, monthIndex0);
+  // Хвост после полуночи 1-го числа (01:00–08:00) стартует уже в следующем календарном дне.
+  const endWithNextDayTail = new Date(new Date(end).getTime() + 24 * 60 * 60_000).toISOString();
   const [incidentSel, rateRuleSel] = await Promise.all([
     getShiftIncidentSelectColumns(),
     getShiftSelectedRateRuleSelect(),
@@ -1038,7 +1040,7 @@ export async function listShiftsForObjectInLocalMonth(
         AND ends_at > $2 AND starts_at < $3
       ORDER BY starts_at ASC
     `,
-    [objectId, start, end],
+    [objectId, start, endWithNextDayTail],
   );
 
   return rows.map(mapDbShiftRow);
@@ -1559,11 +1561,16 @@ async function formatScheduleConflictError(
   return `Нельзя назначить ${guardName}: превышен суточный лимит ${formatMinutesAsHours(conflict.limitMinutes)} ч за ${conflict.dateIso} (уже ${formatMinutesAsHours(conflict.existingMinutes)} ч, назначение +${formatMinutesAsHours(conflict.candidateMinutes)} ч). Доступно ещё ${formatMinutesAsHours(remainingMinutes)} ч.`;
 }
 
+function formatHmKhabarovsk(date: Date): string {
+  const kh = getKhabarovskComponents(date);
+  return `${String(kh.hours).padStart(2, "0")}:${String(kh.minutes).padStart(2, "0")}`;
+}
+
 function formatShiftInterval(startsAt: Date, endsAt: Date): string {
   const startDate = formatDisplayDateLocal(startsAt);
   const endDate = formatDisplayDateLocal(endsAt);
-  const startTime = startsAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  const endTime = endsAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const startTime = formatHmKhabarovsk(startsAt);
+  const endTime = formatHmKhabarovsk(endsAt);
   const datePart = startDate === endDate ? startDate : `${startDate}–${endDate}`;
   return `${datePart}, ${startTime}–${endTime}`;
 }

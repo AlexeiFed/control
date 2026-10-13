@@ -19,6 +19,7 @@ function parseGuardRateContributions(value: unknown): GuardRateContribution[] {
 }
 
 type TimesheetEntryDbRow = {
+  guard_id: string;
   object_id: string;
   guard_name: string;
   object_name: string;
@@ -54,6 +55,7 @@ function toIsoTimestamp(value: string | Date): string {
 
 function mapDbRowToTimesheetRow(row: TimesheetEntryDbRow): TimesheetRow {
   return {
+    guardId: row.guard_id,
     guardName: row.guard_name,
     objectId: row.object_id,
     objectName: row.object_name,
@@ -209,6 +211,7 @@ export async function listTimesheetEntries(
     const rows = await query<TimesheetEntryDbRow>(
       `
         SELECT
+          e.guard_id::text AS guard_id,
           e.object_id::text AS object_id,
           e.guard_name,
           COALESCE(o.name, e.object_name) AS object_name,

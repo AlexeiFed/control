@@ -29,7 +29,7 @@ import {
   getDayKhabarovsk,
   getHoursKhabarovsk,
   getKhabarovskComponents,
-  isIsoInCurrentKhabarovskWeek,
+  isIsoInCurrentShortageControlWindow,
   toDateIsoKhabarovsk,
 } from "../../lib/format/display-date";
 import {
@@ -56,6 +56,7 @@ import { confirmDeleteShift } from "../../lib/scheduling/shift-delete-confirm";
 import { shouldAlertSickGuardFutureShift } from "../../lib/scheduling/sick-guard-shift-alert";
 import { dismissDayShortage } from "../../lib/scheduling/dismiss-shortage-client";
 import { ScheduleHoursShortageIcon } from "./schedule-hours-shortage-icon";
+import { GuardProfileLink } from "../guards/guard-profile-link";
 import { SCHEDULE_SHORTAGE_REFRESH_EVENT } from "./global-schedule-shortage-bell";
 import { dispatchIncidentReplacementsRefresh } from "./global-incident-replacements-banner";
 import {
@@ -522,7 +523,7 @@ export function ObjectMonthScheduleGrid({
 
   function dayHasCurrentWeekHoursShortage(d: number): boolean {
     const dateIso = dateIsoForDay(d);
-    if (!isIsoInCurrentKhabarovskWeek(dateIso)) return false;
+    if (!isIsoInCurrentShortageControlWindow(dateIso)) return false;
     const dayShifts =
       posts.length > 0
         ? Object.values(shiftsByGuardAndDay).flatMap((byDay) => byDay[d] || [])
@@ -841,27 +842,29 @@ export function ObjectMonthScheduleGrid({
                 <span className="text-[9px] text-accent-warning leading-none">Вне штата</span>
               )}
             </div>
-            {canWrite ? (
-              <button
-                type="button"
-                className="shrink-0 rounded p-0.5 text-app-muted opacity-70 transition hover:bg-app-elevated hover:text-status-sick hover:opacity-100 disabled:opacity-40"
-                title={postId ? "Убрать с этого поста" : "Убрать из графика месяца"}
-                aria-label={
-                  postId
-                    ? `Убрать ${sg.displayName} с этого поста за ${monthLabel}`
-                    : `Убрать ${sg.displayName} из графика за ${monthLabel}`
-                }
-                disabled={removingRowKey === scheduleRowHideKey(postId, sg.guardId)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  void removeGuardFromMonth(sg, postId);
-                }}
-                onMouseEnter={(e) => e.stopPropagation()}
-              >
-                <Trash2 className="size-3.5" strokeWidth={2.25} />
-              </button>
-            ) : null}
+            <div className="flex shrink-0 items-center gap-0.5">
+              <GuardProfileLink guardId={sg.guardId} />
+              {canWrite ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-0.5 text-app-muted opacity-70 transition hover:bg-app-elevated hover:text-status-sick hover:opacity-100 disabled:opacity-40"
+                  title={postId ? "Убрать с этого поста" : "Убрать из графика месяца"}
+                  aria-label={
+                    postId
+                      ? `Убрать ${sg.displayName} с этого поста за ${monthLabel}`
+                      : `Убрать ${sg.displayName} из графика за ${monthLabel}`
+                  }
+                  disabled={removingRowKey === scheduleRowHideKey(postId, sg.guardId)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    void removeGuardFromMonth(sg, postId);
+                  }}
+                >
+                  <Trash2 className="size-3.5" strokeWidth={2.25} />
+                </button>
+              ) : null}
+            </div>
           </div>
         </td>
         {days.map((d) => {

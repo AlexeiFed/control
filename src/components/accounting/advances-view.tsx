@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight, Trash2, Wallet } from "lucide-react";
-import { deleteGuardAdvanceAction, issueGuardAdvanceAction } from "../../app/accounting/advances/actions";
+import { deleteGuardAdvanceAction, issueGuardAdvanceAction, setGuardAdvanceAccountedAction } from "../../app/accounting/advances/actions";
 import type { GuardAdvanceRecord } from "../../lib/operations/advances-repository";
 import {
   formatMonthYearLongRu,
@@ -12,6 +12,7 @@ import type { PayrollHalf } from "../../lib/payroll/advance-period";
 import { halfPeriodLabelRu, halfPeriodShortRu } from "../../lib/payroll/advance-period";
 import { Button, ButtonLink } from "../ui/button";
 import { SearchableSelect } from "../ui/searchable-select";
+import { designTokens } from "../../lib/design-tokens";
 import { toast } from "../../store/toast-store";
 
 type Props = {
@@ -37,6 +38,35 @@ export function AdvancesView({ monthKey, advances, guardOptions, objectOptions, 
   const [amountInput, setAmountInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<GuardAdvanceRecord | null>(null);
+  const [accountedById, setAccountedById] = useState<Record<string, boolean>>({});
+
+  function rowAccounted(row: GuardAdvanceRecord): boolean {
+    return accountedById[row.id] ?? Boolean(row.accountedAt);
+  }
+
+  function handleToggleAccounted(row: GuardAdvanceRecord, accounted: boolean) {
+    setAccountedById((prev) => ({ ...prev, [row.id]: accounted }));
+    if (accounted && deleteTarget?.id === row.id) setDeleteTarget(null);
+    const formData = new FormData();
+    formData.set("id", row.id);
+    formData.set("accounted", accounted ? "true" : "false");
+    startTransition(async () => {
+      try {
+        await setGuardAdvanceAccountedAction(formData);
+      } catch (error) {
+        setAccountedById((prev) => {
+          const next = { ...prev };
+          delete next[row.id];
+          return next;
+        });
+        toast({
+          title: "Ошибка",
+          message: error instanceof Error ? error.message : "Не удалось отметить аванс",
+          variant: "error",
+        });
+      }
+    });
+  }
 
   const { year, monthIndex0 } = useMemo(() => parseMonthKey(monthKey), [monthKey]);
   const monthLabel = formatMonthYearLongRu(year, monthIndex0);
@@ -261,7 +291,7 @@ export function AdvancesView({ monthKey, advances, guardOptions, objectOptions, 
                     <th className="px-4 py-3 text-right">Сумма</th>
                     <th className="px-4 py-3">Выдал</th>
                     <th className="px-4 py-3">Дата</th>
-                    {canManage ? <th className="px-4 py-3 w-12" /> : null}
+                    {canManage ? <th className="px-4 py-3 w-44" /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -279,16 +309,28 @@ export function AdvancesView({ monthKey, advances, guardOptions, objectOptions, 
                       <td className="px-4 py-3 text-app-muted">{formatIssuedAt(row.issuedAt)}</td>
                       {canManage ? (
                         <td className="px-4 py-3">
-                          <Button
-                            type="button"
-                            variant="icon"
-                            size="icon"
-                            className="text-accent-danger hover:bg-accent-danger/10"
-                            aria-label="Удалить аванс"
-                            onClick={() => setDeleteTarget(row)}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            <AdvanceAccountedCheckbox
+                              checked={rowAccounted(row)}
+                              disabled={isPending}
+                              onChange={(accounted) => handleToggleAccounted(row, accounted)}
+                            />
+                            <Button
+                              type="button"
+                              variant="icon"
+                              size="icon"
+                              className="text-accent-danger hover:bg-accent-danger/10"
+                              aria-label="Удалить аванс"
+                              title={rowAccounted(row) ? "Аванс учтён — удаление недоступно" : "Удалить аванс"}
+                              disabled={rowAccounted(row) || isPending}
+                              onClick={() => {
+                                if (rowAccounted(row)) return;
+                                setDeleteTarget(row);
+                              }}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
                         </td>
                       ) : null}
                     </tr>
@@ -320,16 +362,28 @@ export function AdvancesView({ monthKey, advances, guardOptions, objectOptions, 
                   </div>
                   {row.note ? <p className="mt-2 text-xs text-app-muted">{row.note}</p> : null}
                   {canManage ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="mt-3 h-auto px-0 text-xs text-accent-danger hover:bg-transparent hover:text-accent-danger"
-                      onClick={() => setDeleteTarget(row)}
-                    >
-                      <Trash2 className="mr-1 size-3.5" />
-                      Удалить
-                    </Button>
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <AdvanceAccountedCheckbox
+                        checked={rowAccounted(row)}
+                        disabled={isPending}
+                        onChange={(accounted) => handleToggleAccounted(row, accounted)}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto px-0 text-xs text-accent-danger hover:bg-transparent hover:text-accent-danger"
+                        disabled={rowAccounted(row) || isPending}
+                        title={rowAccounted(row) ? "Аванс учтён — удаление недоступно" : "Удалить аванс"}
+                        onClick={() => {
+                          if (rowAccounted(row)) return;
+                          setDeleteTarget(row);
+                        }}
+                      >
+                        <Trash2 className="mr-1 size-3.5" />
+                        Удалить
+                      </Button>
+                    </div>
                   ) : null}
                 </article>
               ))}
@@ -371,6 +425,34 @@ export function AdvancesView({ monthKey, advances, guardOptions, objectOptions, 
         </div>
       ) : null}
     </section>
+  );
+}
+
+function AdvanceAccountedCheckbox({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (accounted: boolean) => void;
+}) {
+  return (
+    <label
+      className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-xs font-medium"
+      style={{ color: checked ? designTokens.color.accent.success : designTokens.color.textMuted }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-label="Аванс учтён"
+        onChange={(event) => onChange(event.target.checked)}
+        className="size-4"
+        style={{ accentColor: designTokens.color.accent.success }}
+      />
+      Аванс учтён
+    </label>
   );
 }
 

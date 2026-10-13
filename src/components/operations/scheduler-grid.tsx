@@ -21,7 +21,7 @@ import {
   getHoursKhabarovsk,
   toDateIsoKhabarovsk,
   getKhabarovskComponents,
-  isIsoInCurrentKhabarovskWeek,
+  isIsoInCurrentShortageControlWindow,
 } from "../../lib/format/display-date";
 import {
   defaultDayShiftInterval,
@@ -192,7 +192,7 @@ export type SchedulerGridProps = {
   profilePeriods?: ReadonlyArray<GuardProfilePeriodRecord>;
   currentRole: Role;
   weekStart: Date;
-  createShiftAction: (formData: FormData) => Promise<void>;
+  createShiftAction: (formData: FormData) => Promise<void | { ok: boolean; error?: string }>;
   createShiftLogAction: (formData: FormData) => Promise<void>;
   /** Action для кнопки «Скопировать прошлую неделю» в строке объекта. */
   cloneObjectWeekShiftsAction?: (formData: FormData) => Promise<void>;
@@ -1818,7 +1818,7 @@ export function SchedulerGrid({
                           {planMetrics ? (
                             <div className="text-center text-[8px] leading-tight text-app-muted">
                               {dayPlanHasHoursShortage(planMetrics) &&
-                              isIsoInCurrentKhabarovskWeek(day.iso) &&
+                              isIsoInCurrentShortageControlWindow(day.iso) &&
                               !dismissedShortageKeySet.has(shortageDismissKeyLocal(objectItem.id, day.iso)) ? (
                                 <div className="mb-0.5 flex justify-center">
                                   <ScheduleHoursShortageIcon
@@ -1980,7 +1980,7 @@ export function SchedulerGrid({
                           {planMetrics ? (
                             <div className="text-[9px] leading-tight text-app-muted">
                               {dayPlanHasHoursShortage(planMetrics) &&
-                              isIsoInCurrentKhabarovskWeek(day.iso) &&
+                              isIsoInCurrentShortageControlWindow(day.iso) &&
                               !dismissedShortageKeySet.has(shortageDismissKeyLocal(objectItem.id, day.iso)) ? (
                                 <div className="mb-0.5 flex justify-center">
                                   <ScheduleHoursShortageIcon
@@ -2340,7 +2340,9 @@ export function SchedulerGrid({
 
             <form
               ref={quickAssignFormRef}
-              action={createShiftAction}
+              action={async (formData) => {
+                await createShiftAction(formData);
+              }}
               className="mt-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-app-elevated p-3 md:mt-4 md:overflow-hidden md:rounded-card md:border md:border-app-border md:p-6"
               onSubmit={(event) => {
                 if (

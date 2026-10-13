@@ -1,6 +1,6 @@
 import { isUndefinedColumnOrTableError } from "../db/column-compat";
 import { query } from "../db/pool";
-import { getMondayWeekStartKhabarovsk } from "../format/display-date";
+import { getMondayWeekStartKhabarovsk, shortageControlDates } from "../format/display-date";
 import { buildExpectedShiftsByObjectAndDay, civilDateKeyFromDate, type ExpectedShifts } from "../scheduling/object-shift-templates";
 import type { ScheduleObjectRef, ScheduleObjectShortage } from "../scheduling/schedule-shortage";
 import { buildValidShortageDismissKeySet } from "../scheduling/build-shortage-dismiss-state";
@@ -120,9 +120,7 @@ export async function upsertShortageDismissal(input: {
 
 function currentWeekDayIsos(): string[] {
   const weekStart = getMondayWeekStartKhabarovsk();
-  return Array.from({ length: 7 }, (_, index) =>
-    civilDateKeyFromDate(new Date(weekStart.getTime() + index * 24 * 60 * 60_000)),
-  );
+  return shortageControlDates(weekStart).map((date) => civilDateKeyFromDate(date));
 }
 
 /**
@@ -174,7 +172,7 @@ export async function buildCurrentWeekValidShortageDismissKeySet(
   if (scopedObjectIds.length === 0) return { weekDayIsos, validKeys: new Set() };
 
   const [storedDismissals, monthlyOperationalOverrides] = await Promise.all([
-    listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[6]!),
+    listShortageDismissals(scopedObjectIds, weekDayIsos[0]!, weekDayIsos[weekDayIsos.length - 1]!),
     loadMonthlyOperationalOverridesForDays(scopedObjectIds, weekDayIsos),
   ]);
   const expectedByObjectDay = buildExpectedShiftsByObjectAndDay(

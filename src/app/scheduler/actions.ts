@@ -187,6 +187,8 @@ const deleteShiftFormSchema = z.object({
 
 export type IncidentActionResult = { ok: true } | { ok: false; error: string };
 
+export type ShiftWriteResult = { ok: true } | { ok: false; error: string };
+
 export async function recordShiftIncidentAction(
   formData: FormData,
 ): Promise<IncidentActionResult | void> {
@@ -498,33 +500,44 @@ export async function createShiftLogAction(formData: FormData): Promise<void> {
   redirect(`/scheduler${params.size > 0 ? `?${params.toString()}` : ""}`);
 }
 
-export async function createShiftAction(formData: FormData) {
-  const session = await requireSession();
-  assertScheduleWriteRole(session.user.role);
-
-  if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
-    throw new Error("Недостаточно прав для создания смены");
+export async function createShiftAction(formData: FormData): Promise<ShiftWriteResult> {
+  const noRedirectEarly = formData.get("noRedirect")?.toString().trim() === "true";
+  let session;
+  try {
+    session = await requireSession();
+    assertScheduleWriteRole(session.user.role);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Недостаточно прав для создания смены";
+    if (noRedirectEarly) return { ok: false, error: message };
+    throw error;
   }
 
-  const input = parseCreateShiftForm(formData);
+  if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
+    const message = "Недостаточно прав для создания смены";
+    if (noRedirectEarly) return { ok: false, error: message };
+    throw new Error(message);
+  }
+
+  let input: z.infer<typeof createShiftSchema>;
+  try {
+    input = parseCreateShiftForm(formData);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Некорректные данные смены";
+    if (noRedirectEarly) return { ok: false, error: message };
+    throw error;
+  }
 
   const monthKey = input.shiftDate.slice(0, 7);
   const anchorTime = await getObjectOperationalDayStartTimeForMonth(input.objectId, monthKey);
-  const { startsAt, endsAt } = buildShiftIntervalFromHm(
-    input.shiftDate,
-    input.startTime,
-    input.endTime,
-    anchorTime,
-  );
 
   const shiftKind: ShiftKind = (input.shiftKind as ShiftKind) || "Regular";
   const isNoShow = input.isNoShow === "true";
   let clientCents: number | null;
   let guardCents: number | null;
 
-  function handleError(message: string) {
+  function handleError(message: string): ShiftWriteResult {
     if (input.noRedirect === "true") {
-      throw new Error(message);
+      return { ok: false, error: message };
     }
     if (input.redirect) {
       const url = new URL(input.redirect, "http://localhost"); // base doesn't matter for path only
@@ -538,27 +551,36 @@ export async function createShiftAction(formData: FormData) {
     redirect(`/scheduler?week=${input.weekStart || ""}&error=${encodeURIComponent(message)}${scroll}${objectFilter}`);
   }
 
+  let interval: { startsAt: Date; endsAt: Date };
+  try {
+    interval = buildShiftIntervalFromHm(input.shiftDate, input.startTime, input.endTime, anchorTime);
+  } catch (error) {
+    return handleError(error instanceof Error ? error.message : "Некорректный интервал смены");
+  }
+  const { startsAt, endsAt } = interval;
+
   try {
     clientCents = rublesToCentsOptional(input.manualClientRubles);
     guardCents = rublesToCentsOptional(input.manualGuardRubles);
   } catch (error) {
-    handleError(error instanceof Error ? error.message : "Некорректная сумма override");
-    return; // unreachable
+    return handleError(error instanceof Error ? error.message : "Некорректная сумма override");
   }
   const hasOverride = clientCents !== null || guardCents !== null;
   if (hasOverride) {
-    assertPermission(session.user.role, "schedule:write");
+    try {
+      assertPermission(session.user.role, "schedule:write");
+    } catch (error) {
+      return handleError(error instanceof Error ? error.message : "Недостаточно прав для произвольного тарифа");
+    }
     if (guardCents === null) {
-      handleError("Укажите ставку охранника для произвольного тарифа");
-      return;
+      return handleError("Укажите ставку охранника для произвольного тарифа");
     }
   }
   const unitTrim = input.manualRateUnit?.trim();
   const manualRateUnitResolved: RateUnit | null =
     unitTrim === "Hour" || unitTrim === "Shift" ? unitTrim : null;
   if (hasOverride && !manualRateUnitResolved) {
-    handleError("Для override укажите единицу ставки (час или смену)");
-    return; // unreachable
+    return handleError("Для override укажите единицу ставки (час или смену)");
   }
 
   try {
@@ -599,8 +621,7 @@ export async function createShiftAction(formData: FormData) {
       });
     }
   } catch (error) {
-    handleError(error instanceof Error ? error.message : "Не удалось создать смену");
-    return; // unreachable
+    return handleError(error instanceof Error ? error.message : "Не удалось создать смену");
   }
 
   revalidatePath("/scheduler");
@@ -611,7 +632,7 @@ export async function createShiftAction(formData: FormData) {
   revalidateTag("global-alerts", "max");
 
   if (input.noRedirect === "true") {
-    return;
+    return { ok: true };
   }
 
   if (input.redirect) {
@@ -625,33 +646,44 @@ export async function createShiftAction(formData: FormData) {
   redirect(`/scheduler?week=${input.weekStart || ""}&success=shift-created${scroll}${objectFilter}`);
 }
 
-export async function updateShiftAction(formData: FormData) {
-  const session = await requireSession();
-  assertScheduleWriteRole(session.user.role);
-
-  if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
-    throw new Error("Недостаточно прав для редактирования смены");
+export async function updateShiftAction(formData: FormData): Promise<ShiftWriteResult> {
+  const noRedirectEarly = formData.get("noRedirect")?.toString().trim() === "true";
+  let session;
+  try {
+    session = await requireSession();
+    assertScheduleWriteRole(session.user.role);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Недостаточно прав для редактирования смены";
+    if (noRedirectEarly) return { ok: false, error: message };
+    throw error;
   }
 
-  const input = parseUpdateShiftForm(formData);
+  if (session.user.role !== "Administrator" && session.user.role !== "Planner") {
+    const message = "Недостаточно прав для редактирования смены";
+    if (noRedirectEarly) return { ok: false, error: message };
+    throw new Error(message);
+  }
+
+  let input: z.infer<typeof updateShiftSchema>;
+  try {
+    input = parseUpdateShiftForm(formData);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Некорректные данные смены";
+    if (noRedirectEarly) return { ok: false, error: message };
+    throw error;
+  }
 
   const monthKey = input.shiftDate.slice(0, 7);
   const anchorTime = await getObjectOperationalDayStartTimeForMonth(input.objectId, monthKey);
-  const { startsAt, endsAt } = buildShiftIntervalFromHm(
-    input.shiftDate,
-    input.startTime,
-    input.endTime,
-    anchorTime,
-  );
 
   const shiftKind: ShiftKind = (input.shiftKind as ShiftKind) || "Regular";
 
   let clientCents: number | null;
   let guardCents: number | null;
 
-  function handleError(message: string) {
+  function handleError(message: string): ShiftWriteResult {
     if (input.noRedirect === "true") {
-      throw new Error(message);
+      return { ok: false, error: message };
     }
     if (input.redirect) {
       const url = new URL(input.redirect, "http://localhost");
@@ -664,28 +696,39 @@ export async function updateShiftAction(formData: FormData) {
     redirect(`/scheduler?week=${input.weekStart || ""}&error=${encodeURIComponent(message)}${scroll}${objectFilter}`);
   }
 
+  let startsAt: Date;
+  let endsAt: Date;
+  try {
+    const interval = buildShiftIntervalFromHm(input.shiftDate, input.startTime, input.endTime, anchorTime);
+    startsAt = interval.startsAt;
+    endsAt = interval.endsAt;
+  } catch (error) {
+    return handleError(error instanceof Error ? error.message : "Некорректный интервал смены");
+  }
+
   try {
     clientCents = rublesToCentsOptional(input.manualClientRubles);
     guardCents = rublesToCentsOptional(input.manualGuardRubles);
   } catch (error) {
-    handleError(error instanceof Error ? error.message : "Некорректная сумма override");
-    return;
+    return handleError(error instanceof Error ? error.message : "Некорректная сумма override");
   }
 
   const hasOverride = clientCents !== null || guardCents !== null;
   if (hasOverride) {
-    assertPermission(session.user.role, "schedule:write");
+    try {
+      assertPermission(session.user.role, "schedule:write");
+    } catch (error) {
+      return handleError(error instanceof Error ? error.message : "Недостаточно прав для произвольного тарифа");
+    }
     if (guardCents === null) {
-      handleError("Укажите ставку охранника для произвольного тарифа");
-      return;
+      return handleError("Укажите ставку охранника для произвольного тарифа");
     }
   }
   const unitTrim = input.manualRateUnit?.trim();
   const manualRateUnitResolved: RateUnit | null =
     unitTrim === "Hour" || unitTrim === "Shift" ? unitTrim : null;
   if (hasOverride && !manualRateUnitResolved) {
-    handleError("Для произвольной ставки укажите единицу (час или смену)");
-    return;
+    return handleError("Для произвольной ставки укажите единицу (час или смену)");
   }
 
   try {
@@ -716,8 +759,7 @@ export async function updateShiftAction(formData: FormData) {
       selectedRateRuleId: hasOverride ? null : selectedRateRuleId,
     });
   } catch (error) {
-    handleError(error instanceof Error ? error.message : "Не удалось обновить смену");
-    return;
+    return handleError(error instanceof Error ? error.message : "Не удалось обновить смену");
   }
 
   revalidatePath("/scheduler");
@@ -728,7 +770,7 @@ export async function updateShiftAction(formData: FormData) {
   revalidateTag("global-alerts", "max");
 
   if (input.noRedirect === "true") {
-    return;
+    return { ok: true };
   }
 
   if (input.redirect) {

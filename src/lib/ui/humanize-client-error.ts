@@ -22,6 +22,13 @@ export function humanizeClientError(
   if (lower.includes("shift end must be after shift start")) {
     return "Окончание смены должно быть позже начала";
   }
+  if (
+    lower.includes("server components render") ||
+    lower.includes("failed to find server action") ||
+    lower.includes("omitted in production")
+  ) {
+    return "Страница открыта со старым кодом после обновления. Обновите её (Cmd+Shift+R) и повторите.";
+  }
 
   // Не светим сырой англ. stack / flight-digest пользователю
   if (/^[A-Za-z][A-Za-z0-9 _:[\]()'".+-]*$/.test(raw) && /[A-Za-z]{4,}/.test(raw)) {

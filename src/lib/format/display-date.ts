@@ -176,6 +176,26 @@ export function isIsoInCurrentKhabarovskWeek(dateIso: string, now = new Date()):
   return dateIso >= startIso && dateIso <= lastIso;
 }
 
+/** Контроль недобора: понедельник текущей недели и следующий понедельник включительно. */
+export const SHORTAGE_CONTROL_DAY_COUNT = 8;
+
+/** Полночь каждого дня окна контроля, начиная с понедельника `weekStart`. */
+export function shortageControlDates(weekStart: Date): Date[] {
+  return Array.from({ length: SHORTAGE_CONTROL_DAY_COUNT }, (_, index) =>
+    new Date(weekStart.getTime() + index * 24 * 3600_000),
+  );
+}
+
+/** `YYYY-MM-DD` попадает в текущее окно контроля недобора (пн–следующий пн, Хабаровск). */
+export function isIsoInCurrentShortageControlWindow(dateIso: string, now = new Date()): boolean {
+  const weekStart = getMondayWeekStartKhabarovsk(now);
+  const startIso = toDateIsoKhabarovsk(weekStart);
+  const lastIso = toDateIsoKhabarovsk(
+    new Date(weekStart.getTime() + (SHORTAGE_CONTROL_DAY_COUNT - 1) * 24 * 3600_000),
+  );
+  return dateIso >= startIso && dateIso <= lastIso;
+}
+
 /** Календарный месяц в Хабаровске для anchor `YYYY-MM-DD`. */
 export function khabarovskMonthRangeContaining(isoDate: string): KhabarovskInterval {
   const parsed = parseIsoDateKhabarovskOrNull(isoDate);

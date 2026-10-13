@@ -113,4 +113,9 @@ describe("scheduleShiftColumnDateIso", () => {
     const interval = buildShiftIntervalFromHm("2026-08-31", "09:00", "09:00", "09:00");
     expect(scheduleShiftColumnDateIso(interval, "09:00")).toBe("2026-08-31");
   });
+
+  it("хвост 01:00–08:00 первого числа остаётся в последних сутках прошлого месяца", () => {
+    const interval = buildShiftIntervalFromHm("2026-09-30", "01:00", "08:00", "08:00");
+    expect(scheduleShiftColumnDateIso(interval, "08:00")).toBe("2026-09-30");
+  });
 });

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertPermission } from "../../../lib/auth/rbac";
 import { requireSession } from "../../../lib/auth/session";
-import { createGuardAdvance, listGuardAdvancesForMonth, deleteGuardAdvance } from "../../../lib/operations/advances-repository";
+import { createGuardAdvance, listGuardAdvancesForMonth, deleteGuardAdvance, setGuardAdvanceAccounted } from "../../../lib/operations/advances-repository";
 import type { PayrollHalf } from "../../../lib/payroll/advance-period";
 import { PAYROLL_HALVES } from "../../../lib/payroll/advance-period";
 
@@ -46,6 +46,18 @@ export async function issueGuardAdvanceAction(formData: FormData) {
     issuedByName: session.user.name,
     note,
   });
+
+  revalidatePath("/accounting/advances");
+  revalidatePath("/accounting/timesheet");
+}
+
+export async function setGuardAdvanceAccountedAction(formData: FormData) {
+  const session = await requireSession();
+  assertPermission(session.user.role, "advances:manage");
+
+  const id = z.string().uuid().parse(formData.get("id"));
+  const accounted = z.enum(["true", "false"]).parse(formData.get("accounted")) === "true";
+  await setGuardAdvanceAccounted(id, accounted);
 
   revalidatePath("/accounting/advances");
   revalidatePath("/accounting/timesheet");

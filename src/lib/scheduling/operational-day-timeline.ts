@@ -147,11 +147,14 @@ export function scheduleShiftColumnDateIso(
   const endKh = getKhabarovskComponents(endsAt);
   const endMin = endKh.hours * 60 + endKh.minutes;
 
-  const columnDateIso =
-    endMin === anchorMin
-      ? addDaysToIsoDate(toDateIsoKhabarovsk(endsAt), -1)
-      : operationalDayDateIsoFromStart(startsAt, anchor);
+  const endsAtAnchor = endMin === anchorMin;
+  const columnDateIso = endsAtAnchor
+    ? addDaysToIsoDate(toDateIsoKhabarovsk(endsAt), -1)
+    : operationalDayDateIsoFromStart(startsAt, anchor);
 
+  // Хвост до якоря (01:00–08:00 1-го числа) — это ещё прошлые операционные сутки,
+  // даже если календарный старт уже в следующем месяце.
+  if (endsAtAnchor) return columnDateIso;
   return clampColumnDateToStartMonth(columnDateIso, startsAt);
 }
 

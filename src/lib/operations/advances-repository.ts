@@ -15,6 +15,8 @@ export type GuardAdvanceRecord = {
   issuedByName: string;
   issuedAt: string;
   note: string;
+  /** Когда аванс отмечен как учтённый; null — можно удалить. */
+  accountedAt: string | null;
 };
 
 export function guardObjectAdvanceKey(guardId: string, objectId: string): string {
@@ -52,6 +54,7 @@ export async function listGuardAdvancesForMonth(
     issued_by_name: string;
     issued_at: string;
     note: string;
+    accounted_at: string | null;
   }>(
     `
       SELECT
@@ -66,7 +69,8 @@ export async function listGuardAdvancesForMonth(
         a.issued_by_user_id,
         a.issued_by_name,
         a.issued_at::text,
-        a.note
+        a.note,
+        a.accounted_at::text
       FROM guard_advance_payments a
       JOIN guards g ON g.id = a.guard_id
       LEFT JOIN security_objects so ON so.id = a.object_id
@@ -90,6 +94,7 @@ export async function listGuardAdvancesForMonth(
     issuedByName: row.issued_by_name,
     issuedAt: row.issued_at,
     note: row.note,
+    accountedAt: row.accounted_at,
   }));
 }
 
@@ -206,6 +211,36 @@ export async function sumAdvancesByGuardObjectForMonth(
   return map;
 }
 
+export async function setGuardAdvanceAccounted(id: string, accounted: boolean): Promise<string | null> {
+  const rows = await query<{ accounted_at: string | null }>(
+    `
+      UPDATE guard_advance_payments
+      SET accounted_at = CASE WHEN $2::boolean THEN COALESCE(accounted_at, now()) ELSE NULL END
+      WHERE id = $1::uuid
+      RETURNING accounted_at::text
+    `,
+    [id, accounted],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("Аванс не найден");
+  return row.accounted_at;
+}
+
 export async function deleteGuardAdvance(id: string): Promise<void> {
-  await query(`DELETE FROM guard_advance_payments WHERE id = $1::uuid`, [id]);
+  const deleted = await query<{ id: string }>(
+    `
+      DELETE FROM guard_advance_payments
+      WHERE id = $1::uuid AND accounted_at IS NULL
+      RETURNING id
+    `,
+    [id],
+  );
+  if (deleted[0]?.id) return;
+
+  const existing = await query<{ accounted_at: string | null }>(
+    `SELECT accounted_at::text FROM guard_advance_payments WHERE id = $1::uuid`,
+    [id],
+  );
+  if (existing[0]?.accounted_at) throw new Error("Аванс учтён — удаление недоступно");
+  throw new Error("Аванс не найден");
 }

@@ -26,6 +26,8 @@ import {
   recordShiftIncidentAction,
   updateShiftAction,
 } from "../../app/scheduler/actions";
+import { humanizeClientError } from "../../lib/ui/humanize-client-error";
+import { GuardProfileLink } from "../guards/guard-profile-link";
 import { Button, ButtonLink } from "../ui/button";
 import { DateInput } from "../ui/date-input";
 import type { ShiftLogDraft } from "./object-month-schedule-grid";
@@ -1613,8 +1615,17 @@ export function ObjectDetailView({
                 fd.set("scrollY", String(Math.round(window.scrollY)));
                 const isEdit = Boolean(quickAssign.editingShiftId);
                 try {
+                  const result = isEdit ? await updateShiftAction(fd) : await createShiftAction(fd);
+                  if (result && result.ok === false) {
+                    toast({
+                      title: isEdit ? "Смена не обновлена" : "Смена не создана",
+                      message: result.error,
+                      variant: "error",
+                      durationMs: 8000,
+                    });
+                    return;
+                  }
                   if (isEdit) {
-                    await updateShiftAction(fd);
                     toast({
                       title: "Смена обновлена",
                       message: "График обновлён без прокрутки страницы",
@@ -1628,7 +1639,6 @@ export function ObjectDetailView({
                         shiftKind: quickAssign.shiftKind,
                       });
                     }
-                    await createShiftAction(fd);
                     toast({
                       title: quickAssign.replaceShiftId ? "Смена заменена" : "Смена создана",
                       message: "График обновлён без прокрутки страницы",
@@ -1653,9 +1663,9 @@ export function ObjectDetailView({
                   }
                   toast({
                     title: isEdit ? "Смена не обновлена" : "Смена не создана",
-                    message: err instanceof Error ? err.message : "Не удалось сохранить смену",
+                    message: humanizeClientError(err, "Не удалось сохранить смену"),
                     variant: "error",
-                    durationMs: 6500,
+                    durationMs: 8000,
                   });
                 }
               }}
@@ -2191,8 +2201,9 @@ export function ObjectDetailView({
               <div className="flex items-start justify-between gap-2 border-b border-app-border pb-2">
                 <div className="min-w-0">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-accent-primary">Охранник (другие объекты)</div>
-                  <h2 className="mt-0.5 truncate text-sm font-semibold text-app-text sm:text-base">
-                    {guardSchedulePreview.displayName}
+                  <h2 className="mt-0.5 flex min-w-0 items-center gap-1 text-sm font-semibold text-app-text sm:text-base">
+                    <span className="truncate">{guardSchedulePreview.displayName}</span>
+                    <GuardProfileLink guardId={guardSchedulePreview.guardId} />
                   </h2>
                   <p className="mt-1 text-[10px] leading-snug text-app-muted sm:text-xs">
                     Показаны смены на других объектах за 11 дней от{" "}
