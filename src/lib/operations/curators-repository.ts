@@ -543,19 +543,22 @@ async function getLegacyCuratorTariffs(): Promise<CuratorTariffs> {
   return mapTariffsRow(rows[0]!);
 }
 
+const TARIFFS_VERSION_SELECT = `
+  id::text,
+  effective_from::text,
+  effective_to::text,
+  route_base_rub::text,
+  route_hourly_rub::text,
+  night_inspection_rub::text,
+  replacement_hourly_rub::text,
+  schedule_regular_hourly_rub::text
+`;
+
 /** Открытая (текущая) версия ставок — для формы редактирования. */
 export async function getOpenCuratorTariffsVersion(): Promise<CuratorTariffsVersion | null> {
   const rows = await query<TariffsVersionRow>(
     `
-      SELECT
-        id::text,
-        effective_from::text,
-        effective_to::text,
-        route_base_rub::text,
-        route_hourly_rub::text,
-        night_inspection_rub::text,
-        replacement_hourly_rub::text,
-        schedule_regular_hourly_rub::text
+      SELECT ${TARIFFS_VERSION_SELECT}
       FROM curator_tariffs_versions
       WHERE effective_to IS NULL
       ORDER BY effective_from DESC
@@ -563,6 +566,18 @@ export async function getOpenCuratorTariffsVersion(): Promise<CuratorTariffsVers
     `,
   );
   return rows[0] ? mapTariffsVersionRow(rows[0]) : null;
+}
+
+/** История версий ставок: сначала новые (открытая → закрытые). */
+export async function listCuratorTariffsVersions(): Promise<CuratorTariffsVersion[]> {
+  const rows = await query<TariffsVersionRow>(
+    `
+      SELECT ${TARIFFS_VERSION_SELECT}
+      FROM curator_tariffs_versions
+      ORDER BY effective_from DESC, created_at DESC
+    `,
+  );
+  return rows.map(mapTariffsVersionRow);
 }
 
 /** Ставки, действующие на календарную дату начисления. */

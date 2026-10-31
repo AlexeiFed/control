@@ -6,6 +6,7 @@ import {
   getCuratorTariffsForDate,
   getOpenCuratorTariffsVersion,
   listCuratorMonthlyPaymentsForMonth,
+  listCuratorTariffsVersions,
   listMonthlySalaryDatesByCuratorInRange,
   listCuratorsWithTotals,
   listEntriesForDate,
@@ -38,10 +39,11 @@ export default async function AdminCuratorsPage({ searchParams }: PageProps) {
   const viewYear = selectedParts[0]!;
   const viewM0 = selectedParts[1]! - 1;
 
-  const [curators, openTariffsVersion, tariffsForSelectedDay] = await Promise.all([
+  const [curators, openTariffsVersion, tariffsForSelectedDay, tariffsHistory] = await Promise.all([
     listCuratorsWithTotals(),
     getOpenCuratorTariffsVersion(),
     getCuratorTariffsForDate(selectedIso),
+    listCuratorTariffsVersions(),
   ]);
   const initialSelectedCuratorId = curators[0]?.id ?? null;
   const { start, endExclusive } = monthBoundsFromIsoDate(selectedIso);
@@ -106,6 +108,16 @@ export default async function AdminCuratorsPage({ searchParams }: PageProps) {
       initialEntryTariffs={tariffsForSelectedDay}
       tariffsEffectiveFrom={openTariffsVersion?.effectiveFrom ?? "2020-01-01"}
       defaultTariffsEffectiveFrom={defaultCuratorTariffVersionFrom()}
+      tariffsHistory={tariffsHistory.map((v) => ({
+        id: v.id,
+        effectiveFrom: v.effectiveFrom,
+        effectiveTo: v.effectiveTo,
+        routeBaseRub: v.routeBaseRub,
+        routeHourlyRub: v.routeHourlyRub,
+        nightInspectionRub: v.nightInspectionRub,
+        replacementHourlyRub: v.replacementHourlyRub,
+        scheduleRegularHourlyRub: v.scheduleRegularHourlyRub,
+      }))}
     />
   );
 }

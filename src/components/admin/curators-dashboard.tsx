@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ClipboardList,
   FileSpreadsheet,
+  History,
   Pencil,
   Trash2,
   Wallet,
@@ -98,6 +99,16 @@ type Props = {
   initialEntryTariffs: CuratorTariffs;
   tariffsEffectiveFrom: string;
   defaultTariffsEffectiveFrom: string;
+  tariffsHistory: Array<{
+    id: string;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    routeBaseRub: number;
+    routeHourlyRub: number;
+    nightInspectionRub: number;
+    replacementHourlyRub: number;
+    scheduleRegularHourlyRub: number;
+  }>;
 };
 
 const rub = new Intl.NumberFormat("ru-RU", {
@@ -179,6 +190,7 @@ export function CuratorsDashboard({
   initialEntryTariffs,
   tariffsEffectiveFrom,
   defaultTariffsEffectiveFrom,
+  tariffsHistory,
 }: Props) {
   const initialParts = useMemo(() => parseIso(initialSelectedIso), [initialSelectedIso]);
   const [viewY, setViewY] = useState(initialParts.y);
@@ -1086,6 +1098,63 @@ export function CuratorsDashboard({
               </Button>
             </div>
           </form>
+
+          <div className="mt-6 border-t border-app-border pt-4">
+            <div className="flex items-center gap-2 text-accent-primary">
+              <History className="size-4 shrink-0" />
+              <h3 className="text-sm font-semibold uppercase tracking-wider">История ставок</h3>
+            </div>
+            <p className="mt-1 text-xs text-app-muted">
+              Закрытые версии — что действовало до текущего назначения. Открытая версия помечена как «сейчас».
+            </p>
+            {tariffsHistory.length === 0 ? (
+              <p className="mt-3 text-sm text-app-muted">Пока нет сохранённых версий.</p>
+            ) : (
+              <div className="mt-3 overflow-x-auto rounded-lg border border-app-border">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="bg-app-bg/70 text-app-muted">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Период</th>
+                      <th className="px-3 py-2 font-medium">Статус</th>
+                      <th className="px-3 py-2 font-medium tabular-nums">База выхода</th>
+                      <th className="px-3 py-2 font-medium tabular-nums">Маршрут ₽/ч</th>
+                      <th className="px-3 py-2 font-medium tabular-nums">Ночная проверка</th>
+                      <th className="px-3 py-2 font-medium tabular-nums">Доплата смены ₽/ч</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tariffsHistory.map((v) => {
+                      const isOpen = v.effectiveTo == null;
+                      const period = isOpen
+                        ? `с ${formatDisplayDateFromIso(v.effectiveFrom)}`
+                        : `${formatDisplayDateFromIso(v.effectiveFrom)} — ${formatDisplayDateFromIso(v.effectiveTo!)}`;
+                      return (
+                        <tr
+                          key={v.id}
+                          className={`border-t border-app-border/70 ${isOpen ? "bg-accent-primary/5" : "bg-app-bg/30"}`}
+                        >
+                          <td className="px-3 py-2 tabular-nums text-app-text">{period}</td>
+                          <td className="px-3 py-2">
+                            {isOpen ? (
+                              <span className="rounded bg-accent-success/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent-success">
+                                Сейчас
+                              </span>
+                            ) : (
+                              <span className="text-app-muted">Архив</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">{rub.format(v.routeBaseRub)}</td>
+                          <td className="px-3 py-2 tabular-nums">{rub.format(v.routeHourlyRub)}</td>
+                          <td className="px-3 py-2 tabular-nums">{rub.format(v.nightInspectionRub)}</td>
+                          <td className="px-3 py-2 tabular-nums">{rub.format(v.scheduleRegularHourlyRub)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           <form
             action={backfillCuratorShiftsAction}
