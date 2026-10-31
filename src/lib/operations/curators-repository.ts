@@ -1,4 +1,5 @@
 import { query } from "../db/pool";
+import { resolveCuratorTariffSavePlan } from "../curators/tariff-versioning";
 import {
   DEFAULT_CURATOR_TARIFFS,
   type CuratorTariffs,
@@ -178,7 +179,10 @@ export async function deleteCurator(id: string): Promise<void> {
   await query(`DELETE FROM curators WHERE id = $1`, [id]);
 }
 
-export async function listEntriesForDate(workDate: string): Promise<CuratorWorkEntryRecord[]> {
+export async function listEntriesForDate(
+  workDate: string,
+  curatorId?: string | null,
+): Promise<CuratorWorkEntryRecord[]> {
   const rows = await query<EntryRow>(
     `
       SELECT
@@ -186,9 +190,10 @@ export async function listEntriesForDate(workDate: string): Promise<CuratorWorkE
       FROM curator_work_entries e
       JOIN curators c ON c.id = e.curator_id
       WHERE e.work_date = $1::date
+        AND ($2::uuid IS NULL OR e.curator_id = $2::uuid)
       ORDER BY c.last_name ASC, c.first_name ASC, e.created_at ASC
     `,
-    [workDate],
+    [workDate, curatorId ?? null],
   );
   return rows.map(mapEntry);
 }
@@ -197,16 +202,18 @@ export async function listEntriesForDate(workDate: string): Promise<CuratorWorkE
 export async function sumEntryRubByDateInRange(
   startInclusive: string,
   endExclusive: string,
+  curatorId?: string | null,
 ): Promise<Array<{ workDate: string; totalRub: number }>> {
   const rows = await query<{ work_date: string; total_rub: string }>(
     `
       SELECT work_date::text AS work_date, SUM(amount_rub)::text AS total_rub
       FROM curator_work_entries
       WHERE work_date >= $1::date AND work_date < $2::date
+        AND ($3::uuid IS NULL OR curator_id = $3::uuid)
       GROUP BY work_date
       ORDER BY work_date ASC
     `,
-    [startInclusive, endExclusive],
+    [startInclusive, endExclusive, curatorId ?? null],
   );
   return rows.map((r) => ({
     workDate: String(r.work_date).slice(0, 10),
@@ -454,6 +461,18 @@ type TariffsRow = {
   schedule_regular_hourly_rub: string;
 };
 
+type TariffsVersionRow = TariffsRow & {
+  id: string;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+export type CuratorTariffsVersion = CuratorTariffs & {
+  id: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
 function mapTariffsRow(row: TariffsRow): CuratorTariffs {
   return {
     routeBaseRub: Number(row.route_base_rub),
@@ -464,27 +483,16 @@ function mapTariffsRow(row: TariffsRow): CuratorTariffs {
   };
 }
 
-export async function getCuratorTariffs(): Promise<CuratorTariffs> {
-  const rows = await query<TariffsRow>(
-    `
-      SELECT
-        route_base_rub::text,
-        route_hourly_rub::text,
-        night_inspection_rub::text,
-        replacement_hourly_rub::text,
-        schedule_regular_hourly_rub::text
-      FROM curator_tariffs_settings
-      WHERE id = $1
-    `,
-    [CURATOR_TARIFFS_ROW_ID],
-  );
-  if (rows.length === 0) {
-    return { ...DEFAULT_CURATOR_TARIFFS };
-  }
-  return mapTariffsRow(rows[0]!);
+function mapTariffsVersionRow(row: TariffsVersionRow): CuratorTariffsVersion {
+  return {
+    id: row.id,
+    effectiveFrom: String(row.effective_from).slice(0, 10),
+    effectiveTo: row.effective_to == null ? null : String(row.effective_to).slice(0, 10),
+    ...mapTariffsRow(row),
+  };
 }
 
-export async function saveCuratorTariffs(input: CuratorTariffs): Promise<void> {
+async function mirrorOpenTariffsToSettings(input: CuratorTariffs): Promise<void> {
   await query(
     `
       INSERT INTO curator_tariffs_settings (
@@ -513,4 +521,193 @@ export async function saveCuratorTariffs(input: CuratorTariffs): Promise<void> {
       input.scheduleRegularHourlyRub,
     ],
   );
+}
+
+async function getLegacyCuratorTariffs(): Promise<CuratorTariffs> {
+  const rows = await query<TariffsRow>(
+    `
+      SELECT
+        route_base_rub::text,
+        route_hourly_rub::text,
+        night_inspection_rub::text,
+        replacement_hourly_rub::text,
+        schedule_regular_hourly_rub::text
+      FROM curator_tariffs_settings
+      WHERE id = $1
+    `,
+    [CURATOR_TARIFFS_ROW_ID],
+  );
+  if (rows.length === 0) {
+    return { ...DEFAULT_CURATOR_TARIFFS };
+  }
+  return mapTariffsRow(rows[0]!);
+}
+
+/** Открытая (текущая) версия ставок — для формы редактирования. */
+export async function getOpenCuratorTariffsVersion(): Promise<CuratorTariffsVersion | null> {
+  const rows = await query<TariffsVersionRow>(
+    `
+      SELECT
+        id::text,
+        effective_from::text,
+        effective_to::text,
+        route_base_rub::text,
+        route_hourly_rub::text,
+        night_inspection_rub::text,
+        replacement_hourly_rub::text,
+        schedule_regular_hourly_rub::text
+      FROM curator_tariffs_versions
+      WHERE effective_to IS NULL
+      ORDER BY effective_from DESC
+      LIMIT 1
+    `,
+  );
+  return rows[0] ? mapTariffsVersionRow(rows[0]) : null;
+}
+
+/** Ставки, действующие на календарную дату начисления. */
+export async function getCuratorTariffsForDate(workDate: string): Promise<CuratorTariffs> {
+  const rows = await query<TariffsRow>(
+    `
+      SELECT
+        route_base_rub::text,
+        route_hourly_rub::text,
+        night_inspection_rub::text,
+        replacement_hourly_rub::text,
+        schedule_regular_hourly_rub::text
+      FROM curator_tariffs_versions
+      WHERE effective_from <= $1::date
+        AND (effective_to IS NULL OR effective_to >= $1::date)
+      ORDER BY effective_from DESC
+      LIMIT 1
+    `,
+    [workDate],
+  );
+  if (rows.length > 0) {
+    return mapTariffsRow(rows[0]!);
+  }
+  const open = await getOpenCuratorTariffsVersion();
+  if (open) {
+    return {
+      routeBaseRub: open.routeBaseRub,
+      routeHourlyRub: open.routeHourlyRub,
+      nightInspectionRub: open.nightInspectionRub,
+      replacementHourlyRub: open.replacementHourlyRub,
+      scheduleRegularHourlyRub: open.scheduleRegularHourlyRub,
+    };
+  }
+  return getLegacyCuratorTariffs();
+}
+
+/** Актуальные ставки (открытая версия / legacy settings). */
+export async function getCuratorTariffs(): Promise<CuratorTariffs> {
+  const open = await getOpenCuratorTariffsVersion();
+  if (open) {
+    return {
+      routeBaseRub: open.routeBaseRub,
+      routeHourlyRub: open.routeHourlyRub,
+      nightInspectionRub: open.nightInspectionRub,
+      replacementHourlyRub: open.replacementHourlyRub,
+      scheduleRegularHourlyRub: open.scheduleRegularHourlyRub,
+    };
+  }
+  return getLegacyCuratorTariffs();
+}
+
+/**
+ * Сохраняет ставки с даты `effectiveFrom`:
+ * правка текущей версии или закрытие + новая версия (прошлый период не меняется).
+ */
+export async function saveCuratorTariffs(
+  input: CuratorTariffs,
+  effectiveFrom: string,
+): Promise<{ mode: "update" | "supersede"; effectiveFrom: string }> {
+  const open = await getOpenCuratorTariffsVersion();
+
+  if (!open) {
+    await query(
+      `
+        INSERT INTO curator_tariffs_versions (
+          effective_from,
+          effective_to,
+          route_base_rub,
+          route_hourly_rub,
+          night_inspection_rub,
+          replacement_hourly_rub,
+          schedule_regular_hourly_rub
+        )
+        VALUES ($1::date, NULL, $2, $3, $4, $5, $6)
+      `,
+      [
+        effectiveFrom,
+        input.routeBaseRub,
+        input.routeHourlyRub,
+        input.nightInspectionRub,
+        input.replacementHourlyRub,
+        input.scheduleRegularHourlyRub,
+      ],
+    );
+    await mirrorOpenTariffsToSettings(input);
+    return { mode: "supersede", effectiveFrom };
+  }
+
+  const plan = resolveCuratorTariffSavePlan(open.effectiveFrom, effectiveFrom);
+
+  if (plan.mode === "update") {
+    await query(
+      `
+        UPDATE curator_tariffs_versions
+        SET
+          route_base_rub = $2,
+          route_hourly_rub = $3,
+          night_inspection_rub = $4,
+          replacement_hourly_rub = $5,
+          schedule_regular_hourly_rub = $6
+        WHERE id = $1::uuid
+      `,
+      [
+        open.id,
+        input.routeBaseRub,
+        input.routeHourlyRub,
+        input.nightInspectionRub,
+        input.replacementHourlyRub,
+        input.scheduleRegularHourlyRub,
+      ],
+    );
+    await mirrorOpenTariffsToSettings(input);
+    return { mode: "update", effectiveFrom: open.effectiveFrom };
+  }
+
+  await query(
+    `
+      UPDATE curator_tariffs_versions
+      SET effective_to = $2::date
+      WHERE id = $1::uuid AND effective_to IS NULL
+    `,
+    [open.id, plan.closeEffectiveTo],
+  );
+  await query(
+    `
+      INSERT INTO curator_tariffs_versions (
+        effective_from,
+        effective_to,
+        route_base_rub,
+        route_hourly_rub,
+        night_inspection_rub,
+        replacement_hourly_rub,
+        schedule_regular_hourly_rub
+      )
+      VALUES ($1::date, NULL, $2, $3, $4, $5, $6)
+    `,
+    [
+      plan.newEffectiveFrom,
+      input.routeBaseRub,
+      input.routeHourlyRub,
+      input.nightInspectionRub,
+      input.replacementHourlyRub,
+      input.scheduleRegularHourlyRub,
+    ],
+  );
+  await mirrorOpenTariffsToSettings(input);
+  return { mode: "supersede", effectiveFrom: plan.newEffectiveFrom };
 }

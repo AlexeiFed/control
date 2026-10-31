@@ -15,7 +15,7 @@ import { formatDisplayDateFromIso } from "../../../lib/format/display-date";
 import {
   createWorkEntry,
   deleteCuratorWorkEntryById,
-  getCuratorTariffs,
+  getCuratorTariffsForDate,
   getWorkEntryById,
   findMonthlySalaryDateInMonth,
   listCuratorMonthlyPaymentsForMonth,
@@ -27,6 +27,7 @@ import {
   updateWorkEntry,
   upsertCuratorMonthlyPayment,
 } from "../../../lib/operations/curators-repository";
+import { defaultCuratorTariffVersionFrom } from "../../../lib/curators/tariff-versioning";
 
 const manualWorkTypeSchema = z.enum(["RouteObjects", "NightInspection", "ReplacementShift", "MonthlySalary"]);
 
@@ -106,7 +107,7 @@ export async function addCuratorWorkEntryAction(formData: FormData) {
     }
     amountRub = monthlySalaryRub;
   } else {
-    const tariffs = await getCuratorTariffs();
+    const tariffs = await getCuratorTariffsForDate(parsed.workDate);
     amountRub = computeCuratorEntryRub(workType, hours, tariffs, {
       isBaseIncluded,
       customHourlyRate,
@@ -217,7 +218,7 @@ export async function updateCuratorWorkEntryAction(formData: FormData) {
       customHourlyRate: null,
     });
   } else {
-    const tariffs = await getCuratorTariffs();
+    const tariffs = await getCuratorTariffsForDate(parsed.workDate);
     amountRub = computeCuratorEntryRub(workType, hours, tariffs, {
       isBaseIncluded,
       customHourlyRate,
@@ -236,12 +237,19 @@ export async function updateCuratorWorkEntryAction(formData: FormData) {
 }
 
 const tariffIntSchema = z.coerce.number().int().min(0).max(9_999_999);
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export async function updateCuratorTariffsAction(formData: FormData) {
   const session = await requireSession();
   assertPermission(session.user.role, "curators:manage");
 
-  const returnDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).parse(formData.get("returnDate"));
+  const returnDate = isoDateSchema.parse(formData.get("returnDate"));
+  const effectiveFromRaw = formData.get("effectiveFrom");
+  const effectiveFrom = isoDateSchema.parse(
+    effectiveFromRaw && String(effectiveFromRaw).trim() !== ""
+      ? effectiveFromRaw
+      : defaultCuratorTariffVersionFrom(),
+  );
 
   const parsed = z
     .object({
@@ -259,7 +267,7 @@ export async function updateCuratorTariffsAction(formData: FormData) {
       scheduleRegularHourlyRub: formData.get("scheduleRegularHourlyRub"),
     });
 
-  await saveCuratorTariffs(parsed);
+  await saveCuratorTariffs(parsed, effectiveFrom);
   revalidatePath("/admin/curators");
   redirect(`/admin/curators?date=${encodeURIComponent(returnDate)}`);
 }
@@ -277,6 +285,7 @@ export async function deleteCuratorWorkEntryAction(formData: FormData) {
 export async function fetchCuratorMonthAggregatesAction(
   year: number,
   monthIndex0: number,
+  curatorId?: string | null,
 ): Promise<{
   sumsByDate: Record<string, number>;
   rubByCuratorId: Record<string, number>;
@@ -286,9 +295,14 @@ export async function fetchCuratorMonthAggregatesAction(
   const session = await requireSession();
   assertPermission(session.user.role, "curators:manage");
 
+  const filterCuratorId =
+    curatorId != null && curatorId !== ""
+      ? z.string().uuid().parse(curatorId)
+      : null;
+
   const { start, endExclusive: end } = monthBoundsFromYearMonthIndex0(year, monthIndex0);
   const [byDate, byCurator, payments, monthlySalaryByCurator] = await Promise.all([
-    sumEntryRubByDateInRange(start, end),
+    sumEntryRubByDateInRange(start, end, filterCuratorId),
     sumEntryRubByCuratorInRange(start, end),
     listCuratorMonthlyPaymentsForMonth(year, monthIndex0),
     listMonthlySalaryDatesByCuratorInRange(start, end),
@@ -340,6 +354,7 @@ export async function backfillCuratorShiftsAction(formData: FormData) {
 
 export async function fetchCuratorDayEntriesAction(
   workDate: string,
+  curatorId?: string | null,
 ): Promise<
   Array<{
     id: string;
@@ -362,8 +377,12 @@ export async function fetchCuratorDayEntriesAction(
   const session = await requireSession();
   assertPermission(session.user.role, "curators:manage");
 
-  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).parse(workDate);
-  const rows = await listEntriesForDate(workDate);
+  isoDateSchema.parse(workDate);
+  const filterCuratorId =
+    curatorId != null && curatorId !== ""
+      ? z.string().uuid().parse(curatorId)
+      : null;
+  const rows = await listEntriesForDate(workDate, filterCuratorId);
   return rows.map((r) => ({
     id: r.id,
     curatorId: r.curatorId,
@@ -381,4 +400,11 @@ export async function fetchCuratorDayEntriesAction(
     objectHourlyRateRub: r.objectHourlyRateRub,
     isAdminLocked: r.isAdminLocked,
   }));
+}
+
+export async function fetchCuratorTariffsForDateAction(workDate: string) {
+  const session = await requireSession();
+  assertPermission(session.user.role, "curators:manage");
+  isoDateSchema.parse(workDate);
+  return getCuratorTariffsForDate(workDate);
 }

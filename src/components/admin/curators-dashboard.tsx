@@ -19,6 +19,7 @@ import {
   deleteCuratorWorkEntryAction,
   fetchCuratorDayEntriesAction,
   fetchCuratorMonthAggregatesAction,
+  fetchCuratorTariffsForDateAction,
   backfillCuratorShiftsAction,
   updateCuratorMonthlyPaymentAction,
   updateCuratorTariffsAction,
@@ -26,6 +27,7 @@ import {
 } from "../../app/admin/curators/actions";
 import { Button, ButtonLink, buttonVariants } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { DateInput } from "../ui/date-input";
 import {
   computeCuratorEntryRub,
   curatorWorkTypeLabels,
@@ -90,7 +92,12 @@ type Props = {
   initialPaymentsByCuratorId: Record<string, CuratorPaymentState>;
   initialMonthlySalaryIsoByCuratorId: Record<string, string>;
   initialDayEntries: DayEntry[];
+  initialSelectedCuratorId: string | null;
   initialTariffs: CuratorTariffs;
+  /** Ставки, действующие на выбранный день — для превью новых строк. */
+  initialEntryTariffs: CuratorTariffs;
+  tariffsEffectiveFrom: string;
+  defaultTariffsEffectiveFrom: string;
 };
 
 const rub = new Intl.NumberFormat("ru-RU", {
@@ -167,7 +174,11 @@ export function CuratorsDashboard({
   initialPaymentsByCuratorId,
   initialMonthlySalaryIsoByCuratorId,
   initialDayEntries,
+  initialSelectedCuratorId,
   initialTariffs,
+  initialEntryTariffs,
+  tariffsEffectiveFrom,
+  defaultTariffsEffectiveFrom,
 }: Props) {
   const initialParts = useMemo(() => parseIso(initialSelectedIso), [initialSelectedIso]);
   const [viewY, setViewY] = useState(initialParts.y);
@@ -180,7 +191,7 @@ export function CuratorsDashboard({
     initialMonthlySalaryIsoByCuratorId,
   );
   const [dayEntries, setDayEntries] = useState(initialDayEntries);
-  const [selectedCuratorId, setSelectedCuratorId] = useState<string | null>(curators[0]?.id ?? null);
+  const [selectedCuratorId, setSelectedCuratorId] = useState<string | null>(initialSelectedCuratorId);
   const [workType, setWorkType] = useState<CuratorWorkType>("RouteObjects");
   const [hoursInput, setHoursInput] = useState("1");
   const [isBaseIncluded, setIsBaseIncluded] = useState(true);
@@ -197,6 +208,8 @@ export function CuratorsDashboard({
   const [pendingPreview, setPendingPreview] = useState<number | null>(null);
   const [exportPeriod, setExportPeriod] = useState<"month" | "fortnight">("month");
   const [tariffs, setTariffs] = useState<CuratorTariffs>(initialTariffs);
+  const [entryTariffs, setEntryTariffs] = useState<CuratorTariffs>(initialEntryTariffs);
+  const [tariffsApplyFrom, setTariffsApplyFrom] = useState(defaultTariffsEffectiveFrom);
   const [isSavingEntry, startSaveEntry] = useTransition();
 
   useEffect(() => {
@@ -209,17 +222,36 @@ export function CuratorsDashboard({
     initialTariffs.scheduleRegularHourlyRub,
   ]);
 
+  useEffect(() => {
+    setTariffsApplyFrom(defaultTariffsEffectiveFrom);
+  }, [defaultTariffsEffectiveFrom]);
+
+  useEffect(() => {
+    setEntryTariffs(initialEntryTariffs);
+  }, [
+    initialEntryTariffs.routeBaseRub,
+    initialEntryTariffs.routeHourlyRub,
+    initialEntryTariffs.nightInspectionRub,
+    initialEntryTariffs.replacementHourlyRub,
+    initialEntryTariffs.scheduleRegularHourlyRub,
+  ]);
+
   const monthLabel = useMemo(() => {
     return formatMonthYearLongRu(viewY, viewM0);
   }, [viewY, viewM0]);
 
+  const selectedCurator = useMemo(
+    () => curators.find((c) => c.id === selectedCuratorId) ?? null,
+    [curators, selectedCuratorId],
+  );
+
   const reloadMonth = useCallback(async () => {
-    const next = await fetchCuratorMonthAggregatesAction(viewY, viewM0);
+    const next = await fetchCuratorMonthAggregatesAction(viewY, viewM0, selectedCuratorId);
     setSumsByDate(next.sumsByDate);
     setRubByCuratorId(next.rubByCuratorId);
     setPaymentsByCuratorId(next.paymentsByCuratorId);
     setMonthlySalaryIsoByCuratorId(next.monthlySalaryIsoByCuratorId);
-  }, [viewY, viewM0]);
+  }, [viewY, viewM0, selectedCuratorId]);
 
   const saveCuratorPayment = useCallback(
     async (curatorId: string, patch: Partial<CuratorPaymentState>) => {
@@ -245,9 +277,13 @@ export function CuratorsDashboard({
   );
 
   const reloadDay = useCallback(async () => {
-    const rows = await fetchCuratorDayEntriesAction(selectedIso);
+    const [rows, dayTariffs] = await Promise.all([
+      fetchCuratorDayEntriesAction(selectedIso, selectedCuratorId),
+      fetchCuratorTariffsForDateAction(selectedIso),
+    ]);
     setDayEntries(rows);
-  }, [selectedIso]);
+    setEntryTariffs(dayTariffs);
+  }, [selectedIso, selectedCuratorId]);
 
   const resetEntryForm = useCallback(() => {
     setEditingEntryId(null);
@@ -326,14 +362,14 @@ export function CuratorsDashboard({
 
   useEffect(() => {
     if (workType === "NightInspection") {
-      setPendingPreview(computeCuratorEntryRub("NightInspection", null, tariffs));
+      setPendingPreview(computeCuratorEntryRub("NightInspection", null, entryTariffs));
       return;
     }
     if (workType === "MonthlySalary") {
       const salary = monthlySalaryRubInput.trim() !== "" ? Number(monthlySalaryRubInput.replace(",", ".")) : null;
       setPendingPreview(
         salary != null && salary > 0
-          ? computeCuratorEntryRub("MonthlySalary", null, tariffs, { monthlySalaryRub: salary })
+          ? computeCuratorEntryRub("MonthlySalary", null, entryTariffs, { monthlySalaryRub: salary })
           : null,
       );
       return;
@@ -342,13 +378,13 @@ export function CuratorsDashboard({
     const customRate = customHourlyRateInput ? Number(customHourlyRateInput.replace(",", ".")) : null;
     setPendingPreview(
       h > 0
-        ? computeCuratorEntryRub(workType, h, tariffs, {
+        ? computeCuratorEntryRub(workType, h, entryTariffs, {
             isBaseIncluded,
             customHourlyRate: customRate,
           })
         : null,
     );
-  }, [workType, hoursInput, tariffs, isBaseIncluded, customHourlyRateInput, monthlySalaryRubInput]);
+  }, [workType, hoursInput, entryTariffs, isBaseIncluded, customHourlyRateInput, monthlySalaryRubInput]);
 
   const grid = useMemo(() => buildMonthGrid(viewY, viewM0), [viewY, viewM0]);
 
@@ -458,7 +494,7 @@ export function CuratorsDashboard({
             <div className="rounded-card border border-app-border bg-app-elevated p-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-app-muted">Кураторы</h2>
               <p className="mt-2 text-xs text-app-muted">
-                Список берётся из должности «Куратор» в карточке охранника. Уволенные сюда не попадают.
+                Клик по ФИО фильтрует календарь и день. Список — из должности «Куратор» в карточке охранника.
               </p>
 
               <ul className="mt-4 max-h-[620px] space-y-2 overflow-y-auto pr-1">
@@ -532,9 +568,18 @@ export function CuratorsDashboard({
           <section className="min-w-0 overflow-hidden">
             <div className="rounded-card border border-app-border bg-app-elevated p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2 text-accent-primary">
-                  <CalendarRange className="size-4 shrink-0" />
-                  <span className="truncate text-sm font-semibold capitalize">{monthLabel}</span>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2 text-accent-primary">
+                    <CalendarRange className="size-4 shrink-0" />
+                    <span className="truncate text-sm font-semibold capitalize">{monthLabel}</span>
+                  </div>
+                  {selectedCurator ? (
+                    <p className="mt-1 truncate text-xs text-app-muted">
+                      Фильтр: {selectedCurator.lastName} {selectedCurator.firstName}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-app-muted">Выберите куратора слева</p>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button
@@ -757,7 +802,7 @@ export function CuratorsDashboard({
                     ) : null}
                     {isScheduleCuratorWorkType(editingEntry.workType) ? (
                       <label className="grid gap-1 text-xs text-app-muted">
-                        Доплата, ₽/ч (по умолчанию {rub.format(tariffs.scheduleRegularHourlyRub)}/ч)
+                        Доплата, ₽/ч (по умолчанию {rub.format(entryTariffs.scheduleRegularHourlyRub)}/ч)
                         <input
                           name="customHourlyRate"
                           type="number"
@@ -841,7 +886,7 @@ export function CuratorsDashboard({
                           htmlFor="isBaseIncluded"
                           className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                         >
-                          Прибавить базу за выход ({rub.format(tariffs.routeBaseRub)})
+                          Прибавить базу за выход ({rub.format(entryTariffs.routeBaseRub)})
                         </label>
                       </div>
                     )}
@@ -877,7 +922,7 @@ export function CuratorsDashboard({
 
                     {workType === "ReplacementShift" && (
                       <label className="grid gap-1 text-xs text-app-muted">
-                        Своя ставка (по умолчанию {rub.format(tariffs.replacementHourlyRub)}/ч)
+                        Своя ставка (по умолчанию {rub.format(entryTariffs.replacementHourlyRub)}/ч)
                         <input
                           name="customHourlyRate"
                           type="number"
@@ -928,11 +973,14 @@ export function CuratorsDashboard({
             <h2 className="text-sm font-semibold uppercase tracking-wider">Ставки начислений</h2>
           </div>
           <p className="mt-2 max-w-3xl text-xs text-app-muted">
-            Меняются суммы для новых строк. Уже сохранённые начисления в журнале не пересчитываются автоматически.
+            Новые ставки применяются с выбранной даты. Период до неё сохраняет прежние ставки; уже сохранённые
+            начисления в журнале не пересчитываются. Текущая версия с{" "}
+            {formatDisplayDateFromIso(tariffsEffectiveFrom)}.
           </p>
           <form action={updateCuratorTariffsAction} className="mt-4 space-y-6">
             <div className="hidden" aria-hidden>
               <input type="hidden" name="returnDate" value={selectedIso} />
+              <input type="hidden" name="effectiveFrom" value={tariffsApplyFrom} />
               <input type="hidden" name="routeBaseRub" value={tariffs.routeBaseRub} />
               <input type="hidden" name="routeHourlyRub" value={tariffs.routeHourlyRub} />
               <input type="hidden" name="nightInspectionRub" value={tariffs.nightInspectionRub} />
@@ -1016,10 +1064,23 @@ export function CuratorsDashboard({
             </div>
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-app-border pt-4 lg:flex-row lg:items-center lg:justify-between">
-              <p className="text-xs text-app-muted">
-                После сохранения страница обновится; превью «К выплате по строке» считается по этим ставкам.
-              </p>
+            <div className="flex flex-col gap-3 border-t border-app-border pt-4 lg:flex-row lg:items-end lg:justify-between">
+              <label className="grid max-w-xs gap-1 text-xs text-app-muted">
+                Применить с даты
+                <DateInput
+                  required
+                  value={tariffsApplyFrom}
+                  onChange={(iso) => {
+                    if (iso) setTariffsApplyFrom(iso);
+                  }}
+                  min={tariffsEffectiveFrom}
+                  className="min-h-[2.25rem] w-full rounded-button border border-app-border bg-app-bg px-2.5 py-1.5 text-sm tabular-nums outline-none focus:border-accent-primary"
+                />
+                <span className="text-[11px] text-app-muted/80">
+                  До этой даты действуют текущие ставки; с неё — новые. Можно выбрать любую дату ≥{" "}
+                  {formatDisplayDateFromIso(tariffsEffectiveFrom)}.
+                </span>
+              </label>
               <Button type="submit" className="w-full shrink-0 sm:w-auto">
                 Сохранить ставки
               </Button>

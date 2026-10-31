@@ -4,7 +4,7 @@ import { DEFAULT_SHIFT_TIMEZONE, loadHolidayDateSetForLocalRange } from "../rate
 import { buildSegmentContext, findBestMatchingRule } from "../rates/rate-matching";
 import { listObjectRateRules } from "../operations/object-rate-rules-repository";
 import { ensureCuratorJournalForGuard } from "../operations/curators-guards-link";
-import { getCuratorTariffs } from "../operations/curators-repository";
+import { getCuratorTariffsForDate } from "../operations/curators-repository";
 import { resolveGuardPositionAt, resolveGuardProfileAt } from "../operations/guard-profile-periods-repository";
 import { mapGuardLicenseFromDb } from "../scheduling/guard-profile";
 import type { Guard, Shift, ShiftKind } from "../scheduling/types";
@@ -179,7 +179,7 @@ export async function syncCuratorEntryFromShift(shiftId: string, actorUserId: st
   const rules = await listObjectRateRules(shift.objectId);
   const holidayDates = await loadHolidayDateSetForLocalRange(shift.startsAt, shift.endsAt);
   const breakdown = computeShiftRateBreakdown(shift, guard, rules, holidayDates, DEFAULT_SHIFT_TIMEZONE);
-  const tariffs = await getCuratorTariffs();
+  const tariffs = await getCuratorTariffsForDate(workDate);
   const ctx = buildSegmentContext(shift.startsAt, guard, shift, holidayDates, DEFAULT_SHIFT_TIMEZONE);
   const bestRule = findBestMatchingRule(rules, ctx);
   ruleName = bestRule?.name ?? null;

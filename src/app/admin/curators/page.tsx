@@ -3,7 +3,8 @@ import { assertPermission } from "../../../lib/auth/rbac";
 import { requireSession } from "../../../lib/auth/session";
 import { monthBoundsFromIsoDate, todayIsoInKhabarovsk } from "../../../lib/curators/khabarovsk-date";
 import {
-  getCuratorTariffs,
+  getCuratorTariffsForDate,
+  getOpenCuratorTariffsVersion,
   listCuratorMonthlyPaymentsForMonth,
   listMonthlySalaryDatesByCuratorInRange,
   listCuratorsWithTotals,
@@ -12,6 +13,7 @@ import {
   sumEntryRubByDateInRange,
 } from "../../../lib/operations/curators-repository";
 import { CuratorsDashboard } from "../../../components/admin/curators-dashboard";
+import { defaultCuratorTariffVersionFrom } from "../../../lib/curators/tariff-versioning";
 import type { CuratorWorkType } from "../../../lib/curators/work-entry-amount";
 
 type PageProps = {
@@ -36,10 +38,15 @@ export default async function AdminCuratorsPage({ searchParams }: PageProps) {
   const viewYear = selectedParts[0]!;
   const viewM0 = selectedParts[1]! - 1;
 
-  const [curators, tariffs] = await Promise.all([listCuratorsWithTotals(), getCuratorTariffs()]);
+  const [curators, openTariffsVersion, tariffsForSelectedDay] = await Promise.all([
+    listCuratorsWithTotals(),
+    getOpenCuratorTariffsVersion(),
+    getCuratorTariffsForDate(selectedIso),
+  ]);
+  const initialSelectedCuratorId = curators[0]?.id ?? null;
   const { start, endExclusive } = monthBoundsFromIsoDate(selectedIso);
   const [sumsRows, curatorMonthRows, paymentRows, monthlySalaryByCurator] = await Promise.all([
-    sumEntryRubByDateInRange(start, endExclusive),
+    sumEntryRubByDateInRange(start, endExclusive, initialSelectedCuratorId),
     sumEntryRubByCuratorInRange(start, endExclusive),
     listCuratorMonthlyPaymentsForMonth(viewYear, viewM0),
     listMonthlySalaryDatesByCuratorInRange(start, endExclusive),
@@ -49,7 +56,16 @@ export default async function AdminCuratorsPage({ searchParams }: PageProps) {
   const initialPaymentsByCuratorId = Object.fromEntries(
     paymentRows.map((r) => [r.curatorId, { isPaid: r.isPaid, paidAmountRub: r.paidAmountRub }]),
   );
-  const entries = await listEntriesForDate(selectedIso);
+  const entries = await listEntriesForDate(selectedIso, initialSelectedCuratorId);
+  const initialTariffs = openTariffsVersion
+    ? {
+        routeBaseRub: openTariffsVersion.routeBaseRub,
+        routeHourlyRub: openTariffsVersion.routeHourlyRub,
+        nightInspectionRub: openTariffsVersion.nightInspectionRub,
+        replacementHourlyRub: openTariffsVersion.replacementHourlyRub,
+        scheduleRegularHourlyRub: openTariffsVersion.scheduleRegularHourlyRub,
+      }
+    : tariffsForSelectedDay;
 
   const initialDayEntries = entries.map((r) => ({
     id: r.id,
@@ -85,7 +101,11 @@ export default async function AdminCuratorsPage({ searchParams }: PageProps) {
       initialPaymentsByCuratorId={initialPaymentsByCuratorId}
       initialMonthlySalaryIsoByCuratorId={monthlySalaryByCurator}
       initialDayEntries={initialDayEntries}
-      initialTariffs={tariffs}
+      initialSelectedCuratorId={initialSelectedCuratorId}
+      initialTariffs={initialTariffs}
+      initialEntryTariffs={tariffsForSelectedDay}
+      tariffsEffectiveFrom={openTariffsVersion?.effectiveFrom ?? "2020-01-01"}
+      defaultTariffsEffectiveFrom={defaultCuratorTariffVersionFrom()}
     />
   );
 }
